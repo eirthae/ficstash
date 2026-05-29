@@ -25,7 +25,12 @@ from dotenv import load_dotenv
 
 from ficstash_worker.sources import get_source
 from ficstash_worker.sources.ao3 import RateLimitError
-from ficstash_worker.supabase_io import make_client, upsert_chapters, upsert_work
+from ficstash_worker.supabase_io import (
+    fetch_existing_works,
+    make_client,
+    upsert_chapters,
+    upsert_work,
+)
 
 REQUIRED_ENV = (
     "SUPABASE_URL",
@@ -73,40 +78,62 @@ def main() -> None:
     print("Logging in to AO3…")
     ao3.authenticate(os.environ["AO3_USERNAME"], os.environ["AO3_PASSWORD"])
 
+    print("Loading already-stored works…")
+    existing = fetch_existing_works(db)
+    print(f"{len(existing)} work(s) already in the library.")
+
     print("Fetching bookmarks…")
     reading_list = _with_backoff(ao3.import_reading_list, what="bookmark list")
     total = len(reading_list)
     print(f"Found {total} bookmarked work(s).")
 
-    ok = 0
+    new_count = updated_count = unchanged = failed = 0
     for i, stub in enumerate(reading_list, start=1):
         wid = stub.source_work_id
         label = stub.title or f"work {wid}"
         print(f"[{i}/{total}] {label} (id {wid})")
         try:
+            # One cheap request: metadata only (no chapter bodies yet).
             meta = _with_backoff(
                 lambda: ao3.fetch_work_metadata(wid), what=f"metadata for {wid}"
             )
             work_uuid = upsert_work(db, meta)
 
-            chapters = []
-            for n in range(1, meta.chapters + 1):
-                chapters.append(
-                    _with_backoff(
-                        lambda n=n: ao3.fetch_chapter(wid, n),
-                        what=f"chapter {n} of {wid}",
+            prev = existing.get(wid)
+            is_new = prev is None
+            changed = is_new or prev.get("chapters") != meta.chapters or prev.get("words") != meta.words
+
+            if not changed:
+                unchanged += 1
+                print("    unchanged — kept existing chapters.")
+            else:
+                # New or updated: download chapter bodies (the heavier request).
+                chapters = []
+                for n in range(1, meta.chapters + 1):
+                    chapters.append(
+                        _with_backoff(
+                            lambda n=n: ao3.fetch_chapter(wid, n),
+                            what=f"chapter {n} of {wid}",
+                        )
                     )
-                )
-            written = upsert_chapters(db, work_uuid, chapters)
-            print(f"    saved metadata + {written} chapter(s).")
-            ok += 1
+                written = upsert_chapters(db, work_uuid, chapters)
+                if is_new:
+                    new_count += 1
+                    print(f"    NEW — saved metadata + {written} chapter(s).")
+                else:
+                    updated_count += 1
+                    print(f"    UPDATED — saved metadata + {written} chapter(s).")
         except Exception as exc:  # noqa: BLE001 — keep going on per-work failures
+            failed += 1
             print(f"    skipped (error: {type(exc).__name__}: {exc})")
 
         if i < total:
             time.sleep(RATE_LIMIT_SECONDS)
 
-    print(f"Done. Synced {ok}/{total} work(s).")
+    print(
+        f"Done. {new_count} new, {updated_count} updated, "
+        f"{unchanged} unchanged, {failed} failed (of {total})."
+    )
 
 
 if __name__ == "__main__":

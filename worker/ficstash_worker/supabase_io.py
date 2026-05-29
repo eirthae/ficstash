@@ -55,6 +55,20 @@ def _relative_label(iso: str | None) -> str | None:
     return f"{months} month{'s' if months != 1 else ''} ago"
 
 
+def fetch_existing_works(client: Client, source: str = "ao3") -> dict[str, dict]:
+    """Return already-stored works for a source, keyed by source_work_id.
+
+    Used to skip re-downloading chapter bodies for works that haven't changed.
+    """
+    resp = (
+        client.table("works")
+        .select("id,source_work_id,chapters,words")
+        .eq("source", source)
+        .execute()
+    )
+    return {r["source_work_id"]: r for r in (resp.data or [])}
+
+
 def upsert_work(client: Client, meta: WorkMeta) -> str:
     """Insert/update one work and return its uuid primary key.
 

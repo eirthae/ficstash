@@ -57,9 +57,12 @@ class AO3Source(Source):
 
     def __init__(self) -> None:
         self._session: AO3.Session | None = None
-        # Cache the fully-loaded Work between fetch_work_metadata() and
-        # fetch_chapter() so we don't re-request the same work.
+        # Cache the loaded Work between fetch_work_metadata() and fetch_chapter()
+        # so we don't re-request the same work. Loading metadata is one request;
+        # downloading chapter bodies (load_chapters) is a second, heavier one we
+        # only make when a work has actually changed.
         self._work_cache: dict[str, "AO3.Work"] = {}
+        self._chapters_loaded: set[str] = set()
 
     # ---- auth --------------------------------------------------------------
     def authenticate(self, username: str, password: str) -> str:
@@ -110,16 +113,16 @@ class AO3Source(Source):
 
     # ---- per-work metadata + chapters --------------------------------------
     def fetch_work_metadata(self, source_work_id: str) -> WorkMeta:
-        """Load one work fully (metadata + chapter text in a single page view).
+        """Load one work's metadata only — no chapter bodies (one request).
 
-        Caches the loaded Work so fetch_chapter() reuses it without a new request.
+        Cheap enough to call on every work each sync to detect new chapters.
         """
-        work = self._load_work(source_work_id)
+        work = self._load_work(source_work_id, with_chapters=False)
         return _work_to_meta(self.id, source_work_id, work)
 
     def fetch_chapter(self, source_work_id: str, chapter_n: int) -> Chapter:
-        """Return one chapter's body from the cached (fully-loaded) work."""
-        work = self._load_work(source_work_id)
+        """Return one chapter's body, downloading chapter text on first use."""
+        work = self._load_work(source_work_id, with_chapters=True)
         chapters = getattr(work, "chapters", None) or []
         # AO3 chapter numbers are 1-based; chapters list is 0-based.
         if chapter_n < 1 or chapter_n > len(chapters):
@@ -132,20 +135,27 @@ class AO3Source(Source):
             html=_chapter_text(ch),
         )
 
-    def _load_work(self, source_work_id: str) -> "AO3.Work":
-        if source_work_id in self._work_cache:
-            return self._work_cache[source_work_id]
-        s = self._require_session()
-        try:
-            work = AO3.Work(int(source_work_id), session=s, load=True)
-            # Pull every chapter body in the single "entire work" view.
-            if hasattr(work, "load_chapters"):
-                work.load_chapters()
-        except Exception as exc:  # noqa: BLE001
-            if _is_rate_limited(exc):
-                raise RateLimitError(str(exc)) from exc
-            raise
-        self._work_cache[source_work_id] = work
+    def _load_work(self, source_work_id: str, with_chapters: bool = False) -> "AO3.Work":
+        work = self._work_cache.get(source_work_id)
+        if work is None:
+            s = self._require_session()
+            try:
+                work = AO3.Work(int(source_work_id), session=s, load=True)
+            except Exception as exc:  # noqa: BLE001
+                if _is_rate_limited(exc):
+                    raise RateLimitError(str(exc)) from exc
+                raise
+            self._work_cache[source_work_id] = work
+
+        if with_chapters and source_work_id not in self._chapters_loaded:
+            try:
+                if hasattr(work, "load_chapters"):
+                    work.load_chapters()
+            except Exception as exc:  # noqa: BLE001
+                if _is_rate_limited(exc):
+                    raise RateLimitError(str(exc)) from exc
+                raise
+            self._chapters_loaded.add(source_work_id)
         return work
 
     # ---- update detection --------------------------------------------------
