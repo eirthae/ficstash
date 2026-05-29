@@ -1,0 +1,44 @@
+name: Sync from AO3
+
+# Logs in to AO3, imports bookmarks, and writes works + chapters into Supabase.
+# Runs on a schedule and on demand. All credentials come from repo secrets and
+# are passed to the worker by name — never printed.
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily at 07:00 UTC. AO3 is a volunteer nonprofit — keep this infrequent.
+    - cron: "0 7 * * *"
+
+# Don't let a scheduled run and a manual run hammer AO3 at the same time.
+concurrency:
+  group: ficstash-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: worker/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AO3_USERNAME: ${{ secrets.AO3_USERNAME }}
+          AO3_PASSWORD: ${{ secrets.AO3_PASSWORD }}
+        run: python main.py

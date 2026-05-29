@@ -25,6 +25,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Configure Supabase env
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          ref="$(printf '%s' "$SUPABASE_URL" | sed -E 's#https?://([^.]+)\..*#\1#')"
+          # Fetch the publishable anon key via the Management API (reveal=true returns the value).
+          anon="$(curl -sS "https://api.supabase.com/v1/projects/$ref/api-keys?reveal=true" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            | jq -r '.[] | select(.name=="anon") | .api_key')"
+          if [ -z "$anon" ] || [ "$anon" = "null" ]; then
+            echo "Failed to retrieve anon key from Management API"; exit 1
+          fi
+          # Vite inlines VITE_-prefixed vars from .env.production at build time.
+          printf 'VITE_SUPABASE_URL=%s\n' "$SUPABASE_URL" >> .env.production
+          printf 'VITE_SUPABASE_ANON_KEY=%s\n' "$anon"     >> .env.production
+          echo "Wrote app/.env.production (anon key length: ${#anon})."
+
       - name: Build web bundle
         run: npm run build
 

@@ -20,13 +20,15 @@ class WorkMeta:
     title: str
     author: str
     fandom: str = ""
+    pairing: str = ""
     summary: str = ""
-    tags: list[str] = field(default_factory=list)
+    # Tag objects in the app's shape: [{"t": name, "k": kind}, ...]
+    tags: list[dict] = field(default_factory=list)
     words: int = 0
     chapters: int = 0
     chapters_total: int | None = None
     status: str = "ongoing"  # "ongoing" | "complete"
-    updated: str | None = None
+    updated: str | None = None  # ISO-8601 last-updated timestamp
     url: str = ""
 
 

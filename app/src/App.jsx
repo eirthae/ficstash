@@ -7,6 +7,7 @@ import { SettingsScreen, ConnectScreen } from './screens/Settings.jsx';
 import { StoryDetailScreen } from './screens/Detail.jsx';
 import { ReaderScreen } from './screens/Reader.jsx';
 import { WORKS, NEW_CHAPTERS, NEW_MATCHES, TRACKED_TAGS, SUGGESTIONS } from './data/sample.js';
+import { fetchWorks } from './lib/library.js';
 
 const READER_DEFAULTS = { theme: 'dark', font: 'serif', size: 19, leading: 1.70, margin: 26, brightness: 1 };
 
@@ -32,6 +33,18 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem('fs-reader', JSON.stringify(readerSettings)); } catch (e) {} }, [readerSettings]);
   useEffect(() => { try { localStorage.setItem('fs-reader-theme', readerSettings.theme); } catch (e) {} }, [readerSettings.theme]);
 
+  // ---- live library from Supabase (null = still loading) -----------------
+  // When Supabase isn't configured, fetchWorks() returns null and we fall
+  // back to bundled sample data so the app still has something to show.
+  const [works, setWorks] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetchWorks()
+      .then(r => { if (alive) setWorks(r ?? WORKS); })
+      .catch(() => { if (alive) setWorks(WORKS); });
+    return () => { alive = false; };
+  }, []);
+
   // ---- navigation stack --------------------------------------------------
   const [tab, setTab] = useState('library');
   const [stack, setStack] = useState([]);
@@ -53,7 +66,7 @@ export default function App() {
 
   const renderTab = () => {
     const n = nav.current;
-    if (tab === 'library') return <LibraryScreen works={WORKS} layout="grid" nav={n} />;
+    if (tab === 'library') return <LibraryScreen works={works} layout="grid" nav={n} />;
     if (tab === 'whatsnew') return <WhatsNewScreen chapters={NEW_CHAPTERS} matches={NEW_MATCHES} nav={n} />;
     if (tab === 'discover') return <DiscoverScreen tags={TRACKED_TAGS} nav={n} />;
     if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} nav={n} />;

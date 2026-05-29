@@ -1,6 +1,15 @@
 # FicStash worker — fetches works, detects updates, filters tag matches.
-# Runs server-side only. Talks to AO3 (and later RR/Scribble Hub) and Supabase.
+# Runs server-side only (GitHub Actions). Talks to AO3 and Supabase.
+
+# AO3 login + bookmark enumeration + chapter content/metadata.
+ao3-api>=2.3.0
+
+# Kept for future EPUB export and additional sources (Royal Road, Scribble Hub).
 FanFicFare>=4.32.0
+
+# Supabase writes (service_role key, server-side only).
 supabase>=2.4.0
+
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+python-dotenv>=1.0.0

@@ -5,6 +5,21 @@ import { LibraryCard, GridCard, ContinueCard } from '../components/cards.jsx';
 
 export function LibraryScreen({ works, layout = 'grid', connected = true, nav }) {
   const open = (w) => nav.push('detail', { work: w });
+
+  if (works === null) {
+    return (
+      <div className="screen">
+        <Appbar large title="Library" />
+        <div className="scroll" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="fetch busy" style={{ width: 44, height: 44 }}>
+            <svg className="ring" viewBox="0 0 44 44"><circle className="track" cx="22" cy="22" r="19"></circle>
+              <circle className="bar" cx="22" cy="22" r="19" strokeDasharray="119" strokeDashoffset="50"></circle></svg>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const reading = works.filter(w => w.progress > 0 && w.progress < 1);
   const continueList = reading.length ? reading : works.filter(w => w.progress === 0 && !w.unread);
 
