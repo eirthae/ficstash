@@ -1,0 +1,6 @@
+# FicStash worker — fetches works, detects updates, filters tag matches.
+# Runs server-side only. Talks to AO3 (and later RR/Scribble Hub) and Supabase.
+FanFicFare>=4.32.0
+supabase>=2.4.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0

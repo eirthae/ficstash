@@ -1,0 +1,191 @@
+import { useState, useEffect, useRef } from 'react';
+import Icon from '../components/Icon.jsx';
+import { Sheet, fmtWords } from '../components/ui.jsx';
+import { WORKS, CHAPTERS, READER_PARAS } from '../data/sample.js';
+
+export const READER_FONTS = [
+  { value: 'serif', label: 'Serif', css: 'var(--font-serif)' },
+  { value: 'sans', label: 'Sans', css: 'var(--font-sans)' },
+  { value: 'dys', label: 'Dyslexic', css: 'var(--font-dys)' },
+];
+export const READER_THEMES = [
+  { value: 'dark', label: 'Dark', bg: '#121214', fg: '#cfcfd4' },
+  { value: 'light', label: 'Light', bg: '#ffffff', fg: '#1f2125' },
+  { value: 'sepia', label: 'Sepia', bg: '#f1e7d0', fg: '#4f4334' },
+  { value: 'yellow', label: 'Yellow', bg: '#fbf1c4', fg: '#46401f' },
+];
+
+export function ReaderScreen({ workId, chapterN = 1, chapterTitle, settings, setSettings, nav }) {
+  const work = WORKS.find(w => w.id === workId) || WORKS[0];
+  const total = work.chaptersTotal || work.chapters;
+  const [cur, setCur] = useState(chapterN || work.lastChapter || 1);
+  const ch = CHAPTERS[Math.min(cur, CHAPTERS.length) - 1] || CHAPTERS[0];
+  const [chrome, setChrome] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showTOC, setShowTOC] = useState(false);
+  const scrollRef = useRef(null);
+  const [scrollPct, setScrollPct] = useState(0);
+  const touch = useRef(null);
+
+  const f = READER_FONTS.find(x => x.value === settings.font) || READER_FONTS[0];
+
+  useEffect(() => { const t = setTimeout(() => setChrome(false), 2200); return () => clearTimeout(t); }, []);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; setScrollPct(0); }, [cur]);
+
+  const onScroll = (e) => {
+    const el = e.target; const max = el.scrollHeight - el.clientHeight;
+    setScrollPct(max > 0 ? Math.min(1, el.scrollTop / max) : 0);
+    if (chrome) setChrome(false);
+  };
+  const goCh = (n) => { if (n >= 1 && n <= total) setCur(n); };
+
+  const onTS = (e) => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+  const onTE = (e) => {
+    if (!touch.current) return;
+    const dx = e.changedTouches[0].clientX - touch.current.x;
+    const dy = e.changedTouches[0].clientY - touch.current.y;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) { dx < 0 ? goCh(cur + 1) : goCh(cur - 1); }
+    touch.current = null;
+  };
+
+  const articleStyle = {
+    '--r-font': f.css, '--r-size': settings.size + 'px',
+    '--r-leading': settings.leading, '--r-margin': settings.margin + 'px',
+    '--r-para': (settings.leading * 0.62).toFixed(2) + 'em',
+  };
+
+  return (
+    <div className="reader" data-reader-theme={settings.theme}>
+      <div className="reader-scroll" ref={scrollRef} onScroll={onScroll}
+        onClick={() => setChrome(c => !c)} onTouchStart={onTS} onTouchEnd={onTE}>
+        <div className="reader-article" style={articleStyle}>
+          <div className="ch-head">
+            <div className="ch-kicker">Chapter {cur} of {total}</div>
+            <div className="ch-h">{chapterTitle && cur === chapterN ? chapterTitle : ch.title}</div>
+          </div>
+          {READER_PARAS.map((p, i) => <p key={i}>{p}</p>)}
+          {READER_PARAS.slice(0, 4).map((p, i) => <p key={'b' + i}>{p}</p>)}
+
+          <div className="eoc">
+            <div className="star"><span className="ln"></span><Icon icon="solar:asterisk-linear" size={16} /><span className="ln"></span></div>
+            {cur < total ? (
+              <button className="nextbtn pressable" onClick={(e) => { e.stopPropagation(); goCh(cur + 1); }}>
+                Next chapter <Icon icon="solar:arrow-right-linear" size={18} />
+              </button>
+            ) : (
+              <div style={{ color: 'var(--reader-text-dim)' }}>
+                <Icon icon={work.status === 'complete' ? 'solar:check-circle-bold' : 'solar:clock-circle-linear'} size={26} style={{ marginBottom: 8 }} />
+                <div style={{ fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 600 }}>
+                  {work.status === 'complete' ? 'The end · you’re all caught up' : 'Caught up — no newer chapters yet'}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="reader-brightness" style={{ opacity: (1 - settings.brightness) * 0.55 }}></div>
+
+      <div className={`reader-chrome reader-top ${chrome ? '' : 'hidden'}`}>
+        <button className="reader-icbtn" onClick={() => nav.pop()}><Icon icon="solar:arrow-left-linear" size={23} /></button>
+        <div className="rt-title">
+          <div className="rt-t">{work.title}</div>
+          <div className="rt-s">by {work.author}</div>
+        </div>
+        <button className="reader-icbtn" onClick={() => nav.push('detail', { work })}><Icon icon="solar:info-circle-linear" size={22} /></button>
+      </div>
+
+      <div className={`reader-chrome reader-bottom ${chrome ? '' : 'hidden'}`}>
+        <div className="reader-progress">
+          <span>Ch {cur}</span>
+          <div className="bar"><i style={{ width: `${scrollPct * 100}%` }}></i></div>
+          <span>{Math.round(scrollPct * 100)}%</span>
+        </div>
+        <div className="reader-nav">
+          <button className="reader-icbtn" disabled={cur <= 1} style={{ opacity: cur <= 1 ? .3 : 1 }} onClick={() => goCh(cur - 1)}><Icon icon="solar:alt-arrow-left-linear" size={24} /></button>
+          <button className="reader-icbtn" onClick={() => setShowSettings(true)}>
+            <span style={{ fontSize: 21, fontFamily: 'var(--font-serif)', fontWeight: 600 }}>Aa</span></button>
+          <button className="reader-icbtn" onClick={() => { const i = READER_THEMES.findIndex(t => t.value === settings.theme); setSettings({ ...settings, theme: READER_THEMES[(i + 1) % 4].value }); }}>
+            <Icon icon="solar:pallete-2-linear" size={23} /></button>
+          <button className="reader-icbtn" onClick={() => setShowTOC(true)}><Icon icon="solar:list-linear" size={23} /></button>
+          <button className="reader-icbtn" disabled={cur >= total} style={{ opacity: cur >= total ? .3 : 1 }} onClick={() => goCh(cur + 1)}><Icon icon="solar:alt-arrow-right-linear" size={24} /></button>
+        </div>
+      </div>
+
+      <ReaderSettingsSheet open={showSettings} onClose={() => setShowSettings(false)} settings={settings} setSettings={setSettings} />
+      <ReaderTOCSheet open={showTOC} onClose={() => setShowTOC(false)} total={total} cur={cur} onPick={(n) => { goCh(n); setShowTOC(false); }} />
+    </div>
+  );
+}
+
+function ReaderSettingsSheet({ open, onClose, settings, setSettings }) {
+  const set = (k, v) => setSettings({ ...settings, [k]: v });
+  return (
+    <Sheet open={open} onClose={onClose} reader title="Reading settings">
+      <div className="section-label" style={{ marginBottom: 10, color: 'var(--reader-text-dim)' }}>Theme</div>
+      <div className="themeswatches" style={{ marginBottom: 22 }}>
+        {READER_THEMES.map(t => (
+          <button key={t.value} className={`themeswatch pressable ${settings.theme === t.value ? 'on' : ''}`}
+            style={{ background: t.bg, color: t.fg }} onClick={() => set('theme', t.value)}>
+            {settings.theme === t.value && <span className="check"><Icon icon="solar:check-circle-bold" size={16} /></span>}
+            <span style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 600 }}>Aa</span>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="section-label" style={{ marginBottom: 10, color: 'var(--reader-text-dim)' }}>Font</div>
+      <div className="seg" style={{ marginBottom: 22 }}>
+        {READER_FONTS.map(ft => (
+          <button key={ft.value} className={settings.font === ft.value ? 'on' : ''} onClick={() => set('font', ft.value)}
+            style={{ fontFamily: ft.css, flexDirection: 'column', gap: 1, height: 48 }}>
+            <span style={{ fontSize: 17 }}>Ag</span><span style={{ fontSize: 10.5, fontFamily: 'var(--font-sans)' }}>{ft.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <SheetStepperRow label="Text size" value={settings.size + 'px'} onMinus={() => set('size', Math.max(14, settings.size - 1))} onPlus={() => set('size', Math.min(28, settings.size + 1))} />
+      <SheetStepperRow label="Line height" value={settings.leading.toFixed(2)} onMinus={() => set('leading', Math.max(1.3, +(settings.leading - 0.05).toFixed(2)))} onPlus={() => set('leading', Math.min(2.2, +(settings.leading + 0.05).toFixed(2)))} />
+      <SheetStepperRow label="Margins" value={settings.margin + 'px'} onMinus={() => set('margin', Math.max(12, settings.margin - 4))} onPlus={() => set('margin', Math.min(56, settings.margin + 4))} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '14px 2px 8px' }}>
+        <Icon icon="solar:sun-2-linear" size={20} color="var(--reader-text-dim)" />
+        <input className="range" type="range" min="0.4" max="1" step="0.02" value={settings.brightness}
+          onChange={e => set('brightness', +e.target.value)} />
+        <Icon icon="solar:sun-2-bold" size={22} color="var(--reader-ui)" />
+      </div>
+    </Sheet>
+  );
+}
+
+function SheetStepperRow({ label, value, onMinus, onPlus }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '9px 0' }}>
+      <span style={{ fontSize: 14.5, fontWeight: 600 }}>{label}</span>
+      <div className="stepper" style={{ width: 150 }}>
+        <button onClick={onMinus}><Icon icon="solar:minus-circle-linear" size={20} /></button>
+        <span className="val">{value}</span>
+        <button onClick={onPlus}><Icon icon="solar:add-circle-linear" size={20} /></button>
+      </div>
+    </div>
+  );
+}
+
+function ReaderTOCSheet({ open, onClose, total, cur, onPick }) {
+  return (
+    <Sheet open={open} onClose={onClose} reader title="Chapters" maxH="78%">
+      <div style={{ paddingBottom: 8 }}>
+        {CHAPTERS.slice(0, total).map(ch => (
+          <button key={ch.n} onClick={() => onPick(ch.n)} className="chrow pressable" style={{ width: '100%', textAlign: 'left' }}>
+            <div className="chnum" style={{ color: ch.n === cur ? 'var(--reader-accent)' : 'var(--reader-text-dim)' }}>{ch.n === cur ? <Icon icon="solar:bookmark-bold" size={15} /> : ch.n}</div>
+            <div className="chmeta">
+              <div className="chtitle" style={{ color: ch.n === cur ? 'var(--reader-accent)' : 'var(--reader-ui)' }}>{ch.title}</div>
+              <div className="chsub" style={{ color: 'var(--reader-text-dim)' }}>{fmtWords(ch.words)}</div>
+            </div>
+            {ch.n === cur && <span style={{ fontSize: 11, color: 'var(--reader-accent)', fontWeight: 700 }}>Reading</span>}
+          </button>
+        ))}
+      </div>
+    </Sheet>
+  );
+}

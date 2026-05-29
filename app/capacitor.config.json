@@ -1,0 +1,8 @@
+{
+  "appId": "com.eirthae.ficstash",
+  "appName": "FicStash",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#0c0c0e"
+  }
+}
