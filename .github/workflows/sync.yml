@@ -41,4 +41,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           AO3_USERNAME: ${{ secrets.AO3_USERNAME }}
           AO3_PASSWORD: ${{ secrets.AO3_PASSWORD }}
+          # Optional repo variable: how many history pages to walk per run.
+          # Leave unset for the default (3 ≈ 60 works); set to "all" for everything.
+          HISTORY_MAX_PAGES: ${{ vars.HISTORY_MAX_PAGES }}
         run: python main.py

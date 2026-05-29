@@ -10,9 +10,18 @@ Required environment variables:
   AO3_USERNAME                 AO3 login
   AO3_PASSWORD                 AO3 password (used to mint a session, not stored)
 
-Flow (Phase 1): log in to AO3 → enumerate bookmarks → for each work, fetch full
-metadata + chapter bodies (spaced for politeness) → upsert into Supabase. The
-upsert omits reader-state columns so progress is preserved across re-syncs.
+Optional:
+  HISTORY_MAX_PAGES            how many reading-history listing pages to walk
+                               per run (default 3 ≈ 60 works). Already-stored
+                               history works are just re-flagged, so history
+                               backfills a little each run rather than all at once.
+
+Flow: log in → three passes over the user's AO3 activity:
+  1. Bookmarks   → full offline copies (metadata + chapter bodies).
+  2. Subscriptions → metadata only, flagged for new-chapter tracking.
+  3. Reading history → metadata only ("all-time usage"; new entries backfilled).
+Upserts omit reader-state columns so progress survives re-syncs, and unchanged
+works are never re-downloaded.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_existing_works,
     make_client,
+    mark_flag,
     upsert_chapters,
     upsert_work,
 )
@@ -43,6 +53,7 @@ REQUIRED_ENV = (
 # (with growing waits) whenever AO3 signals it's being hit too hard.
 RATE_LIMIT_SECONDS = 6
 BACKOFF_SECONDS = (30, 60, 120)
+DEFAULT_HISTORY_MAX_PAGES = 3
 
 
 def check_env() -> None:
@@ -54,18 +65,39 @@ def check_env() -> None:
     print("Environment OK — all required secrets present.")
 
 
-def _with_backoff(fn, *, what: str):
-    """Run fn(), retrying on RateLimitError with growing waits."""
+def _with_backoff(fn, *, what: str, broad: bool = False):
+    """Run fn(), retrying with growing waits.
+
+    Always retries RateLimitError. With broad=True, also retries any other
+    exception — used for listing pages (bookmarks/history/subscriptions), where
+    AO3 occasionally returns a malformed page under load that ao3-api surfaces
+    as an AttributeError rather than a clean 429.
+    """
     for attempt, wait in enumerate((0, *BACKOFF_SECONDS)):
         if wait:
-            print(f"  rate limited — backing off {wait}s before retrying {what}…")
+            print(f"  retrying {what} after {wait}s…")
             time.sleep(wait)
         try:
             return fn()
         except RateLimitError:
             if attempt >= len(BACKOFF_SECONDS):
                 raise
-    raise RateLimitError(f"gave up on {what} after backoff")
+        except Exception:  # noqa: BLE001
+            if not broad or attempt >= len(BACKOFF_SECONDS):
+                raise
+    raise RuntimeError(f"gave up on {what} after backoff")
+
+
+def _history_max_pages() -> int | None:
+    raw = os.environ.get("HISTORY_MAX_PAGES", "").strip()
+    if not raw:
+        return DEFAULT_HISTORY_MAX_PAGES
+    if raw.lower() in ("0", "all", "none"):
+        return None  # walk every page
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_HISTORY_MAX_PAGES
 
 
 def main() -> None:
@@ -82,34 +114,50 @@ def main() -> None:
     existing = fetch_existing_works(db)
     print(f"{len(existing)} work(s) already in the library.")
 
-    print("Fetching bookmarks…")
-    reading_list = _with_backoff(ao3.import_reading_list, what="bookmark list")
-    total = len(reading_list)
+    processed: set[str] = set()  # work ids we've already fetched this run
+    request_count = 0
+
+    def space() -> None:
+        # Sleep between AO3 requests, but not before the very first one.
+        nonlocal request_count
+        if request_count:
+            time.sleep(RATE_LIMIT_SECONDS)
+        request_count += 1
+
+    # ---- Pass 1: bookmarks → full offline copies ---------------------------
+    print("\n== Bookmarks ==")
+    bookmarks = _with_backoff(
+        ao3.import_reading_list, what="bookmark list", broad=True
+    )
+    total = len(bookmarks)
     print(f"Found {total} bookmarked work(s).")
 
     new_count = updated_count = unchanged = failed = 0
-    for i, stub in enumerate(reading_list, start=1):
+    for i, stub in enumerate(bookmarks, start=1):
         wid = stub.source_work_id
-        label = stub.title or f"work {wid}"
-        print(f"[{i}/{total}] {label} (id {wid})")
+        print(f"[{i}/{total}] {stub.title or wid} (id {wid})")
         try:
-            # One cheap request: metadata only (no chapter bodies yet).
+            space()
             meta = _with_backoff(
-                lambda: ao3.fetch_work_metadata(wid), what=f"metadata for {wid}"
+                lambda: ao3.fetch_work_metadata(wid), what=f"metadata {wid}"
             )
-            work_uuid = upsert_work(db, meta)
+            work_uuid = upsert_work(db, meta, bookmarked=True, offline=True)
+            processed.add(wid)
 
             prev = existing.get(wid)
             is_new = prev is None
-            changed = is_new or prev.get("chapters") != meta.chapters or prev.get("words") != meta.words
-
+            changed = (
+                is_new
+                or prev.get("chapters") != meta.chapters
+                or prev.get("words") != meta.words
+            )
             if not changed:
                 unchanged += 1
                 print("    unchanged — kept existing chapters.")
             else:
-                # New or updated: download chapter bodies (the heavier request).
                 chapters = []
                 for n in range(1, meta.chapters + 1):
+                    space()
                     chapters.append(
                         _with_backoff(
                             lambda n=n: ao3.fetch_chapter(wid, n),
@@ -117,23 +165,83 @@ def main() -> None:
                         )
                     )
                 written = upsert_chapters(db, work_uuid, chapters)
-                if is_new:
-                    new_count += 1
-                    print(f"    NEW — saved metadata + {written} chapter(s).")
-                else:
-                    updated_count += 1
-                    print(f"    UPDATED — saved metadata + {written} chapter(s).")
+                new_count += is_new
+                updated_count += not is_new
+                tag = "NEW" if is_new else "UPDATED"
+                print(f"    {tag} — saved metadata + {written} chapter(s).")
         except Exception as exc:  # noqa: BLE001 — keep going on per-work failures
             failed += 1
             print(f"    skipped (error: {type(exc).__name__}: {exc})")
-
-        if i < total:
-            time.sleep(RATE_LIMIT_SECONDS)
-
     print(
-        f"Done. {new_count} new, {updated_count} updated, "
-        f"{unchanged} unchanged, {failed} failed (of {total})."
+        f"Bookmarks: {new_count} new, {updated_count} updated, "
+        f"{unchanged} unchanged, {failed} failed."
     )
+
+    # ---- Pass 2: subscriptions → metadata + new-chapter tracking -----------
+    print("\n== Subscriptions ==")
+    subs = _with_backoff(
+        ao3.import_subscriptions, what="subscriptions", broad=True
+    )
+    print(f"Found {len(subs)} subscription(s).")
+    sub_fetched = sub_flagged = sub_failed = 0
+    already_subbed: list[str] = []
+    for stub in subs:
+        wid = stub.source_work_id
+        if wid in processed:
+            already_subbed.append(wid)  # bookmarked too — just set the flag
+            continue
+        try:
+            space()
+            meta = _with_backoff(
+                lambda: ao3.fetch_work_metadata(wid), what=f"sub metadata {wid}"
+            )
+            upsert_work(db, meta, subscribed=True)
+            processed.add(wid)
+            sub_fetched += 1
+        except Exception as exc:  # noqa: BLE001
+            sub_failed += 1
+            print(f"    sub {wid} skipped ({type(exc).__name__}: {exc})")
+    if already_subbed:
+        sub_flagged = mark_flag(db, already_subbed, "subscribed")
+    print(
+        f"Subscriptions: {sub_fetched} fetched, {sub_flagged} flagged, "
+        f"{sub_failed} failed."
+    )
+
+    # ---- Pass 3: reading history → metadata only ("all-time usage") --------
+    print("\n== Reading history ==")
+    max_pages = _history_max_pages()
+    history = _with_backoff(
+        lambda: ao3.import_history(max_pages=max_pages),
+        what="reading history",
+        broad=True,
+    )
+    print(f"Found {len(history)} history work(s) (max_pages={max_pages}).")
+    hist_fetched = hist_failed = 0
+    flag_only: list[str] = []
+    for stub in history:
+        wid = stub.source_work_id
+        if wid in processed or wid in existing:
+            flag_only.append(wid)  # already stored — just mark in_history
+            continue
+        try:
+            space()
+            meta = _with_backoff(
+                lambda: ao3.fetch_work_metadata(wid), what=f"history metadata {wid}"
+            )
+            upsert_work(db, meta, in_history=True)
+            processed.add(wid)
+            hist_fetched += 1
+        except Exception as exc:  # noqa: BLE001
+            hist_failed += 1
+            print(f"    history {wid} skipped ({type(exc).__name__}: {exc})")
+    hist_flagged = mark_flag(db, flag_only, "in_history") if flag_only else 0
+    print(
+        f"History: {hist_fetched} newly stored, {hist_flagged} flagged, "
+        f"{hist_failed} failed."
+    )
+
+    print("\nSync complete.")
 
 
 if __name__ == "__main__":

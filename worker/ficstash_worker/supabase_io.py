@@ -69,11 +69,12 @@ def fetch_existing_works(client: Client, source: str = "ao3") -> dict[str, dict]
     return {r["source_work_id"]: r for r in (resp.data or [])}
 
 
-def upsert_work(client: Client, meta: WorkMeta) -> str:
+def upsert_work(client: Client, meta: WorkMeta, **flags: bool) -> str:
     """Insert/update one work and return its uuid primary key.
 
     Omits progress/last_chapter/unread/frozen/frozen_date so the reader's state
-    survives re-syncs.
+    survives re-syncs. `flags` (offline/bookmarked/subscribed/in_history) are
+    only written when provided, so one sync pass never clobbers another's flag.
     """
     payload = {
         "source": meta.source,
@@ -92,6 +93,9 @@ def upsert_work(client: Client, meta: WorkMeta) -> str:
         "source_updated": meta.updated,
         "palette": palette_for(meta.fandom or meta.title),
     }
+    for key in ("offline", "bookmarked", "subscribed", "in_history"):
+        if key in flags:
+            payload[key] = bool(flags[key])
     resp = (
         client.table("works")
         .upsert(payload, on_conflict="source,source_work_id")
@@ -100,6 +104,23 @@ def upsert_work(client: Client, meta: WorkMeta) -> str:
     if not resp.data:
         raise RuntimeError(f"Upsert returned no row for work {meta.source_work_id}")
     return resp.data[0]["id"]
+
+
+def mark_flag(
+    client: Client, source_work_ids: list[str], flag: str, source: str = "ao3"
+) -> int:
+    """Set a boolean origin flag to true on already-stored works.
+
+    Lets us tag works as in_history/subscribed without a fresh AO3 request when
+    we already have their metadata.
+    """
+    ids = list(source_work_ids)
+    if not ids:
+        return 0
+    client.table("works").update({flag: True}).eq("source", source).in_(
+        "source_work_id", ids
+    ).execute()
+    return len(ids)
 
 
 def upsert_chapters(client: Client, work_id: str, chapters: list[Chapter]) -> int:

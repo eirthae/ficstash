@@ -94,9 +94,51 @@ class AO3Source(Source):
             if _is_rate_limited(exc):
                 raise RateLimitError(str(exc)) from exc
             raise
+        return self._stubs(works)
 
+    def import_history(self, max_pages: int | None = None) -> list[WorkMeta]:
+        """Return the user's AO3 reading history as lightweight WorkMeta.
+
+        This is the closest thing AO3 exposes to "all-time usage" — every work
+        the user has opened (kudos-given history is NOT exposed by AO3). Stored
+        metadata-only; we never download full chapter bodies for history items.
+        `max_pages` bounds how many history listing pages we walk per run.
+        """
+        s = self._require_session()
+        try:
+            # ao3-api returns [(work, num_visits, last_visit), ...] for history.
+            rows = s.get_history(max_pages=max_pages) if max_pages else s.get_history()
+        except TypeError:
+            rows = s.get_history()
+        except Exception as exc:  # noqa: BLE001
+            if _is_rate_limited(exc):
+                raise RateLimitError(str(exc)) from exc
+            raise
+        works = [r[0] if isinstance(r, (tuple, list)) else r for r in (rows or [])]
+        return self._stubs(works)
+
+    def import_subscriptions(self) -> list[WorkMeta]:
+        """Return the works the user subscribes to (followed for new chapters)."""
+        s = self._require_session()
+        getter = getattr(s, "get_work_subscriptions", None) or getattr(
+            s, "get_subscriptions", None
+        )
+        if getter is None:
+            return []
+        try:
+            works = getter(use_threading=False)
+        except TypeError:
+            works = getter()
+        except Exception as exc:  # noqa: BLE001
+            if _is_rate_limited(exc):
+                raise RateLimitError(str(exc)) from exc
+            raise
+        return self._stubs(works)
+
+    def _stubs(self, works) -> list[WorkMeta]:
+        """Build lightweight WorkMeta (id + title) from a list of AO3 works."""
         out: list[WorkMeta] = []
-        for w in works:
+        for w in works or []:
             wid = str(getattr(w, "id", "") or "")
             if not wid:
                 continue
