@@ -77,3 +77,14 @@ create policy works_read on public.works
 drop policy if exists chapters_read on public.chapters;
 create policy chapters_read on public.chapters
   for select to anon, authenticated using (true);
+
+-- ---- table privileges ------------------------------------------------------
+-- Tables created via the Management API don't always inherit Supabase's
+-- default role grants. Grant them explicitly:
+--   * service_role (worker) needs full write access (it also bypasses RLS);
+--   * anon/authenticated (app) need SELECT — the RLS policies above then
+--     decide which rows are visible.
+grant select, insert, update, delete on public.works    to service_role;
+grant select, insert, update, delete on public.chapters to service_role;
+grant select on public.works    to anon, authenticated;
+grant select on public.chapters to anon, authenticated;
