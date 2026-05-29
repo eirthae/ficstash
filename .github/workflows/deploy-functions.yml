@@ -1,0 +1,30 @@
+name: Deploy Edge Functions
+
+# Deploys Supabase Edge Functions (e.g. the AO3 tag autocomplete proxy).
+# Uses SUPABASE_ACCESS_TOKEN — no DB password needed. Manual trigger.
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy functions
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          ref="$(printf '%s' "$SUPABASE_URL" | sed -E 's#https?://([^.]+)\..*#\1#')"
+          if [ -z "$ref" ]; then echo "Could not derive project ref"; exit 1; fi
+          echo "Deploying functions to project: $ref"
+          supabase functions deploy tag-autocomplete --project-ref "$ref"
+          echo "Done."

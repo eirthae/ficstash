@@ -36,9 +36,12 @@ from ficstash_worker.sources import get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_existing_works,
+    fetch_tracked_groups,
     make_client,
     mark_flag,
+    mark_group_checked,
     upsert_chapters,
+    upsert_tag_matches,
     upsert_work,
 )
 
@@ -240,6 +243,35 @@ def main() -> None:
         f"History: {hist_fetched} newly stored, {hist_flagged} flagged, "
         f"{hist_failed} failed."
     )
+
+    # ---- Pass 4: tracked tag groups → discover new matches -----------------
+    print("\n== Tracked tag groups ==")
+    groups = fetch_tracked_groups(db)
+    print(f"{len(groups)} tracked group(s).")
+    for g in groups:
+        tag_names = [
+            (t.get("name") if isinstance(t, dict) else str(t))
+            for t in (g.get("tags") or [])
+        ]
+        tag_names = [t for t in tag_names if t]
+        label = g.get("label") or " + ".join(tag_names) or g["id"]
+        if not tag_names:
+            print(f"    '{label}': no tags, skipped.")
+            continue
+        try:
+            space()
+            metas = _with_backoff(
+                lambda: ao3.search_group(
+                    tag_names, match_mode=g.get("match_mode", "all")
+                ),
+                what=f"tag search '{label}'",
+                broad=True,
+            )
+            written = upsert_tag_matches(db, g["id"], metas)
+            mark_group_checked(db, g["id"])
+            print(f"    '{label}': {written} match(es).")
+        except Exception as exc:  # noqa: BLE001
+            print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
 
     print("\nSync complete.")
 

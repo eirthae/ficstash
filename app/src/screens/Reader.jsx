@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import Icon from '../components/Icon.jsx';
 import { Sheet, fmtWords } from '../components/ui.jsx';
 import { WORKS, CHAPTERS, READER_PARAS } from '../data/sample.js';
+import { fetchChapters } from '../lib/library.js';
 
 export const READER_FONTS = [
   { value: 'serif', label: 'Serif', css: 'var(--font-serif)' },
@@ -15,11 +16,24 @@ export const READER_THEMES = [
   { value: 'yellow', label: 'Yellow', bg: '#fbf1c4', fg: '#46401f' },
 ];
 
-export function ReaderScreen({ workId, chapterN = 1, chapterTitle, settings, setSettings, nav }) {
-  const work = WORKS.find(w => w.id === workId) || WORKS[0];
-  const total = work.chaptersTotal || work.chapters;
+export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitle, settings, setSettings, nav }) {
+  const work = propWork || WORKS.find(w => w.id === workId) || WORKS[0];
+  const [chapters, setChapters] = useState(null); // null until live load resolves
+  useEffect(() => {
+    let alive = true;
+    fetchChapters(work.id)
+      .then(r => { if (alive) setChapters(r && r.length ? r : []); })
+      .catch(() => { if (alive) setChapters([]); });
+    return () => { alive = false; };
+  }, [work.id]);
+
+  const hasReal = chapters && chapters.length > 0;
+  const total = hasReal ? chapters.length : (work.chaptersTotal || work.chapters || CHAPTERS.length);
   const [cur, setCur] = useState(chapterN || work.lastChapter || 1);
-  const ch = CHAPTERS[Math.min(cur, CHAPTERS.length) - 1] || CHAPTERS[0];
+  const curChapter = hasReal
+    ? (chapters.find(c => c.n === cur) || chapters[Math.min(cur, chapters.length) - 1])
+    : (CHAPTERS[Math.min(cur, CHAPTERS.length) - 1] || CHAPTERS[0]);
+  const ch = curChapter || { title: '', words: 0 };
   const [chrome, setChrome] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [showTOC, setShowTOC] = useState(false);
@@ -63,8 +77,16 @@ export function ReaderScreen({ workId, chapterN = 1, chapterTitle, settings, set
             <div className="ch-kicker">Chapter {cur} of {total}</div>
             <div className="ch-h">{chapterTitle && cur === chapterN ? chapterTitle : ch.title}</div>
           </div>
-          {READER_PARAS.map((p, i) => <p key={i}>{p}</p>)}
-          {READER_PARAS.slice(0, 4).map((p, i) => <p key={'b' + i}>{p}</p>)}
+          {hasReal ? (
+            curChapter && curChapter.content
+              ? <div className="chapter-body" dangerouslySetInnerHTML={{ __html: curChapter.content }} />
+              : <p style={{ color: 'var(--reader-text-dim)' }}>This chapter hasn’t been downloaded yet.</p>
+          ) : (
+            <>
+              {READER_PARAS.map((p, i) => <p key={i}>{p}</p>)}
+              {READER_PARAS.slice(0, 4).map((p, i) => <p key={'b' + i}>{p}</p>)}
+            </>
+          )}
 
           <div className="eoc">
             <div className="star"><span className="ln"></span><Icon icon="solar:asterisk-linear" size={16} /><span className="ln"></span></div>
@@ -113,7 +135,7 @@ export function ReaderScreen({ workId, chapterN = 1, chapterTitle, settings, set
       </div>
 
       <ReaderSettingsSheet open={showSettings} onClose={() => setShowSettings(false)} settings={settings} setSettings={setSettings} />
-      <ReaderTOCSheet open={showTOC} onClose={() => setShowTOC(false)} total={total} cur={cur} onPick={(n) => { goCh(n); setShowTOC(false); }} />
+      <ReaderTOCSheet open={showTOC} onClose={() => setShowTOC(false)} total={total} cur={cur} chapters={hasReal ? chapters : null} onPick={(n) => { goCh(n); setShowTOC(false); }} />
     </div>
   );
 }
@@ -171,11 +193,12 @@ function SheetStepperRow({ label, value, onMinus, onPlus }) {
   );
 }
 
-function ReaderTOCSheet({ open, onClose, total, cur, onPick }) {
+function ReaderTOCSheet({ open, onClose, total, cur, chapters, onPick }) {
+  const list = chapters && chapters.length ? chapters : CHAPTERS.slice(0, total);
   return (
     <Sheet open={open} onClose={onClose} reader title="Chapters" maxH="78%">
       <div style={{ paddingBottom: 8 }}>
-        {CHAPTERS.slice(0, total).map(ch => (
+        {list.map(ch => (
           <button key={ch.n} onClick={() => onPick(ch.n)} className="chrow pressable" style={{ width: '100%', textAlign: 'left' }}>
             <div className="chnum" style={{ color: ch.n === cur ? 'var(--reader-accent)' : 'var(--reader-text-dim)' }}>{ch.n === cur ? <Icon icon="solar:bookmark-bold" size={15} /> : ch.n}</div>
             <div className="chmeta">

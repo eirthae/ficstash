@@ -282,6 +282,15 @@ input,textarea { font-family:inherit; }
 .reader-article .ch-head { padding:calc(54px + env(safe-area-inset-top)) 0 22px; }
 .reader-article .ch-kicker { font-family:var(--font-sans); font-size:12px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--reader-accent); margin-bottom:8px; }
 .reader-article .ch-h { font-family:var(--font-serif); font-weight:600; font-size:26px; line-height:1.18; color:var(--reader-ui); }
+/* rendered AO3 chapter HTML — inherit the reader typography */
+.reader-article .chapter-body { font-family:var(--r-font,var(--font-serif)); font-size:var(--r-size,19px); line-height:var(--r-leading,1.7); color:var(--reader-text); }
+.reader-article .chapter-body em, .reader-article .chapter-body i { font-style:italic; }
+.reader-article .chapter-body strong, .reader-article .chapter-body b { font-weight:700; color:var(--reader-ui); }
+.reader-article .chapter-body a { color:var(--reader-accent); text-decoration:underline; }
+.reader-article .chapter-body blockquote { margin:0 0 var(--r-para,1.1em); padding-left:16px; border-left:3px solid var(--reader-border); color:var(--reader-text-dim); }
+.reader-article .chapter-body hr { border:none; border-top:1px solid var(--reader-border); margin:26px auto; width:60%; }
+.reader-article .chapter-body h1, .reader-article .chapter-body h2, .reader-article .chapter-body h3 { font-family:var(--font-serif); color:var(--reader-ui); line-height:1.25; margin:1.2em 0 .5em; }
+.reader-article .chapter-body img { max-width:100%; height:auto; }
 .reader-brightness { position:absolute; inset:0; background:#000; pointer-events:none; z-index:5; transition:opacity .2s; }
 
 /* end-of-chapter marker */

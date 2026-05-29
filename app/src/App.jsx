@@ -6,7 +6,7 @@ import { DiscoverScreen, TagResultsScreen } from './screens/Discover.jsx';
 import { SettingsScreen, ConnectScreen } from './screens/Settings.jsx';
 import { StoryDetailScreen } from './screens/Detail.jsx';
 import { ReaderScreen } from './screens/Reader.jsx';
-import { WORKS, NEW_CHAPTERS, NEW_MATCHES, TRACKED_TAGS, SUGGESTIONS } from './data/sample.js';
+import { WORKS, NEW_CHAPTERS, NEW_MATCHES } from './data/sample.js';
 import { fetchWorks } from './lib/library.js';
 
 const READER_DEFAULTS = { theme: 'dark', font: 'serif', size: 19, leading: 1.70, margin: 26, brightness: 1 };
@@ -68,14 +68,14 @@ export default function App() {
     const n = nav.current;
     if (tab === 'library') return <LibraryScreen works={works} layout="grid" nav={n} />;
     if (tab === 'whatsnew') return <WhatsNewScreen chapters={NEW_CHAPTERS} matches={NEW_MATCHES} nav={n} />;
-    if (tab === 'discover') return <DiscoverScreen tags={TRACKED_TAGS} nav={n} />;
+    if (tab === 'discover') return <DiscoverScreen nav={n} />;
     if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} nav={n} />;
   };
   const renderTop = () => {
     const n = nav.current, p = top.props || {};
     if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} nav={n} />;
-    if (top.screen === 'reader') return <ReaderScreen workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={setReaderSettings} nav={n} />;
-    if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} suggestions={SUGGESTIONS} nav={n} />;
+    if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={setReaderSettings} nav={n} />;
+    if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
     if (top.screen === 'connect') return <ConnectScreen nav={n} />;
     return null;
   };

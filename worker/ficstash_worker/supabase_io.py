@@ -106,6 +106,55 @@ def upsert_work(client: Client, meta: WorkMeta, **flags: bool) -> str:
     return resp.data[0]["id"]
 
 
+def fetch_tracked_groups(client: Client) -> list[dict]:
+    """Return the user's tracked tag groups (created in-app)."""
+    resp = (
+        client.table("tracked_groups")
+        .select("id,label,tags,match_mode")
+        .execute()
+    )
+    return list(resp.data or [])
+
+
+def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> int:
+    """Store discovered works for a tracked group.
+
+    Omits `seen`/`first_seen_at` so a work already marked seen stays seen across
+    re-runs; brand-new matches default to unseen ("fresh").
+    """
+    rows = [
+        {
+            "group_id": group_id,
+            "source": m.source,
+            "source_work_id": m.source_work_id,
+            "title": m.title,
+            "author": m.author,
+            "fandom": m.fandom,
+            "summary": m.summary,
+            "tags": m.tags,
+            "words": m.words,
+            "chapters": m.chapters,
+            "status": m.status,
+            "source_updated": m.updated,
+            "palette": palette_for(m.fandom or m.title),
+        }
+        for m in metas
+    ]
+    if not rows:
+        return 0
+    client.table("tag_matches").upsert(
+        rows, on_conflict="group_id,source,source_work_id"
+    ).execute()
+    return len(rows)
+
+
+def mark_group_checked(client: Client, group_id: str) -> None:
+    """Record that the worker just searched this group."""
+    client.table("tracked_groups").update(
+        {"last_checked": datetime.now(timezone.utc).isoformat()}
+    ).eq("id", group_id).execute()
+
+
 def mark_flag(
     client: Client, source_work_ids: list[str], flag: str, source: str = "ao3"
 ) -> int:

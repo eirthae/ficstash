@@ -74,7 +74,7 @@ export function ContinueCard({ work, onOpen }) {
 }
 
 // ---- Suggestion card (+ download / dismiss) -------------------------------
-export function SuggestionCard({ work, fetchState = 'idle', onFetch, onDismiss, onOpen }) {
+export function SuggestionCard({ work, fetchState = 'idle', onFetch, onDismiss, onOpen, cta = 'Open' }) {
   return (
     <div className="libcard fade-enter">
       <div onClick={() => onOpen && onOpen(work)} style={{ cursor: 'pointer' }}>
@@ -96,11 +96,17 @@ export function SuggestionCard({ work, fetchState = 'idle', onFetch, onDismiss, 
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="metarow"><StatusBadge status={work.status} /><span>·</span><span>{fmtWords(work.words)}</span></div>
-          <button className={`btn btn-sm ${fetchState === 'done' ? 'btn-flat' : 'btn-primary'}`} onClick={onFetch} style={{ minWidth: 92 }}>
-            {fetchState === 'done' ? <><Icon icon="solar:check-read-linear" size={16} /> Saved</>
-              : fetchState === 'busy' ? <>Fetching…</>
-              : <><Icon icon="solar:download-minimalistic-linear" size={16} /> Download</>}
-          </button>
+          {onFetch ? (
+            <button className={`btn btn-sm ${fetchState === 'done' ? 'btn-flat' : 'btn-primary'}`} onClick={onFetch} style={{ minWidth: 92 }}>
+              {fetchState === 'done' ? <><Icon icon="solar:check-read-linear" size={16} /> Saved</>
+                : fetchState === 'busy' ? <>Fetching…</>
+                : <><Icon icon="solar:download-minimalistic-linear" size={16} /> Download</>}
+            </button>
+          ) : (
+            <button className="btn btn-sm btn-flat" onClick={() => onOpen && onOpen(work)} style={{ minWidth: 92 }}>
+              <Icon icon="solar:arrow-right-linear" size={16} /> {cta}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -110,7 +116,7 @@ export function SuggestionCard({ work, fetchState = 'idle', onFetch, onDismiss, 
 // ---- Tag tile (discovery grid) --------------------------------------------
 export function TagTile({ tag, onOpen }) {
   const pal = COVER_PALETTES[tag.palette] || COVER_PALETTES[0];
-  const kindLabel = { relationship: 'Relationship', fandom: 'Fandom', freeform: 'Tag', character: 'Character' }[tag.kind] || 'Tag';
+  const kindLabel = { relationship: 'Relationship', fandom: 'Fandom', freeform: 'Tag', character: 'Character', group: 'Tag group' }[tag.kind] || 'Tag';
   return (
     <div className="tile pressable" onClick={() => onOpen && onOpen(tag)} style={{ background: `linear-gradient(150deg, ${pal[0]}, ${pal[1]})` }}>
       <div className="grain"></div>

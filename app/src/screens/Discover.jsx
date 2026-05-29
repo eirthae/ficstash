@@ -1,64 +1,281 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
-import { SearchField, EmptyState, TAG_COLOR, useToast } from '../components/ui.jsx';
+import { SearchField, EmptyState, TAG_COLOR, useToast, Sheet, Segmented } from '../components/ui.jsx';
 import { TagTile, SuggestionCard } from '../components/cards.jsx';
+import {
+  fetchTrackedGroups, createGroup, deleteGroup,
+  fetchMatches, markMatchSeen, markGroupSeen, autocompleteTags,
+} from '../lib/tags.js';
+import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
 
-export function DiscoverScreen({ tags, nav }) {
-  const [q, setQ] = useState('');
-  const open = (tag) => nav.push('tagresults', { tag });
-  const trackTag = () => q && nav.push('tagresults', { tag: { name: q, kind: 'freeform', count: 0, fresh: 0, palette: 2 } });
+// ============================================================================
+// Discover — track AO3 tags / tag groups and review the works they turn up.
+// Groups are stored in Supabase (tracked_groups); the worker fills tag_matches.
+// ============================================================================
+
+export function DiscoverScreen({ nav }) {
+  const [groups, setGroups] = useState(null); // null = loading
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [toast, showToast] = useToast();
+
+  const load = useCallback(() => {
+    fetchTrackedGroups()
+      .then((r) => setGroups(r ?? TRACKED_TAGS))
+      .catch(() => setGroups(TRACKED_TAGS));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const tags = groups || [];
+  const fresh = tags.reduce((a, t) => a + (t.fresh || 0), 0);
+  const open = (tag) => nav.push('tagresults', { tag, onLeave: load });
+
+  const onCreated = (g) => {
+    setBuilderOpen(false);
+    showToast(`Now tracking “${g.name}”`);
+    load();
+  };
+
   return (
     <div className="screen">
       <Appbar large title="Discover" />
       <div className="scroll" style={{ padding: '0 20px 24px' }}>
-        <div style={{ marginBottom: 18 }}>
-          <SearchField placeholder="Track a tag, ship, or fandom…" value={q} onChange={setQ} onSubmit={trackTag} />
-        </div>
+        <button
+          className="searchfield pressable"
+          style={{ width: '100%', marginBottom: 18, textAlign: 'left', cursor: 'pointer' }}
+          onClick={() => setBuilderOpen(true)}
+        >
+          <Icon icon="solar:magnifer-linear" size={20} color="var(--text-tertiary)" />
+          <span style={{ color: 'var(--text-tertiary)', flex: 1 }}>Track a tag, ship, or tag group…</span>
+        </button>
+
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div className="section-label">Tracked tags · {tags.length}</div>
-          <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{tags.reduce((a, t) => a + t.fresh, 0)} new matches</span>
+          <div className="section-label">Tracked · {tags.length}</div>
+          {fresh > 0 && <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{fresh} new matches</span>}
         </div>
-        <div className="tilegrid">
-          {tags.map(t => <TagTile key={t.id} tag={t} onOpen={open} />)}
-          <button className="tile add pressable" onClick={() => document.querySelector('.searchfield input')?.focus()}>
-            <Icon icon="solar:add-circle-linear" size={30} />
-            <div className="t-name" style={{ marginTop: 6 }}>Track a new tag</div>
-          </button>
-        </div>
+
+        {groups === null ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '8px 2px' }}>Loading…</div>
+        ) : tags.length === 0 ? (
+          <EmptyState
+            icon="solar:hashtag-circle-linear"
+            title="Nothing tracked yet"
+            desc="Track a tag or a tag group and FicStash will surface matching works as they're posted."
+            action={<button className="btn btn-primary" onClick={() => setBuilderOpen(true)}><Icon icon="solar:add-circle-linear" size={18} /> Track a tag</button>}
+          />
+        ) : (
+          <div className="tilegrid">
+            {tags.map((t) => <TagTile key={t.id} tag={t} onOpen={open} />)}
+            <button className="tile add pressable" onClick={() => setBuilderOpen(true)}>
+              <Icon icon="solar:add-circle-linear" size={30} />
+              <div className="t-name" style={{ marginTop: 6 }}>Track a new tag</div>
+            </button>
+          </div>
+        )}
       </div>
+
+      <TagGroupBuilder open={builderOpen} onClose={() => setBuilderOpen(false)} onCreated={onCreated} />
+      {toast}
     </div>
   );
 }
 
-export function TagResultsScreen({ tag, suggestions, nav }) {
-  const [items, setItems] = useState(suggestions);
-  const [fetch, setFetch] = useState({});
-  const [toast, showToast] = useToast();
-  const c = TAG_COLOR[tag.kind] || 'var(--accent)';
+// ---- Builder sheet: live AO3 autocomplete → pick tags → save a group -------
+function TagGroupBuilder({ open, onClose, onCreated }) {
+  const [term, setTerm] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState([]);
+  const [label, setLabel] = useState('');
+  const [matchMode, setMatchMode] = useState('all');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const debounce = useRef();
 
-  const doFetch = (w) => {
-    if (fetch[w.id] === 'done') return;
-    setFetch(f => ({ ...f, [w.id]: 'busy' }));
-    setTimeout(() => { setFetch(f => ({ ...f, [w.id]: 'done' })); showToast(`“${w.title}” saved to library`); }, 1300);
+  useEffect(() => {
+    if (open) { setTerm(''); setResults([]); setPicked([]); setLabel(''); setMatchMode('all'); setErr(''); }
+  }, [open]);
+
+  useEffect(() => {
+    clearTimeout(debounce.current);
+    const q = term.trim();
+    if (q.length < 2) { setResults([]); setSearching(false); return; }
+    setSearching(true);
+    debounce.current = setTimeout(() => {
+      autocompleteTags(q)
+        .then((r) => setResults(r))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 280);
+    return () => clearTimeout(debounce.current);
+  }, [term]);
+
+  const add = (t) => {
+    if (!picked.some((p) => p.name.toLowerCase() === t.name.toLowerCase())) {
+      setPicked((p) => [...p, t]);
+      setErr('');
+    }
+    setTerm('');
+    setResults([]);
   };
-  const dismiss = (w) => { setItems(arr => arr.filter(x => x.id !== w.id)); showToast('Dismissed — won\'t resurface', 'solar:eye-closed-linear'); };
+  const remove = (name) => setPicked((p) => p.filter((x) => x.name !== name));
+
+  const save = async () => {
+    if (!picked.length) { setErr('Add at least one tag first.'); return; }
+    setBusy(true); setErr('');
+    try {
+      const g = await createGroup({ label: label.trim(), tags: picked, matchMode });
+      onCreated(g);
+    } catch (e) {
+      setErr(e?.message ? String(e.message) : 'Could not save — check your connection.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="screen view-enter">
-      <Appbar back={() => nav.pop()} title={tag.name} sub={`${tag.count} works · ${tag.fresh || items.length} to review`} />
-      <div className="scroll" style={{ padding: '4px 20px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 16 }}>
-          <span className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, height: 26 }}>
-            <span className="swatch" style={{ background: c }}></span>{tag.kind}</span>
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>metadata only — nothing downloaded until you save</span>
+    <Sheet open={open} onClose={onClose} title="Track a tag group" maxH="88vh">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {picked.length > 0 && (
+          <div>
+            <div className="section-label" style={{ marginBottom: 8 }}>
+              {picked.length === 1 ? 'Tracking this tag' : `Tracking works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`}
+            </div>
+            <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8 }}>
+              {picked.map((t) => {
+                const c = TAG_COLOR[t.kind] || TAG_COLOR.freeform;
+                return (
+                  <span key={t.name} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
+                    <span className="swatch" style={{ background: c }}></span>{t.name}
+                    <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => remove(t.name)} aria-label="Remove tag">
+                      <Icon icon="solar:close-circle-bold" size={15} color={c} />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <SearchField placeholder="Search AO3 tags…" value={term} onChange={setTerm} />
+          {searching && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 6, paddingLeft: 2 }}>Searching AO3…</div>}
+          {results.length > 0 && (
+            <div className="tag-suggest" style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+              {results.map((t) => (
+                <button
+                  key={`${t.name}-${t.id}`}
+                  className="pressable"
+                  onClick={() => add(t)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '11px 14px', background: 'transparent', borderBottom: '1px solid var(--border)' }}
+                >
+                  <Icon icon="solar:add-circle-linear" size={18} color="var(--accent)" />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        {items.length === 0 ? (
-          <EmptyState icon="solar:inbox-line-linear" title="All caught up" desc="You've reviewed every new match for this tag. New works will appear here as they're posted." />
+
+        {picked.length > 1 && (
+          <div>
+            <div className="section-label" style={{ marginBottom: 8 }}>Match</div>
+            <Segmented
+              value={matchMode}
+              onChange={setMatchMode}
+              options={[{ value: 'all', label: 'Has all tags' }, { value: 'any', label: 'Has any tag' }]}
+            />
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
+              {matchMode === 'all'
+                ? 'A work must carry every tag in the group.'
+                : 'A work matches if it has at least one of these tags.'}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="section-label" style={{ marginBottom: 8 }}>Name <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
+          <input
+            className="textinput"
+            placeholder={picked.map((t) => t.name).join(' + ') || 'e.g. Soulmates AU — my ship'}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 15 }}
+          />
+        </div>
+
+        {err && <div style={{ color: 'var(--danger, #f5455c)', fontSize: 13 }}>{err}</div>}
+
+        <button className="btn btn-primary" disabled={busy || !picked.length} onClick={save} style={{ width: '100%', opacity: busy || !picked.length ? 0.6 : 1 }}>
+          {busy ? 'Saving…' : <><Icon icon="solar:check-circle-bold" size={18} /> Track this {picked.length > 1 ? 'group' : 'tag'}</>}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+// ---- Results: works the worker found for a tracked group -------------------
+export function TagResultsScreen({ tag, nav, onLeave }) {
+  const [items, setItems] = useState(null); // null = loading
+  const [toast, showToast] = useToast();
+  const c = TAG_COLOR[tag.kind] || 'var(--accent)';
+  const kindLabel = { relationship: 'relationship', fandom: 'fandom', freeform: 'tag', character: 'character', group: 'tag group' }[tag.kind] || 'tag';
+
+  useEffect(() => {
+    let alive = true;
+    fetchMatches(tag.id)
+      .then((r) => { if (alive) setItems(r ?? SUGGESTIONS); })
+      .catch(() => { if (alive) setItems(SUGGESTIONS); });
+    // Viewing the matches clears the "N new" badge on the tile.
+    markGroupSeen(tag.id).catch(() => {});
+    return () => { alive = false; };
+  }, [tag.id]);
+
+  const leave = () => { onLeave && onLeave(); nav.pop(); };
+
+  const dismiss = (w) => {
+    setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
+    markMatchSeen(w.matchId || w.id).catch(() => {});
+    showToast('Dismissed', 'solar:eye-closed-linear');
+  };
+
+  const removeGroup = async () => {
+    try { await deleteGroup(tag.id); } catch (e) { /* sample data / offline */ }
+    showToast('Stopped tracking');
+    leave();
+  };
+
+  const list = items || [];
+  return (
+    <div className="screen view-enter">
+      <Appbar
+        back={leave}
+        title={tag.name}
+        sub={`${tag.count ?? list.length} works · ${kindLabel}`}
+        actions={[{ icon: 'solar:trash-bin-trash-linear', onClick: removeGroup }]}
+      />
+      <div className="scroll" style={{ padding: '4px 20px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 16, flexWrap: 'wrap' }}>
+          <span className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, height: 26 }}>
+            <span className="swatch" style={{ background: c }}></span>{kindLabel}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>metadata only — nothing downloaded</span>
+        </div>
+
+        {items === null ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Loading…</div>
+        ) : list.length === 0 ? (
+          <EmptyState icon="solar:inbox-line-linear" title="No matches yet" desc="When the worker next checks AO3, new works for this tag will appear here." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-            {items.map(w => <SuggestionCard key={w.id} work={w} fetchState={fetch[w.id] || 'idle'}
-              onFetch={() => doFetch(w)} onDismiss={() => dismiss(w)} onOpen={() => nav.push('detail', { work: w, suggestion: true })} />)}
+            {list.map((w) => (
+              <SuggestionCard
+                key={w.id}
+                work={w}
+                onDismiss={() => dismiss(w)}
+                onOpen={() => nav.push('detail', { work: w, suggestion: true })}
+              />
+            ))}
           </div>
         )}
         {toast}

@@ -1,16 +1,30 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import Icon from '../components/Icon.jsx';
 import { Cover, StatusBadge, FrozenBadge, TagChip, fmtWords, useToast } from '../components/ui.jsx';
 import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
+import { fetchChapters } from '../lib/library.js';
 
 export function StoryDetailScreen({ work, suggestion, nav }) {
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
   const total = work.chaptersTotal || work.chapters || 1;
-  const base = CHAPTERS.slice(0, total);
-  const [chState, setChState] = useState(() => {
-    const m = {}; base.forEach(c => { m[c.n] = suggestion ? 'idle' : c.state; }); return m;
-  });
+
+  // Real downloaded chapters for this work; suggestions/sample fall back to a
+  // placeholder list so the page always renders something.
+  const [live, setLive] = useState(null);
+  useEffect(() => {
+    if (suggestion) { setLive([]); return; }
+    let alive = true;
+    fetchChapters(work.id)
+      .then(r => { if (alive) setLive(r || []); })
+      .catch(() => { if (alive) setLive([]); });
+    return () => { alive = false; };
+  }, [work.id, suggestion]);
+
+  const base = (live && live.length)
+    ? live
+    : CHAPTERS.slice(0, total).map(c => ({ ...c, state: suggestion ? 'idle' : c.state }));
+  const [chState, setChState] = useState({});
   const [saved, setSaved] = useState(!suggestion);
   const [toast, showToast] = useToast();
 
@@ -19,14 +33,15 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
     setChState(s => ({ ...s, [ch.n]: 'busy' }));
     setTimeout(() => setChState(s => ({ ...s, [ch.n]: 'done' })), 1100);
   };
-  const downloadedCount = Object.values(chState).filter(s => s === 'done').length;
+  const chStateOf = (c) => chState[c.n] || c.state || 'idle';
+  const downloadedCount = base.filter(c => chStateOf(c) === 'done').length;
 
   const saveWork = () => {
     setSaved(true); showToast('Added to library — downloading…');
     base.forEach((c, i) => setTimeout(() => setChState(s => ({ ...s, [c.n]: 'done' })), 400 + i * 120));
   };
 
-  const openReader = (ch) => nav.push('reader', { workId: work.id, chapterTitle: ch ? ch.title : null, chapterN: ch ? ch.n : (work.lastChapter || 1) });
+  const openReader = (ch) => nav.push('reader', { work, workId: work.id, chapterTitle: ch ? ch.title : null, chapterN: ch ? ch.n : (work.lastChapter || 1) });
 
   return (
     <div className="screen view-enter">
@@ -107,7 +122,7 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
           <div>
             {base.map(ch => (
               <Fragment key={ch.n}>
-                <ChapterRow ch={ch} current={!work.frozen && ch.n === work.lastChapter} fetchState={chState[ch.n]}
+                <ChapterRow ch={ch} current={!work.frozen && ch.n === work.lastChapter} fetchState={chStateOf(ch)}
                   onOpen={() => openReader(ch)} onFetch={fetchCh} />
                 <div className="divider"></div>
               </Fragment>

@@ -212,35 +212,56 @@ class AO3Source(Source):
             return fresh
         return None
 
-    # ---- tag search (Phase 2 surface; basic implementation) ----------------
     def search_by_tag(self, tag: str, limit: int = 25) -> list[WorkMeta]:
+        return self.search_group([tag], match_mode="all", limit=limit)
+
+    # ---- tag-group discovery -----------------------------------------------
+    def search_group(
+        self, tags: list[str], match_mode: str = "all", limit: int = 30
+    ) -> list[WorkMeta]:
+        """Find recent works matching a tracked tag group, via AO3's own search.
+
+        We feed tag names to AO3's works search so AO3's canonical-tag / synonym
+        wrangling applies (e.g. "Soulmates AU" pulls in everything AO3 folds
+        under it) — no naive string matching here.
+          * match_mode 'all' (AND): one search with all tags included together.
+          * match_mode 'any' (OR): one search per tag, results merged.
+        Results are newest-first by date posted, deduped, capped at `limit`.
+        """
+        tags = [t for t in (tags or []) if t]
+        if not tags:
+            return []
+        queries = [",".join(tags)] if match_mode == "all" else list(tags)
+
+        seen: dict[str, WorkMeta] = {}
+        for qi, q in enumerate(queries):
+            if qi:
+                time.sleep(RATE_LIMIT_SECONDS)  # space multi-tag 'any' searches
+            for w in self._run_tag_search(q, limit):
+                wid = str(getattr(w, "id", "") or "")
+                if not wid or wid in seen:
+                    continue
+                seen[wid] = _work_to_meta(self.id, wid, w)
+                if len(seen) >= limit:
+                    break
+        return list(seen.values())[:limit]
+
+    def _run_tag_search(self, tags_csv: str, limit: int):
+        s = self._require_session()
         try:
-            search = AO3.Search(any_field="", tags=[tag], session=self._session)
-            search.update()
-        except TypeError:
-            # Older ao3-api signatures differ; fall back to a query search.
-            search = AO3.Search(query=tag, session=self._session)
+            try:
+                search = AO3.Search(
+                    tags=tags_csv, sort_column="created_at", session=s
+                )
+            except TypeError:
+                # Older ao3-api signatures lack sort_column.
+                search = AO3.Search(tags=tags_csv, session=s)
             search.update()
         except Exception as exc:  # noqa: BLE001
             if _is_rate_limited(exc):
                 raise RateLimitError(str(exc)) from exc
             raise
-
-        out: list[WorkMeta] = []
-        for w in (getattr(search, "results", None) or [])[:limit]:
-            wid = str(getattr(w, "id", "") or "")
-            if not wid:
-                continue
-            out.append(
-                WorkMeta(
-                    source=self.id,
-                    source_work_id=wid,
-                    title=getattr(w, "title", "") or "",
-                    author=_first_author(w),
-                    url=f"https://archiveofourown.org/works/{wid}",
-                )
-            )
-        return out
+        return (getattr(search, "results", None) or [])[:limit]
 
 
 # ---- helpers ---------------------------------------------------------------
