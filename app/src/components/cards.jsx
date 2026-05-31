@@ -6,7 +6,6 @@ import { COVER_PALETTES } from '../data/sample.js';
 export function LibraryCard({ work, onOpen }) {
   return (
     <div className="libcard pressable" onClick={() => onOpen && onOpen(work)}>
-      <Cover title={work.title} author={work.author} fandom={work.fandom} palette={work.palette} w={84} h={116} />
       <div className="meta">
         <div className="story-title" style={{ marginBottom: 2 }}>{work.title}</div>
         <div className="story-sub" style={{ marginBottom: 7 }}>by {work.author}</div>
