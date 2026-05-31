@@ -51,7 +51,19 @@ function mapMatch(row) {
     palette: row.palette,
     seen: row.seen,
     fresh: !row.seen,
+    wanted: !!row.wanted,
+    saved: !!row.saved,
   };
+}
+
+// "Save to library" = ask the worker to fetch this work offline on its next run.
+export async function requestSave(matchId) {
+  if (!hasSupabase) return;
+  const { error } = await supabase
+    .from('tag_matches')
+    .update({ wanted: true, seen: true })
+    .eq('id', matchId);
+  if (error) throw error;
 }
 
 export async function fetchTrackedGroups() {
@@ -194,6 +206,8 @@ export async function fetchNewMatches() {
       status: row.status,
       palette: row.palette,
       sourceWorkId: row.source_work_id,
+      wanted: !!row.wanted,
+      saved: !!row.saved,
     };
   });
 }

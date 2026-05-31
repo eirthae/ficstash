@@ -73,8 +73,9 @@ export function ContinueCard({ work, onOpen }) {
   );
 }
 
-// ---- Suggestion card (+ download / dismiss) -------------------------------
-export function SuggestionCard({ work, fetchState = 'idle', onFetch, onDismiss, onOpen, cta = 'Open' }) {
+// ---- Suggestion card (+ save / dismiss) -----------------------------------
+// saveState: 'idle' → 'queued' (worker will fetch on next sync) → 'saved' (in library)
+export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, cta = 'Open' }) {
   return (
     <div className="libcard fade-enter">
       <div onClick={() => onOpen && onOpen(work)} style={{ cursor: 'pointer' }}>
@@ -96,11 +97,17 @@ export function SuggestionCard({ work, fetchState = 'idle', onFetch, onDismiss, 
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="metarow"><StatusBadge status={work.status} /><span>·</span><span>{fmtWords(work.words)}</span></div>
-          {onFetch ? (
-            <button className={`btn btn-sm ${fetchState === 'done' ? 'btn-flat' : 'btn-primary'}`} onClick={onFetch} style={{ minWidth: 92 }}>
-              {fetchState === 'done' ? <><Icon icon="solar:check-read-linear" size={16} /> Saved</>
-                : fetchState === 'busy' ? <>Fetching…</>
-                : <><Icon icon="solar:download-minimalistic-linear" size={16} /> Download</>}
+          {onSave ? (
+            <button
+              className={`btn btn-sm ${saveState === 'idle' ? 'btn-primary' : 'btn-flat'}`}
+              onClick={() => saveState === 'idle' && onSave(work)}
+              disabled={saveState !== 'idle'}
+              style={{ minWidth: 104 }}
+              title={saveState === 'queued' ? 'Will download on the next sync' : undefined}
+            >
+              {saveState === 'saved' ? <><Icon icon="solar:check-read-linear" size={16} /> In library</>
+                : saveState === 'queued' ? <><Icon icon="solar:clock-circle-linear" size={16} /> Queued</>
+                : <><Icon icon="solar:download-minimalistic-linear" size={16} /> Save</>}
             </button>
           ) : (
             <button className="btn btn-sm btn-flat" onClick={() => onOpen && onOpen(work)} style={{ minWidth: 92 }}>

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
 import { Cover, StatusBadge, fmtWords, useToast } from '../components/ui.jsx';
-import { fetchNewMatches, markMatchSeen } from '../lib/tags.js';
+import { fetchNewMatches, markMatchSeen, requestSave } from '../lib/tags.js';
 
 // shared row: a new chapter on a followed work
 function ChapterUpdateRow({ u, nav }) {
@@ -27,7 +27,7 @@ function ChapterUpdateRow({ u, nav }) {
 }
 
 // shared row: a new work matching a tracked tag (metadata-first)
-function MatchUpdateRow({ u, onOpen, onDismiss }) {
+function MatchUpdateRow({ u, onOpen, onDismiss, onSave, saveState = 'idle' }) {
   const tagLabel = u.tag || 'Tracked tag';
   return (
     <div className="update pressable" onClick={() => onOpen(u)}>
@@ -37,13 +37,24 @@ function MatchUpdateRow({ u, onOpen, onDismiss }) {
           <span className="chip" style={{ background: 'color-mix(in srgb, var(--tag-relationship) 16%, transparent)', color: 'var(--tag-relationship)', height: 20 }}>
             <span className="swatch" style={{ background: 'var(--tag-relationship)' }}></span>{tagLabel.length > 22 ? tagLabel.slice(0, 21) + '…' : tagLabel}</span>
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginLeft: 'auto' }}>{u.time}</span>
+          <button className="iconbtn" style={{ width: 24, height: 24 }} onClick={(e) => { e.stopPropagation(); onDismiss(u); }} aria-label="Dismiss">
+            <Icon icon="solar:close-circle-linear" size={17} color="var(--text-tertiary)" />
+          </button>
         </div>
         <div className="story-title" style={{ fontSize: 14.5 }}>{u.title}</div>
         <div className="summary" style={{ WebkitLineClamp: 2 }}>{u.summary}</div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
           <div className="metarow"><StatusBadge status={u.status} /><span>·</span><span>{fmtWords(u.words)}</span></div>
-          <button className="btn btn-sm btn-flat" onClick={(e) => { e.stopPropagation(); onDismiss(u); }} style={{ minWidth: 84 }}>
-            <Icon icon="solar:eye-closed-linear" size={15} /> Dismiss
+          <button
+            className={`btn btn-sm ${saveState === 'idle' ? 'btn-primary' : 'btn-flat'}`}
+            disabled={saveState !== 'idle'}
+            onClick={(e) => { e.stopPropagation(); if (saveState === 'idle') onSave(u); }}
+            style={{ minWidth: 100 }}
+            title={saveState === 'queued' ? 'Will download on the next sync' : undefined}
+          >
+            {saveState === 'saved' ? <><Icon icon="solar:check-read-linear" size={15} /> In library</>
+              : saveState === 'queued' ? <><Icon icon="solar:clock-circle-linear" size={15} /> Queued</>
+              : <><Icon icon="solar:download-minimalistic-linear" size={15} /> Save</>}
           </button>
         </div>
       </div>
@@ -75,6 +86,12 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
     markMatchSeen(u.matchId || u.id).catch(() => {});
     showToast('Dismissed', 'solar:eye-closed-linear');
   };
+  const saveMatch = (u) => {
+    setLiveMatches((arr) => (arr || matchList).map((x) => (x.id === u.id ? { ...x, wanted: true } : x)));
+    requestSave(u.matchId || u.id).catch(() => {});
+    showToast('Queued — downloads on next sync', 'solar:clock-circle-linear');
+  };
+  const saveStateOf = (u) => (u.saved ? 'saved' : u.wanted ? 'queued' : 'idle');
 
   const days = (arr) => {
     const order = ['Today', 'Yesterday', 'This week'];
@@ -105,7 +122,7 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               {g.items.map(u => tab === 'chapters'
                 ? <ChapterUpdateRow key={u.id} u={u} nav={nav} />
-                : <MatchUpdateRow key={u.id} u={u} onOpen={openMatch} onDismiss={dismissMatch} />)}
+                : <MatchUpdateRow key={u.id} u={u} onOpen={openMatch} onDismiss={dismissMatch} onSave={saveMatch} saveState={saveStateOf(u)} />)}
             </div>
           </div>
         ))}

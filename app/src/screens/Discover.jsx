@@ -5,7 +5,7 @@ import { SearchField, EmptyState, TAG_COLOR, useToast, Sheet, Segmented } from '
 import { TagTile, SuggestionCard } from '../components/cards.jsx';
 import {
   fetchTrackedGroups, createGroup, deleteGroup,
-  fetchMatches, markMatchSeen, markGroupSeen, autocompleteTags,
+  fetchMatches, markMatchSeen, markGroupSeen, autocompleteTags, requestSave,
 } from '../lib/tags.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
 
@@ -239,6 +239,13 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
     showToast('Dismissed', 'solar:eye-closed-linear');
   };
 
+  const save = (w) => {
+    setItems((arr) => (arr || []).map((x) => (x.id === w.id ? { ...x, wanted: true } : x)));
+    requestSave(w.matchId || w.id).catch(() => {});
+    showToast('Queued — downloads on next sync', 'solar:clock-circle-linear');
+  };
+  const saveStateOf = (w) => (w.saved ? 'saved' : w.wanted ? 'queued' : 'idle');
+
   const removeGroup = async () => {
     try { await deleteGroup(tag.id); } catch (e) { /* sample data / offline */ }
     showToast('Stopped tracking');
@@ -272,6 +279,8 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
               <SuggestionCard
                 key={w.id}
                 work={w}
+                onSave={save}
+                saveState={saveStateOf(w)}
                 onDismiss={() => dismiss(w)}
                 onOpen={() => nav.push('detail', { work: w, suggestion: true })}
               />

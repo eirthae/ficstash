@@ -37,9 +37,11 @@ from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_existing_works,
     fetch_tracked_groups,
+    fetch_wanted_matches,
     make_client,
     mark_flag,
     mark_group_checked,
+    mark_matches_saved,
     upsert_chapters,
     upsert_tag_matches,
     upsert_work,
@@ -272,6 +274,44 @@ def main() -> None:
             print(f"    '{label}': {written} match(es).")
         except Exception as exc:  # noqa: BLE001
             print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
+
+    # ---- Pass 5: requested saves → full offline copies ---------------------
+    # Works the user tapped "Save" on in the app (tag_matches.wanted). Fetch the
+    # full work like a bookmark, store it offline, then mark the match saved.
+    print("\n== Requested saves ==")
+    wanted = fetch_wanted_matches(db)
+    print(f"{len(wanted)} work(s) requested.")
+    saved_count = save_failed = 0
+    for wid in wanted:
+        if wid in processed:
+            # Already fetched this run (e.g. also a bookmark) — just flag it.
+            mark_matches_saved(db, wid)
+            saved_count += 1
+            continue
+        try:
+            space()
+            meta = _with_backoff(
+                lambda: ao3.fetch_work_metadata(wid), what=f"requested metadata {wid}"
+            )
+            work_uuid = upsert_work(db, meta, offline=True)
+            chapters = []
+            for n in range(1, meta.chapters + 1):
+                space()
+                chapters.append(
+                    _with_backoff(
+                        lambda n=n: ao3.fetch_chapter(wid, n),
+                        what=f"chapter {n} of {wid}",
+                    )
+                )
+            written = upsert_chapters(db, work_uuid, chapters)
+            mark_matches_saved(db, wid)
+            processed.add(wid)
+            saved_count += 1
+            print(f"    saved {wid} — {written} chapter(s).")
+        except Exception as exc:  # noqa: BLE001
+            save_failed += 1
+            print(f"    requested {wid} skipped ({type(exc).__name__}: {exc})")
+    print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
 
     print("\nSync complete.")
 

@@ -172,6 +172,37 @@ def mark_flag(
     return len(ids)
 
 
+def fetch_wanted_matches(client: Client, source: str = "ao3") -> list[str]:
+    """Return distinct source_work_ids the app has requested be saved offline.
+
+    These are tag_matches the user tapped "Save" on (wanted=true) that the worker
+    hasn't fetched into the library yet (saved=false).
+    """
+    resp = (
+        client.table("tag_matches")
+        .select("source_work_id")
+        .eq("source", source)
+        .eq("wanted", True)
+        .eq("saved", False)
+        .execute()
+    )
+    seen: list[str] = []
+    for r in resp.data or []:
+        wid = r.get("source_work_id")
+        if wid and wid not in seen:
+            seen.append(wid)
+    return seen
+
+
+def mark_matches_saved(
+    client: Client, source_work_id: str, source: str = "ao3"
+) -> None:
+    """Flag every match row for a work as saved once it's in the library."""
+    client.table("tag_matches").update({"saved": True, "wanted": False}).eq(
+        "source", source
+    ).eq("source_work_id", source_work_id).execute()
+
+
 def upsert_chapters(client: Client, work_id: str, chapters: list[Chapter]) -> int:
     """Insert/update chapter bodies for a work. Returns the count written."""
     rows = [

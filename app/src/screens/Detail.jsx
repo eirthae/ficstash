@@ -4,6 +4,7 @@ import { Cover, StatusBadge, FrozenBadge, TagChip, fmtWords, useToast } from '..
 import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
 import { fetchChapters } from '../lib/library.js';
+import { requestSave } from '../lib/tags.js';
 
 export function StoryDetailScreen({ work, suggestion, nav }) {
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
@@ -25,7 +26,9 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
     ? live
     : CHAPTERS.slice(0, total).map(c => ({ ...c, state: suggestion ? 'idle' : c.state }));
   const [chState, setChState] = useState({});
-  const [saved, setSaved] = useState(!suggestion);
+  // For suggestions, Save is a request to the worker (idle → queued → saved);
+  // for library works there's nothing to save, so the button opens AO3 instead.
+  const [saveState, setSaveState] = useState(work.saved ? 'saved' : work.wanted ? 'queued' : 'idle');
   const [toast, showToast] = useToast();
 
   const fetchCh = (ch) => {
@@ -36,12 +39,19 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
   const chStateOf = (c) => chState[c.n] || c.state || 'idle';
   const downloadedCount = base.filter(c => chStateOf(c) === 'done').length;
 
-  const saveWork = () => {
-    setSaved(true); showToast('Added to library — downloading…');
-    base.forEach((c, i) => setTimeout(() => setChState(s => ({ ...s, [c.n]: 'done' })), 400 + i * 120));
+  const queueSave = () => {
+    if (saveState !== 'idle') return;
+    setSaveState('queued');
+    requestSave(work.matchId || work.id).catch(() => {});
+    showToast('Queued — downloads on next sync', 'solar:clock-circle-linear');
   };
 
   const openReader = (ch) => nav.push('reader', { work, workId: work.id, chapterTitle: ch ? ch.title : null, chapterN: ch ? ch.n : (work.lastChapter || 1) });
+
+  const openOnAO3 = () => {
+    if (!work.sourceWorkId) { showToast('No AO3 link for this work', 'solar:link-broken-linear'); return; }
+    window.open(`https://archiveofourown.org/works/${work.sourceWorkId}`, '_blank', 'noopener');
+  };
 
   return (
     <div className="screen view-enter">
@@ -52,7 +62,7 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
         <button className="iconbtn" style={{ background: 'rgba(0,0,0,.28)', backdropFilter: 'blur(4px)', color: '#fff' }} onClick={() => nav.pop()}>
           <Icon icon="solar:arrow-left-linear" size={22} /></button>
         <div style={{ flex: 1 }}></div>
-        <button className="iconbtn" style={{ background: 'rgba(0,0,0,.28)', backdropFilter: 'blur(4px)', color: '#fff' }} onClick={() => showToast('Opening AO3 in browser…', 'solar:square-top-down-linear')}>
+        <button className="iconbtn" style={{ background: 'rgba(0,0,0,.28)', backdropFilter: 'blur(4px)', color: '#fff' }} onClick={openOnAO3}>
           <Icon icon="solar:menu-dots-bold" size={22} /></button>
       </div>
 
@@ -79,11 +89,17 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
               <Icon icon="solar:book-2-bold" size={20} />
               {work.progress >= 1 ? 'Read again' : work.progress > 0 ? `Continue · Ch ${work.lastChapter}` : 'Start reading'}
             </button>
-            {!saved ? (
-              <button className="btn btn-lg btn-flat" onClick={saveWork} style={{ flex: 'none', width: 56, padding: 0 }}>
-                <Icon icon="solar:download-minimalistic-bold" size={22} /></button>
+            {suggestion ? (
+              <button
+                className={`btn btn-lg ${saveState === 'idle' ? 'btn-flat' : 'btn-surface'}`}
+                onClick={queueSave}
+                disabled={saveState !== 'idle'}
+                style={{ flex: 'none', width: 56, padding: 0 }}
+                title={saveState === 'saved' ? 'In your library' : saveState === 'queued' ? 'Will download on the next sync' : 'Save to library'}
+              >
+                <Icon icon={saveState === 'saved' ? 'solar:check-read-linear' : saveState === 'queued' ? 'solar:clock-circle-linear' : 'solar:download-minimalistic-bold'} size={22} /></button>
             ) : (
-              <button className="btn btn-lg btn-surface" onClick={() => showToast('Opening on AO3…', 'solar:square-top-down-linear')} style={{ flex: 'none', width: 56, padding: 0 }} title="Open on AO3">
+              <button className="btn btn-lg btn-surface" onClick={openOnAO3} style={{ flex: 'none', width: 56, padding: 0 }} title="Open on AO3">
                 <Icon icon="solar:square-top-down-linear" size={22} /></button>
             )}
           </div>
@@ -106,7 +122,7 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
           </div>
 
           <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 22 }}
-            onClick={() => showToast('Opening on AO3…', 'solar:square-top-down-linear')}>
+            onClick={openOnAO3}>
             <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
             <div style={{ flex: 1 }}>
               <div className="set-h">Open on AO3</div>
