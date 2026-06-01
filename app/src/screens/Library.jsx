@@ -40,10 +40,11 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
     );
   }
 
-  // Hide works that aren't downloaded yet (offline === false). They appear once
-  // the worker has fetched their chapters, so a backfill in progress never
-  // surfaces an unreadable, empty story.
-  const ready = works.filter((w) => w.offline !== false);
+  // Show every work, including those still downloading. The cards mark
+  // not-yet-downloaded works as "Queued" / "Downloads on next sync", and Detail
+  // won't open them for reading until their chapters arrive — so a backfill in
+  // progress is visible rather than making the library look half-empty.
+  const ready = works;
 
   if (!connected || ready.length === 0) {
     return (
