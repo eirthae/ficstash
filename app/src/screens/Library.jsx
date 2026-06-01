@@ -14,6 +14,7 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
   const open = (w) => nav.push('detail', { work: w });
   const [toast, showToast] = useToast();
   const [syncing, setSyncing] = useState(false);
+  const [status, setStatus] = useState('all');
 
   const doSync = async () => {
     if (syncing) return;
@@ -60,22 +61,41 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
 
   const archiveAction = { icon: 'solar:history-linear', onClick: () => nav.push('archive') };
 
+  // Status filter (All / Ongoing / Complete). Counts come from the full ready
+  // set so the labels stay stable as the user switches between them.
+  const ongoingCount = ready.filter(w => w.status !== 'complete').length;
+  const completeCount = ready.length - ongoingCount;
+  const shown = status === 'complete' ? ready.filter(w => w.status === 'complete')
+    : status === 'ongoing' ? ready.filter(w => w.status !== 'complete')
+    : ready;
+  const label = status === 'complete' ? 'Complete' : status === 'ongoing' ? 'Ongoing' : 'All works';
+
   return (
     <div className="screen">
       <Appbar large title="Library" actions={[syncAction, archiveAction]} />
       {toast}
       <div className="scroll">
-        {layout === 'shelves' ? <Shelves works={ready} open={open} />
-          : layout === 'fandom' ? <FandomSections works={ready} open={open} />
+        <div className="seg" style={{ margin: '0 20px 16px' }}>
+          <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {ready.length}</button>
+          <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
+          <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+        </div>
+        {shown.length === 0 ? (
+          <div style={{ padding: '0 20px' }}>
+            <EmptyState icon="solar:inbox-line-linear" title={`No ${label.toLowerCase()} works`}
+              desc="Nothing here under this filter yet." />
+          </div>
+        ) : layout === 'shelves' ? <Shelves works={shown} open={open} />
+          : layout === 'fandom' ? <FandomSections works={shown} open={open} />
           : layout === 'list' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
-              <div className="section-label" style={{ marginBottom: -2 }}>All works · {ready.length}</div>
-              {ready.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
+              <div className="section-label" style={{ marginBottom: -2 }}>{label} · {shown.length}</div>
+              {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
             </div>
           ) : (
             <div style={{ padding: '0 20px 24px' }}>
-              <div className="section-label" style={{ marginBottom: 12 }}>All works · {ready.length}</div>
-              <div className="libgrid">{ready.map(w => <GridCard key={w.id} work={w} onOpen={open} />)}</div>
+              <div className="section-label" style={{ marginBottom: 12 }}>{label} · {shown.length}</div>
+              <div className="libgrid">{shown.map(w => <GridCard key={w.id} work={w} onOpen={open} />)}</div>
             </div>
           )}
       </div>
