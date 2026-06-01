@@ -1,5 +1,5 @@
 import Icon from './Icon.jsx';
-import { Cover, FetchButton, StatusBadge, FrozenBadge, TagChip, fmtWords } from './ui.jsx';
+import { Cover, FetchButton, StatusBadge, FrozenBadge, OriginBadges, TagChip, fmtWords } from './ui.jsx';
 import { COVER_PALETTES } from '../data/sample.js';
 
 // ---- Library list card (horizontal) --------------------------------------
@@ -11,6 +11,7 @@ export function LibraryCard({ work, onOpen }) {
         <div className="story-sub" style={{ marginBottom: 7 }}>by {work.author}</div>
         <div className="chiprow" style={{ marginBottom: 8 }}>
           {work.frozen ? <FrozenBadge /> : <StatusBadge status={work.status} updated={work.updated} />}
+          <OriginBadges bookmarked={work.bookmarked} subscribed={work.subscribed} />
         </div>
         <div className="summary" style={{ flex: 1 }}>{work.summary}</div>
         <div style={{ marginTop: 9 }}>
@@ -47,25 +48,6 @@ export function GridCard({ work, onOpen }) {
             {work.progress >= 1 ? 'Finished' : work.progress > 0 ? `Ch ${work.lastChapter}/${work.chaptersTotal}` : work.status === 'complete' ? 'Complete' : 'Ongoing'}
           </span>
           <span>{fmtWords(work.words)}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---- Continue-reading hero card -------------------------------------------
-export function ContinueCard({ work, onOpen }) {
-  return (
-    <div className="ccard pressable" onClick={() => onOpen && onOpen(work)}>
-      <div style={{ display: 'flex', gap: 12, padding: 12 }}>
-        <Cover title={work.title} author={work.author} fandom={work.fandom} palette={work.palette} w={66} h={92} />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <div className="section-label" style={{ color: 'var(--accent)', marginBottom: 5 }}>Continue</div>
-          <div className="story-title" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginBottom: 4 }}>{work.title}</div>
-          <div className="story-sub">{work.frozen ? 'saved copy' : work.fandom.split('–')[0].trim()}</div>
-          <div style={{ flex: 1 }}></div>
-          <div className="metarow" style={{ marginBottom: 6 }}><span>Chapter {work.lastChapter}</span><span>·</span><span>{Math.round(work.progress * 100)}%</span></div>
-          <div className="progress"><i style={{ width: `${work.progress * 100}%` }}></i></div>
         </div>
       </div>
     </div>

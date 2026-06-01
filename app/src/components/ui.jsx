@@ -88,6 +88,25 @@ export function FrozenBadge({ date, full }) {
   );
 }
 
+// Origin chips — where a work entered the library (a work can have several)
+export function OriginBadges({ bookmarked, subscribed }) {
+  if (!bookmarked && !subscribed) return null;
+  return (
+    <>
+      {bookmarked && (
+        <span className="originbadge" style={{ color: 'var(--accent)' }} title="You bookmarked this on AO3">
+          <Icon icon="solar:bookmark-bold" size={13} /> Bookmarked
+        </span>
+      )}
+      {subscribed && (
+        <span className="originbadge" style={{ color: 'var(--tag-relationship)' }} title="You subscribe to this on AO3">
+          <Icon icon="solar:bell-bold" size={13} /> Subscribed
+        </span>
+      )}
+    </>
+  );
+}
+
 export function fmtWords(n) {
   return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k words` : `${n} words`;
 }

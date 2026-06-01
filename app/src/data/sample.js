@@ -32,7 +32,7 @@ export const WORKS = [
     summary: 'Two seasons, three time zones, and a secret that lives in hotel hallways. Shane keeps a list of all the cities where no one knows his name. Ilya keeps the room key.',
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Hurt/Comfort', 'freeform'), T('Slow Burn', 'freeform'), T('Pining', 'freeform')],
     words: 84200, chapters: 18, chaptersTotal: 22, status: 'ongoing', updated: '3 days ago',
-    progress: 0.62, lastChapter: 11, palette: 0,
+    progress: 0.62, lastChapter: 11, palette: 0, inHistory: true, bookmarked: true,
   },
   {
     id: 'w2', source: 'ao3', title: 'Offside Hearts', author: 'northern_lights',
@@ -40,7 +40,7 @@ export const WORKS = [
     summary: 'A retirement, a farmhouse in Vermont, and twenty years of learning how to be loud about something they spent a decade keeping quiet.',
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Established Relationship', 'freeform'), T('Domestic Fluff', 'freeform'), T('Post-Canon', 'freeform')],
     words: 41800, chapters: 9, chaptersTotal: 9, status: 'complete', updated: 'Mar 2',
-    progress: 1, lastChapter: 9, palette: 4,
+    progress: 1, lastChapter: 9, palette: 4, inHistory: true, subscribed: true,
   },
   {
     id: 'w3', source: 'ao3', title: 'Translation Errors', author: 'verbatim',
@@ -48,7 +48,7 @@ export const WORKS = [
     summary: "Ilya's English is perfect except for the words that matter most. A study in the things that get lost — and the ones that survive anyway.",
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Angst with a Happy Ending', 'freeform'), T('Language Barrier', 'freeform')],
     words: 22600, chapters: 5, chaptersTotal: 5, status: 'complete', updated: 'Jan 14',
-    progress: 0.2, lastChapter: 1, palette: 1,
+    progress: 0.2, lastChapter: 1, palette: 1, inHistory: true,
   },
   {
     id: 'w4', source: 'ao3', title: 'A Quieter Country', author: 'samovar',
@@ -56,7 +56,7 @@ export const WORKS = [
     summary: 'Between the cameras and the contracts, a captain learns that the bravest thing on the ice is letting someone see you flinch.',
     tags: [T('Scott Hunter/Kip Grady', 'relationship'), T('Coming Out', 'freeform'), T('Found Family', 'freeform')],
     words: 67400, chapters: 14, chaptersTotal: 14, status: 'complete', updated: 'Feb 20',
-    progress: 0.05, lastChapter: 1, palette: 5,
+    progress: 0.05, lastChapter: 1, palette: 5, inHistory: true, bookmarked: true, subscribed: true,
   },
   {
     id: 'w5', source: 'ao3', title: 'Last Call in St. Petersburg', author: 'ferrywoman',
@@ -64,7 +64,7 @@ export const WORKS = [
     summary: "The off-season fic that lived on AO3 for two years before it vanished. You saved it the week before. Now it's yours.",
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Summer', 'freeform'), T('Hurt/Comfort', 'freeform')],
     words: 31900, chapters: 7, chaptersTotal: 7, status: 'complete', updated: 'saved Apr 11',
-    progress: 0.78, lastChapter: 5, palette: 3, frozen: true, frozenDate: 'Apr 11, 2025',
+    progress: 0.78, lastChapter: 5, palette: 3, frozen: true, frozenDate: 'Apr 11, 2025', inHistory: true, bookmarked: true,
   },
   {
     id: 'w6', source: 'ao3', title: 'Power Play', author: 'redline',
@@ -72,7 +72,7 @@ export const WORKS = [
     summary: 'Enemies-to-lovers, but make it the regular season. A rookie reporter, a leaked photo, and two men who are very bad at lying.',
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Enemies to Lovers', 'freeform'), T('Media', 'freeform'), T('Mutual Pining', 'freeform')],
     words: 12400, chapters: 3, chaptersTotal: 12, status: 'ongoing', updated: 'yesterday',
-    progress: 0, lastChapter: 0, palette: 6, unread: true,
+    progress: 0, lastChapter: 0, palette: 6, unread: true, subscribed: true,
   },
 ];
 
