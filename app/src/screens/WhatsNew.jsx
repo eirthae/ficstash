@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
-import { Cover, StatusBadge, fmtWords, useToast } from '../components/ui.jsx';
+import { StatusBadge, fmtWords, useToast } from '../components/ui.jsx';
 import { fetchNewMatches, markMatchSeen, requestSave } from '../lib/tags.js';
 
 // shared row: a new chapter on a followed work
@@ -36,10 +36,10 @@ function ChapterUpdateRow({ u, nav }) {
 // shared row: a new work matching a tracked tag (metadata-first)
 function MatchUpdateRow({ u, onOpen, onDismiss, onSave, saveState = 'idle' }) {
   const tagLabel = u.tag || 'Tracked tag';
+  const fandom = (u.fandom || '').split('–')[0].split(' - ')[0].trim();
   return (
     <div className="update pressable" onClick={() => onOpen(u)}>
-      <Cover title={u.title} author={u.author} fandom={u.fandom} palette={u.palette} w={50} h={70} />
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, paddingLeft: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span className="chip" style={{ background: 'color-mix(in srgb, var(--tag-relationship) 16%, transparent)', color: 'var(--tag-relationship)', height: 20 }}>
             <span className="swatch" style={{ background: 'var(--tag-relationship)' }}></span>{tagLabel.length > 22 ? tagLabel.slice(0, 21) + '…' : tagLabel}</span>
@@ -49,7 +49,9 @@ function MatchUpdateRow({ u, onOpen, onDismiss, onSave, saveState = 'idle' }) {
           </button>
         </div>
         <div className="story-title" style={{ fontSize: 14.5 }}>{u.title}</div>
+        <div className="story-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>by {u.author}</div>
         <div className="summary" style={{ WebkitLineClamp: 2 }}>{u.summary}</div>
+        {fandom && <div className="metarow" style={{ fontSize: 11.5 }}><Icon icon="solar:book-2-linear" size={13} /> {fandom}</div>}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
           <div className="metarow"><StatusBadge status={u.status} /><span>·</span><span>{fmtWords(u.words)}</span></div>
           <button
