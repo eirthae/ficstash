@@ -15,11 +15,19 @@ Optional:
                                per run (default 3 ≈ 60 works). Already-stored
                                history works are just re-flagged, so history
                                backfills a little each run rather than all at once.
+  OFFLINE_BACKFILL_MAX         how many not-yet-offline works to fully download
+                               per run (default 25; "all"/0 = no cap). Keeps the
+                               offline backfill gradual and polite to AO3.
 
-Flow: log in → three passes over the user's AO3 activity:
+Flow: log in → passes over the user's AO3 activity:
   1. Bookmarks   → full offline copies (metadata + chapter bodies).
-  2. Subscriptions → metadata only, flagged for new-chapter tracking.
-  3. Reading history → metadata only ("all-time usage"; new entries backfilled).
+  2. Subscriptions → register metadata, flagged for new-chapter tracking.
+  3. Reading history → register metadata ("all-time usage"; new entries backfilled).
+  4. Tracked tag groups → discover new matches.
+  5. Requested saves → full offline copies for in-app Save requests.
+  6. Offline backfill → download full chapter text for any work that isn't a
+     full offline copy yet (subscriptions/history), capped per run. The app is
+     offline-first: every work should become readable offline by default.
 Upserts omit reader-state columns so progress survives re-syncs, and unchanged
 works are never re-downloaded.
 """
@@ -36,6 +44,7 @@ from ficstash_worker.sources import get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_existing_works,
+    fetch_non_offline_works,
     fetch_tracked_groups,
     fetch_wanted_matches,
     make_client,
@@ -60,6 +69,9 @@ REQUIRED_ENV = (
 RATE_LIMIT_SECONDS = 6
 BACKOFF_SECONDS = (30, 60, 120)
 DEFAULT_HISTORY_MAX_PAGES = 3
+# Per-run cap on how many not-yet-offline works to fully download. Keeps the
+# backfill gradual (and AO3 traffic polite); the rest follow on later runs.
+DEFAULT_OFFLINE_BACKFILL_MAX = 25
 
 
 def check_env() -> None:
@@ -104,6 +116,18 @@ def _history_max_pages() -> int | None:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_HISTORY_MAX_PAGES
+
+
+def _offline_backfill_max() -> int | None:
+    raw = os.environ.get("OFFLINE_BACKFILL_MAX", "").strip()
+    if not raw:
+        return DEFAULT_OFFLINE_BACKFILL_MAX
+    if raw.lower() in ("0", "all", "none"):
+        return None  # download every pending work this run
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_OFFLINE_BACKFILL_MAX
 
 
 def main() -> None:
@@ -316,6 +340,44 @@ def main() -> None:
             save_failed += 1
             print(f"    requested {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
+
+    # ---- Pass 6: offline backfill → full copies for everything else --------
+    # The app is offline-first, so every work should be a full offline copy.
+    # Subscriptions/history land as metadata only; here we download their
+    # chapter bodies a capped batch at a time so the library fills in gradually
+    # without hammering AO3.
+    print("\n== Offline backfill ==")
+    backfill_max = _offline_backfill_max()
+    pending = fetch_non_offline_works(db, limit=backfill_max)
+    print(f"{len(pending)} work(s) need offline copies (max {backfill_max}).")
+    bf_done = bf_failed = 0
+    for row in pending:
+        wid = row["source_work_id"]
+        if wid in processed:
+            continue  # already fully fetched this run
+        try:
+            space()
+            meta = _with_backoff(
+                lambda: ao3.fetch_work_metadata(wid), what=f"backfill metadata {wid}"
+            )
+            work_uuid = upsert_work(db, meta, offline=True)
+            chapters = []
+            for n in range(1, meta.chapters + 1):
+                space()
+                chapters.append(
+                    _with_backoff(
+                        lambda n=n: ao3.fetch_chapter(wid, n),
+                        what=f"chapter {n} of {wid}",
+                    )
+                )
+            written = upsert_chapters(db, work_uuid, chapters)
+            processed.add(wid)
+            bf_done += 1
+            print(f"    backfilled {wid} — {written} chapter(s).")
+        except Exception as exc:  # noqa: BLE001
+            bf_failed += 1
+            print(f"    backfill {wid} skipped ({type(exc).__name__}: {exc})")
+    print(f"Offline backfill: {bf_done} downloaded, {bf_failed} failed.")
 
     print("\nSync complete.")
 

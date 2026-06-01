@@ -69,6 +69,29 @@ def fetch_existing_works(client: Client, source: str = "ao3") -> dict[str, dict]
     return {r["source_work_id"]: r for r in (resp.data or [])}
 
 
+def fetch_non_offline_works(
+    client: Client, source: str = "ao3", limit: int | None = None
+) -> list[dict]:
+    """Return stored works that don't yet have full offline chapter bodies.
+
+    Every work in the library should become a full offline copy (the app is
+    offline-first). Bookmarks are fetched whole on pass 1; subscriptions and
+    history start as metadata-only, so this backfills their chapter text on
+    later runs. Ordered most-recently-updated first and capped by `limit` so the
+    backfill stays gradual and polite to AO3.
+    """
+    query = (
+        client.table("works")
+        .select("id,source_work_id,chapters,words")
+        .eq("source", source)
+        .eq("offline", False)
+        .order("source_updated", desc=True)
+    )
+    if limit:
+        query = query.limit(limit)
+    return list(query.execute().data or [])
+
+
 def upsert_work(
     client: Client,
     meta: WorkMeta,

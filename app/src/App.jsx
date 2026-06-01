@@ -83,7 +83,7 @@ export default function App() {
 
   const renderTab = () => {
     const n = nav.current;
-    if (tab === 'library') return <LibraryScreen works={works} layout="list" nav={n} />;
+    if (tab === 'library') return <LibraryScreen works={works} layout="fandom" nav={n} />;
     if (tab === 'whatsnew') return <WhatsNewScreen chapters={NEW_CHAPTERS} matches={NEW_MATCHES} nav={n} />;
     if (tab === 'discover') return <DiscoverScreen nav={n} />;
     if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} nav={n} />;

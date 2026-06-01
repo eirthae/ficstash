@@ -95,7 +95,7 @@ export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitl
             </>
           ) : (
             <p style={{ color: 'var(--reader-text-dim)' }}>
-              This work hasn’t been downloaded yet. Bookmark it on AO3 (or tap Save on a match) and the next sync will fetch the full text for offline reading.
+              This work hasn’t been downloaded yet — it’s queued for offline download, and the next sync will fetch the full text so you can read it here.
             </p>
           )}
 

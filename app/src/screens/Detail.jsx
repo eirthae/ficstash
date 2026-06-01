@@ -142,7 +142,7 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
               <div style={{ padding: '16px 2px', fontSize: 13.5, lineHeight: 1.55, color: 'var(--text-tertiary)' }}>
                 {suggestion
                   ? 'Save this work and the next sync will download it for offline reading.'
-                  : "Chapters haven’t been downloaded yet. Bookmark it on AO3 (or Save it) and the next sync will fetch the full text."}
+                  : 'Queued for offline download — the next sync will fetch the full text so you can read it offline.'}
               </div>
             ) : base.map(ch => (
               <Fragment key={ch.n}>
