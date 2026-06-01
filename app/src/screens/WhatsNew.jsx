@@ -6,18 +6,19 @@ import { fetchNewMatches, markMatchSeen, requestSave } from '../lib/tags.js';
 
 // shared row: a new chapter on a followed work
 function ChapterUpdateRow({ u, nav }) {
+  const fandom = (u.fandom || '').split('–')[0].split(' - ')[0].trim();
   return (
     <div className="update pressable" onClick={() => nav.push('reader', { workId: u.workId, chapterTitle: u.chapter })}>
       {u.fresh && <span className="unew"></span>}
-      <Cover title={u.title} author={u.author} fandom={u.fandom} palette={u.palette} w={50} h={70} />
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, paddingLeft: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span className="chip" style={{ background: 'var(--accent-soft)', color: 'var(--accent)', height: 20 }}>
             <Icon icon="solar:bookmark-bold" size={12} /> New chapter</span>
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginLeft: 'auto' }}>{u.time}</span>
         </div>
         <div className="story-title" style={{ fontSize: 14.5 }}>{u.chapter}</div>
-        <div className="story-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.title} · {fmtWords(u.words)}</div>
+        <div className="story-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.title}</div>
+        {fandom && <div className="metarow" style={{ fontSize: 11.5 }}><Icon icon="solar:book-2-linear" size={13} /> {fandom} · {fmtWords(u.words)}</div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, fontSize: 11.5, color: 'var(--success)', fontWeight: 600 }}>
           <Icon icon="solar:check-circle-bold" size={13} /> Downloaded · ready to read
         </div>
