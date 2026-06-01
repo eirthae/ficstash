@@ -92,7 +92,7 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
               onClick={() => saveState === 'idle' && onSave(work)}
               disabled={saveState !== 'idle'}
               style={{ minWidth: 104 }}
-              title={saveState === 'queued' ? 'Will download on the next sync' : undefined}
+              title={saveState === 'queued' ? 'Downloading — sync started' : undefined}
             >
               {saveState === 'saved' ? <><Icon icon="solar:check-read-linear" size={16} /> In library</>
                 : saveState === 'queued' ? <><Icon icon="solar:clock-circle-linear" size={16} /> Queued</>

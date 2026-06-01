@@ -3,6 +3,7 @@ import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
 import { StatusBadge, fmtWords, useToast } from '../components/ui.jsx';
 import { fetchNewMatches, markMatchSeen, requestSave } from '../lib/tags.js';
+import { kickSync } from '../lib/sync.js';
 
 // shared row: a new chapter on a followed work
 function ChapterUpdateRow({ u, nav }) {
@@ -59,7 +60,7 @@ function MatchUpdateRow({ u, onOpen, onDismiss, onSave, saveState = 'idle' }) {
             disabled={saveState !== 'idle'}
             onClick={(e) => { e.stopPropagation(); if (saveState === 'idle') onSave(u); }}
             style={{ minWidth: 100 }}
-            title={saveState === 'queued' ? 'Will download on the next sync' : undefined}
+            title={saveState === 'queued' ? 'Downloading — sync started' : undefined}
           >
             {saveState === 'saved' ? <><Icon icon="solar:check-read-linear" size={15} /> In library</>
               : saveState === 'queued' ? <><Icon icon="solar:clock-circle-linear" size={15} /> Queued</>
@@ -102,9 +103,10 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
     markWanted(u, true);
     try {
       await requestSave(u.matchId || u.id);
+      kickSync();
       showToast(u.status !== 'complete'
-        ? 'Saved — subscribe on AO3 for new chapters'
-        : 'Saved — downloads in full on next sync', 'solar:check-circle-bold');
+        ? 'Saved — downloading; subscribe on AO3 for new chapters'
+        : 'Saved — starting download', 'solar:check-circle-bold');
     } catch {
       markWanted(u, false);
       showToast("Couldn't save — try again", 'solar:danger-triangle-linear');

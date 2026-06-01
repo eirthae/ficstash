@@ -6,6 +6,7 @@ import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
 import { fetchChapters } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
+import { kickSync } from '../lib/sync.js';
 
 export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
@@ -54,10 +55,11 @@ export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
     setSaveState('queued');
     try {
       await requestSave(work.matchId || work.id);
+      kickSync();
       onSaved?.();
       showToast(ongoing
-        ? 'Saved — subscribe on AO3 for new chapters'
-        : 'Saved — downloads in full on next sync', 'solar:check-circle-bold');
+        ? 'Saved — downloading; subscribe on AO3 for new chapters'
+        : 'Saved — starting download', 'solar:check-circle-bold');
     } catch {
       setSaveState('idle');
       showToast("Couldn't save — try again", 'solar:danger-triangle-linear');
@@ -118,7 +120,7 @@ export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
                 onClick={queueSave}
                 disabled={saveState !== 'idle'}
                 style={{ flex: 'none', width: 56, padding: 0 }}
-                title={saveState === 'saved' ? 'In your library' : saveState === 'queued' ? 'Will download on the next sync' : 'Save to library'}
+                title={saveState === 'saved' ? 'In your library' : saveState === 'queued' ? 'Downloading — sync started' : 'Save to library'}
               >
                 <Icon icon={saveState === 'saved' ? 'solar:check-read-linear' : saveState === 'queued' ? 'solar:clock-circle-linear' : 'solar:download-minimalistic-bold'} size={22} /></button>
             ) : (

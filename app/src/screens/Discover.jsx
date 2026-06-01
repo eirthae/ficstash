@@ -7,6 +7,7 @@ import {
   fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup,
   fetchMatches, markMatchSeen, markGroupSeen, autocompleteTags, requestSave,
 } from '../lib/tags.js';
+import { kickSync } from '../lib/sync.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
 
 // Languages you can browse straight from Discover. `code` is AO3's language_id
@@ -275,8 +276,8 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
 
   const save = (w) => {
     setItems((arr) => (arr || []).map((x) => (x.id === w.id ? { ...x, wanted: true } : x)));
-    requestSave(w.matchId || w.id).catch(() => {});
-    showToast('Queued — downloads on next sync', 'solar:clock-circle-linear');
+    requestSave(w.matchId || w.id).then(() => kickSync()).catch(() => {});
+    showToast('Saved — starting download', 'solar:download-minimalistic-linear');
   };
   const saveStateOf = (w) => (w.saved ? 'saved' : w.wanted ? 'queued' : 'idle');
 
