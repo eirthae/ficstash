@@ -15,7 +15,9 @@ export function LibraryCard({ work, onOpen }) {
         </div>
         <div className="summary" style={{ flex: 1 }}>{work.summary}</div>
         <div style={{ marginTop: 9 }}>
-          {work.progress >= 1 ? (
+          {work.offline === false ? (
+            <div className="metarow" style={{ color: 'var(--text-tertiary)' }}><Icon icon="solar:clock-circle-linear" size={14} /><span>Downloads on next sync</span></div>
+          ) : work.progress >= 1 ? (
             <div className="metarow"><Icon icon="solar:check-circle-bold" size={14} color="var(--success)" /><span>Finished</span></div>
           ) : work.progress > 0 ? (
             <>
@@ -44,9 +46,15 @@ export function GridCard({ work, onOpen }) {
       <div>
         {work.progress > 0 && work.progress < 1 && <div className="progress" style={{ marginBottom: 6 }}><i style={{ width: `${work.progress * 100}%` }}></i></div>}
         <div className="metarow" style={{ justifyContent: 'space-between' }}>
-          <span style={{ color: work.status === 'complete' ? 'var(--success)' : 'var(--warning)', fontWeight: 600 }}>
-            {work.progress >= 1 ? 'Finished' : work.progress > 0 ? `Ch ${work.lastChapter}/${work.chaptersTotal}` : work.status === 'complete' ? 'Complete' : 'Ongoing'}
-          </span>
+          {work.offline === false ? (
+            <span style={{ color: 'var(--text-tertiary)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Icon icon="solar:clock-circle-linear" size={13} /> Queued
+            </span>
+          ) : (
+            <span style={{ color: work.status === 'complete' ? 'var(--success)' : 'var(--warning)', fontWeight: 600 }}>
+              {work.progress >= 1 ? 'Finished' : work.progress > 0 ? `Ch ${work.lastChapter}/${work.chaptersTotal}` : work.status === 'complete' ? 'Complete' : 'Ongoing'}
+            </span>
+          )}
           <span>{fmtWords(work.words)}</span>
         </div>
       </div>

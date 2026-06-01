@@ -19,9 +19,15 @@ function ChapterUpdateRow({ u, nav }) {
         <div className="story-title" style={{ fontSize: 14.5 }}>{u.chapter}</div>
         <div className="story-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.title}</div>
         {fandom && <div className="metarow" style={{ fontSize: 11.5 }}><Icon icon="solar:book-2-linear" size={13} /> {fandom} · {fmtWords(u.words)}</div>}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, fontSize: 11.5, color: 'var(--success)', fontWeight: 600 }}>
-          <Icon icon="solar:check-circle-bold" size={13} /> Downloaded · ready to read
-        </div>
+        {u.fetched === false ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>
+            <Icon icon="solar:clock-circle-linear" size={13} /> Downloads on next sync
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, fontSize: 11.5, color: 'var(--success)', fontWeight: 600 }}>
+            <Icon icon="solar:check-circle-bold" size={13} /> Downloaded · ready to read
+          </div>
+        )}
       </div>
     </div>
   );

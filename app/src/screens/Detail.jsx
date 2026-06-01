@@ -44,6 +44,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
   const downloadedCount = base.filter(c => chStateOf(c) === 'done').length;
 
   const ongoing = work.status !== 'complete';
+  // Readable only when a full offline copy exists. Suggestions and metadata-only
+  // library works (offline === false) aren't downloaded yet; the sample/demo
+  // build leaves offline undefined, so those stay readable.
+  const readable = !suggestion && work.offline !== false;
 
   const queueSave = async () => {
     if (saveState !== 'idle') return;
@@ -97,10 +101,17 @@ export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
           </div>
 
           <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-            <button className="btn btn-lg btn-primary btn-block" onClick={() => openReader()}>
-              <Icon icon="solar:book-2-bold" size={20} />
-              {work.progress >= 1 ? 'Read again' : work.progress > 0 ? `Continue · Ch ${work.lastChapter}` : 'Start reading'}
-            </button>
+            {readable ? (
+              <button className="btn btn-lg btn-primary btn-block" onClick={() => openReader()}>
+                <Icon icon="solar:book-2-bold" size={20} />
+                {work.progress >= 1 ? 'Read again' : work.progress > 0 ? `Continue · Ch ${work.lastChapter}` : 'Start reading'}
+              </button>
+            ) : (
+              <button className="btn btn-lg btn-surface btn-block" disabled style={{ opacity: .85 }}>
+                <Icon icon="solar:clock-circle-linear" size={20} />
+                {suggestion ? 'Not saved yet' : 'Not downloaded yet'}
+              </button>
+            )}
             {suggestion ? (
               <button
                 className={`btn btn-lg ${saveState === 'idle' ? 'btn-flat' : 'btn-surface'}`}
