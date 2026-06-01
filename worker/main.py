@@ -25,7 +25,9 @@ Flow: log in → passes over the user's AO3 activity:
   3. Reading history → register metadata ("all-time usage"; new entries backfilled).
   4. Tracked tag groups → discover new matches.
   5. Requested saves → full offline copies for in-app Save requests.
-  6. Offline backfill → download full chapter text for any work that isn't a
+  6. Requested links → full offline copies of works added by pasted URL
+     (Royal Road, Scribble Hub, FFN, …) via FanFicFare.
+  7. Offline backfill → download full chapter text for any work that isn't a
      full offline copy yet (subscriptions/history), capped per run. The app is
      offline-first: every work should become readable offline by default.
 Upserts omit reader-state columns so progress survives re-syncs, and unchanged
@@ -46,6 +48,7 @@ from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_existing_works,
     fetch_non_offline_works,
+    fetch_requested_urls,
     fetch_tracked_groups,
     fetch_wanted_matches,
     make_client,
@@ -53,6 +56,7 @@ from ficstash_worker.supabase_io import (
     mark_group_checked,
     mark_in_history,
     mark_matches_saved,
+    mark_request,
     reset_empty_offline,
     upsert_chapters,
     upsert_tag_matches,
@@ -428,7 +432,59 @@ def main() -> None:
             print(f"    requested {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
 
-    # ---- Pass 6: offline backfill → full copies for everything else --------
+    # ---- Pass 6: requested links → full offline copies via FanFicFare ------
+    # Works the user added by pasting a URL in the app (Royal Road, Scribble
+    # Hub, FFN, …). Runs before the long backfill so a just-pasted link
+    # downloads promptly. Same per-chapter spacing as AO3 to stay polite.
+    print("\n== Requested links ==")
+    link_requests = fetch_requested_urls(db)
+    print(f"{len(link_requests)} link request(s).")
+    link_done = link_failed = 0
+    if link_requests:
+        from ficstash_worker.sources.link import LinkFetcher, UnsupportedSite
+
+        linker = LinkFetcher()
+        for req in link_requests:
+            rid = req["id"]
+            url = req["url"]
+            print(f"[link] {url}")
+            try:
+                mark_request(db, rid, status="fetching")
+                space()
+                meta, chap_list = linker.prepare(url)
+                work_uuid = upsert_work(db, meta)
+                chapters = []
+                for i, ch in enumerate(chap_list):
+                    space()
+                    chapters.append(linker.fetch_chapter(url, i, ch))
+                written = upsert_chapters(db, work_uuid, chapters)
+                if not written:
+                    mark_request(db, rid, status="error", error="No chapters fetched.")
+                    link_failed += 1
+                    print("    no chapters fetched.")
+                    continue
+                mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
+                mark_request(
+                    db,
+                    rid,
+                    status="done",
+                    source=meta.source,
+                    source_work_id=meta.source_work_id,
+                    title=meta.title,
+                )
+                link_done += 1
+                print(f"    downloaded — {written} chapter(s) from {meta.source}.")
+            except UnsupportedSite as exc:
+                mark_request(db, rid, status="error", error=f"Unsupported site: {exc}")
+                link_failed += 1
+                print(f"    unsupported site ({exc}).")
+            except Exception as exc:  # noqa: BLE001
+                mark_request(db, rid, status="error", error=f"{type(exc).__name__}: {exc}")
+                link_failed += 1
+                print(f"    skipped ({type(exc).__name__}: {exc})")
+    print(f"Requested links: {link_done} downloaded, {link_failed} failed.")
+
+    # ---- Pass 7: offline backfill → full copies for everything else --------
     # The app is offline-first, so every work should be a full offline copy.
     # Subscriptions/history land as metadata only; here we download their
     # chapter bodies a capped batch at a time so the library fills in gradually

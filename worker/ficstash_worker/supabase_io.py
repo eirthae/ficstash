@@ -123,6 +123,10 @@ def upsert_work(
         "source_updated": meta.updated,
         "palette": palette_for(meta.fandom or meta.title),
     }
+    # Store the canonical link only for works added by URL (non-AO3), so the
+    # app can link back out; AO3 rows leave source_url null.
+    if meta.source != "ao3" and meta.url:
+        payload["source_url"] = meta.url
     for key in ("offline", "bookmarked", "subscribed", "in_history"):
         if key in flags:
             payload[key] = bool(flags[key])
@@ -303,6 +307,26 @@ def reset_empty_offline(client: Client, source: str = "ao3") -> int:
         batch = empty_ids[i : i + chunk]
         client.table("works").update({"offline": False}).in_("id", batch).execute()
     return len(empty_ids)
+
+
+def fetch_requested_urls(client: Client) -> list[dict]:
+    """Return queued add-by-link requests (oldest first) the app submitted."""
+    resp = (
+        client.table("requested_urls")
+        .select("id,url")
+        .eq("status", "queued")
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return list(resp.data or [])
+
+
+def mark_request(client: Client, request_id: str, **fields) -> None:
+    """Update a link request's progress (status/source/source_work_id/title/error)."""
+    payload = {k: v for k, v in fields.items() if v is not None}
+    if not payload:
+        return
+    client.table("requested_urls").update(payload).eq("id", request_id).execute()
 
 
 def upsert_chapters(client: Client, work_id: str, chapters: list[Chapter]) -> int:

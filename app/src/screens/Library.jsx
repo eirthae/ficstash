@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
-import { EmptyState, useToast } from '../components/ui.jsx';
+import { EmptyState, useToast, Sheet } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { LibraryCard, GridCard } from '../components/cards.jsx';
 import { triggerSync } from '../lib/sync.js';
+import { requestUrl, fetchPendingLinks } from '../lib/links.js';
 
 // The fandom name without the author suffix ("Heated Rivalry – Rachel Reid" → "Heated Rivalry").
 function fandomName(work) {
@@ -15,6 +16,11 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
   const [toast, showToast] = useToast();
   const [syncing, setSyncing] = useState(false);
   const [status, setStatus] = useState('all');
+  const [showAdd, setShowAdd] = useState(false);
+  const [pendingLinks, setPendingLinks] = useState([]);
+
+  const reloadLinks = () => fetchPendingLinks().then(setPendingLinks).catch(() => {});
+  useEffect(() => { reloadLinks(); }, []);
 
   const doSync = async () => {
     if (syncing) return;
@@ -25,6 +31,11 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
     showToast(res.ok ? 'Sync started — new works arrive shortly.' : (res.error || 'Sync failed.'));
   };
   const syncAction = { icon: syncing ? 'solar:refresh-circle-bold' : 'solar:refresh-circle-linear', onClick: doSync };
+  const addAction = { icon: 'solar:add-circle-linear', onClick: () => setShowAdd(true) };
+  const addSheet = (
+    <AddLinkSheet open={showAdd} onClose={() => setShowAdd(false)} showToast={showToast}
+      onAdded={() => { setShowAdd(false); reloadLinks(); }} />
+  );
 
   if (works === null) {
     return (
@@ -49,39 +60,50 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
   if (!connected || ready.length === 0) {
     return (
       <div className="screen">
-        <Appbar large title="Library" />
+        <Appbar large title="Library" actions={[addAction]} />
+        {toast}
         <div className="scroll" style={{ display: 'flex' }}>
           <EmptyState icon="solar:book-minimalistic-linear" title="Nothing here yet"
             desc="Connect your AO3 account and your bookmarks will download into your private shelf."
             action={<button className="btn btn-lg btn-primary" onClick={() => nav.push('connect')}>
               <Icon icon="solar:link-circle-bold" size={20} /> Connect to AO3</button>} />
         </div>
+        {addSheet}
       </div>
     );
   }
 
   const archiveAction = { icon: 'solar:history-linear', onClick: () => nav.push('archive') };
 
-  // Status filter (All / Ongoing / Complete). Counts come from the full ready
-  // set so the labels stay stable as the user switches between them.
-  const ongoingCount = ready.filter(w => w.status !== 'complete').length;
-  const completeCount = ready.length - ongoingCount;
-  const shown = status === 'complete' ? ready.filter(w => w.status === 'complete')
-    : status === 'ongoing' ? ready.filter(w => w.status !== 'complete')
-    : ready;
+  // Works added by pasting a link (Royal Road, etc.) get their own section,
+  // separate from the AO3 library that fills the main list.
+  const linkWorks = ready.filter(w => w.source && w.source !== 'ao3');
+  const mainWorks = ready.filter(w => !w.source || w.source === 'ao3');
+
+  // Status filter (All / Ongoing / Complete) over the AO3 library. Counts come
+  // from the full set so the labels stay stable as the user switches.
+  const ongoingCount = mainWorks.filter(w => w.status !== 'complete').length;
+  const completeCount = mainWorks.length - ongoingCount;
+  const shown = status === 'complete' ? mainWorks.filter(w => w.status === 'complete')
+    : status === 'ongoing' ? mainWorks.filter(w => w.status !== 'complete')
+    : mainWorks;
   const label = status === 'complete' ? 'Complete' : status === 'ongoing' ? 'Ongoing' : 'All works';
+  const showLinks = linkWorks.length > 0 || pendingLinks.length > 0;
 
   return (
     <div className="screen">
-      <Appbar large title="Library" actions={[syncAction, archiveAction]} />
+      <Appbar large title="Library" actions={[addAction, syncAction, archiveAction]} />
       {toast}
       <div className="scroll">
-        <div className="seg" style={{ margin: '0 20px 16px' }}>
-          <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {ready.length}</button>
-          <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
-          <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
-        </div>
-        {shown.length === 0 ? (
+        {mainWorks.length > 0 && (
+          <div className="seg" style={{ margin: '0 20px 16px' }}>
+            <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {mainWorks.length}</button>
+            <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
+            <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+          </div>
+        )}
+        {mainWorks.length === 0 ? null
+          : shown.length === 0 ? (
           <div style={{ padding: '0 20px' }}>
             <EmptyState icon="solar:inbox-line-linear" title={`No ${label.toLowerCase()} works`}
               desc="Nothing here under this filter yet." />
@@ -99,8 +121,77 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
               <div className="libgrid">{shown.map(w => <GridCard key={w.id} work={w} onOpen={open} />)}</div>
             </div>
           )}
+        {showLinks && <LinkSection works={linkWorks} pending={pendingLinks} open={open} />}
+      </div>
+      {addSheet}
+    </div>
+  );
+}
+
+function prettyUrl(url) {
+  return (url || '').replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+}
+
+function LinkRequestRow({ req }) {
+  const failed = req.status === 'error';
+  const label = req.status === 'fetching' ? 'Downloading…' : failed ? 'Couldn’t download' : 'Queued for download';
+  const icon = failed ? 'solar:danger-triangle-bold' : req.status === 'fetching' ? 'solar:download-minimalistic-linear' : 'solar:clock-circle-linear';
+  const color = failed ? 'var(--danger, #f5455c)' : 'var(--text-tertiary)';
+  return (
+    <div className="libcard" style={{ marginBottom: 13 }}>
+      <div className="meta">
+        <div className="story-title" style={{ marginBottom: 2 }}>{req.title || prettyUrl(req.url)}</div>
+        <div className="story-sub" style={{ marginBottom: 7, wordBreak: 'break-all' }}>{prettyUrl(req.url)}</div>
+        <div className="metarow" style={{ color }}><Icon icon={icon} size={14} /><span>{label}</span></div>
+        {failed && req.error && <div className="summary" style={{ marginTop: 6 }}>{req.error}</div>}
       </div>
     </div>
+  );
+}
+
+function LinkSection({ works, pending, open }) {
+  return (
+    <div style={{ padding: '4px 20px 24px' }}>
+      <div className="section-label" style={{ marginBottom: 12 }}>Added by link · {works.length}</div>
+      {pending.map(r => <LinkRequestRow key={r.id} req={r} />)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+        {works.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
+      </div>
+    </div>
+  );
+}
+
+function AddLinkSheet({ open, onClose, onAdded, showToast }) {
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (busy || !url.trim()) return;
+    setBusy(true);
+    const res = await requestUrl(url);
+    setBusy(false);
+    if (res.ok) {
+      setUrl('');
+      showToast('Downloading… it’ll appear here shortly.');
+      onAdded && onAdded();
+    } else {
+      showToast(res.error || 'Could not add link.', 'solar:danger-triangle-bold');
+    }
+  };
+  return (
+    <Sheet open={open} onClose={onClose} title="Add a work by link">
+      <div style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
+        Paste a story link — Royal Road, Scribble Hub, FanFiction.net and many more. FicStash downloads a full offline copy.
+      </div>
+      <div className="searchfield" style={{ marginBottom: 14 }}>
+        <Icon icon="solar:link-linear" size={20} color="var(--text-tertiary)" />
+        <input placeholder="https://www.royalroad.com/fiction/…" value={url}
+          onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()}
+          autoCapitalize="off" autoCorrect="off" spellCheck={false} inputMode="url" />
+      </div>
+      <button className="btn btn-lg btn-primary" style={{ width: '100%' }} onClick={submit} disabled={busy || !url.trim()}>
+        {busy ? 'Adding…' : <><Icon icon="solar:download-minimalistic-bold" size={18} /> Download work</>}
+      </button>
+    </Sheet>
   );
 }
 
