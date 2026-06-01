@@ -157,7 +157,8 @@ def main() -> None:
     existing = fetch_existing_works(db)
     print(f"{len(existing)} work(s) already in the library.")
 
-    processed: set[str] = set()  # work ids we've already fetched this run
+    processed: set[str] = set()  # work ids whose metadata we fetched this run
+    have_offline: set[str] = set()  # work ids whose chapter text we stored this run
     request_count = 0
 
     def space() -> None:
@@ -221,6 +222,7 @@ def main() -> None:
                 written = upsert_chapters(db, work_uuid, chapters)
                 if written:
                     mark_flag(db, [wid], "offline")
+                    have_offline.add(wid)
                 new_count += is_new
                 updated_count += not is_new
                 tag = "NEW" if is_new else "UPDATED"
@@ -388,8 +390,8 @@ def main() -> None:
     print(f"{len(wanted)} work(s) requested.")
     saved_count = save_failed = 0
     for wid in wanted:
-        if wid in processed:
-            # Already fetched this run (e.g. also a bookmark) — just flag it.
+        if wid in have_offline:
+            # Already downloaded in full this run (e.g. also a bookmark) — just flag it.
             mark_matches_saved(db, wid)
             saved_count += 1
             continue
@@ -418,6 +420,7 @@ def main() -> None:
             mark_flag(db, [wid], "offline")
             mark_matches_saved(db, wid)
             processed.add(wid)
+            have_offline.add(wid)
             saved_count += 1
             print(f"    saved {wid} — {written} chapter(s).")
         except Exception as exc:  # noqa: BLE001
@@ -443,8 +446,8 @@ def main() -> None:
     bf_done = bf_failed = 0
     for row in pending:
         wid = row["source_work_id"]
-        if wid in processed:
-            continue  # already fully fetched this run
+        if wid in have_offline:
+            continue  # already downloaded in full this run
         try:
             space()
             meta = _with_backoff(
@@ -469,6 +472,7 @@ def main() -> None:
                 continue
             mark_flag(db, [wid], "offline")
             processed.add(wid)
+            have_offline.add(wid)
             bf_done += 1
             print(f"    backfilled {wid} — {written} chapter(s).")
         except Exception as exc:  # noqa: BLE001
