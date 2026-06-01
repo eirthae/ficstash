@@ -62,6 +62,9 @@ jobs:
             npx cap add android
           fi
 
+      - name: Generate app icons
+        run: npx --yes @capacitor/assets generate --android --assetPath resources
+
       - name: Sync web bundle into Android
         run: npx cap sync android
 
