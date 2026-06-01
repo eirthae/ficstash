@@ -192,7 +192,9 @@ def main() -> None:
                 filtered += 1
                 print(f"    filtered — language {meta.language!r} not in allowlist.")
                 continue
-            work_uuid = upsert_work(db, meta, bookmarked=True, offline=True)
+            # Don't flag offline yet — only after chapter text is actually
+            # stored, so a work is never shown as "downloaded" while empty.
+            work_uuid = upsert_work(db, meta, bookmarked=True)
             processed.add(wid)
 
             prev = existing.get(wid)
@@ -216,6 +218,8 @@ def main() -> None:
                         )
                     )
                 written = upsert_chapters(db, work_uuid, chapters)
+                if written:
+                    mark_flag(db, [wid], "offline")
                 new_count += is_new
                 updated_count += not is_new
                 tag = "NEW" if is_new else "UPDATED"
@@ -386,7 +390,7 @@ def main() -> None:
             meta = _with_backoff(
                 lambda: ao3.fetch_work_metadata(wid), what=f"requested metadata {wid}"
             )
-            work_uuid = upsert_work(db, meta, offline=True)
+            work_uuid = upsert_work(db, meta)
             chapters = []
             for n in range(1, meta.chapters + 1):
                 space()
@@ -397,6 +401,13 @@ def main() -> None:
                     )
                 )
             written = upsert_chapters(db, work_uuid, chapters)
+            if not written:
+                # No text fetched — leave it un-flagged and still wanted so a
+                # later run retries, rather than showing an empty work.
+                save_failed += 1
+                print(f"    requested {wid} — no chapters fetched, will retry.")
+                continue
+            mark_flag(db, [wid], "offline")
             mark_matches_saved(db, wid)
             processed.add(wid)
             saved_count += 1
@@ -425,7 +436,7 @@ def main() -> None:
             meta = _with_backoff(
                 lambda: ao3.fetch_work_metadata(wid), what=f"backfill metadata {wid}"
             )
-            work_uuid = upsert_work(db, meta, offline=True)
+            work_uuid = upsert_work(db, meta)
             chapters = []
             for n in range(1, meta.chapters + 1):
                 space()
@@ -436,6 +447,13 @@ def main() -> None:
                     )
                 )
             written = upsert_chapters(db, work_uuid, chapters)
+            if not written:
+                # Leave offline=False so a later run retries this work instead
+                # of marking it downloaded while it has no readable text.
+                bf_failed += 1
+                print(f"    backfill {wid} — no chapters fetched, will retry.")
+                continue
+            mark_flag(db, [wid], "offline")
             processed.add(wid)
             bf_done += 1
             print(f"    backfilled {wid} — {written} chapter(s).")
