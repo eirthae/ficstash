@@ -40,6 +40,7 @@ import time
 
 from dotenv import load_dotenv
 
+from ficstash_worker.lang import allowed_language_set, language_allowed
 from ficstash_worker.sources import get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
@@ -137,6 +138,15 @@ def main() -> None:
     ao3 = get_source("ao3")
     db = make_client()
 
+    # Only import works in languages the user can read; everything else is
+    # dropped before it ever reaches the library or tag-match discovery.
+    allowed_langs = allowed_language_set()
+
+    def keep_language(meta) -> bool:
+        return language_allowed(meta.language, allowed_langs)
+
+    print(f"Language allowlist: {', '.join(sorted(allowed_langs))}")
+
     print("Logging in to AO3…")
     ao3.authenticate(os.environ["AO3_USERNAME"], os.environ["AO3_PASSWORD"])
 
@@ -162,15 +172,24 @@ def main() -> None:
     total = len(bookmarks)
     print(f"Found {total} bookmarked work(s).")
 
-    new_count = updated_count = unchanged = failed = 0
+    new_count = updated_count = unchanged = failed = filtered = 0
     for i, stub in enumerate(bookmarks, start=1):
         wid = stub.source_work_id
+        # Cheap pre-filter on the listing-blurb language — skips a request when
+        # the work is plainly in a language we don't import.
+        if not keep_language(stub):
+            filtered += 1
+            continue
         print(f"[{i}/{total}] {stub.title or wid} (id {wid})")
         try:
             space()
             meta = _with_backoff(
                 lambda: ao3.fetch_work_metadata(wid), what=f"metadata {wid}"
             )
+            if not keep_language(meta):
+                filtered += 1
+                print(f"    filtered — language {meta.language!r} not in allowlist.")
+                continue
             work_uuid = upsert_work(db, meta, bookmarked=True, offline=True)
             processed.add(wid)
 
@@ -204,7 +223,7 @@ def main() -> None:
             print(f"    skipped (error: {type(exc).__name__}: {exc})")
     print(
         f"Bookmarks: {new_count} new, {updated_count} updated, "
-        f"{unchanged} unchanged, {failed} failed."
+        f"{unchanged} unchanged, {filtered} filtered, {failed} failed."
     )
 
     # ---- Pass 2: subscriptions → metadata + new-chapter tracking -----------
@@ -213,18 +232,24 @@ def main() -> None:
         ao3.import_subscriptions, what="subscriptions", broad=True
     )
     print(f"Found {len(subs)} subscription(s).")
-    sub_fetched = sub_flagged = sub_failed = 0
+    sub_fetched = sub_flagged = sub_failed = sub_filtered = 0
     already_subbed: list[str] = []
     for stub in subs:
         wid = stub.source_work_id
         if wid in processed:
             already_subbed.append(wid)  # bookmarked too — just set the flag
             continue
+        if not keep_language(stub):
+            sub_filtered += 1
+            continue
         try:
             space()
             meta = _with_backoff(
                 lambda: ao3.fetch_work_metadata(wid), what=f"sub metadata {wid}"
             )
+            if not keep_language(meta):
+                sub_filtered += 1
+                continue
             upsert_work(db, meta, subscribed=True)
             processed.add(wid)
             sub_fetched += 1
@@ -235,7 +260,7 @@ def main() -> None:
         sub_flagged = mark_flag(db, already_subbed, "subscribed")
     print(
         f"Subscriptions: {sub_fetched} fetched, {sub_flagged} flagged, "
-        f"{sub_failed} failed."
+        f"{sub_filtered} filtered, {sub_failed} failed."
     )
 
     # ---- Pass 3: reading history → metadata only ("all-time usage") --------
@@ -247,7 +272,7 @@ def main() -> None:
         broad=True,
     )
     print(f"Found {len(history)} history work(s) (max_pages={max_pages}).")
-    hist_fetched = hist_failed = 0
+    hist_fetched = hist_failed = hist_filtered = 0
     flag_only: dict[str, str | None] = {}  # source_work_id -> last-read ISO date
     for stub in history:
         wid = stub.source_work_id
@@ -255,11 +280,17 @@ def main() -> None:
             # already stored — just mark in_history + stamp the read date
             flag_only[wid] = stub.history_read_at
             continue
+        if not keep_language(stub):
+            hist_filtered += 1
+            continue
         try:
             space()
             meta = _with_backoff(
                 lambda: ao3.fetch_work_metadata(wid), what=f"history metadata {wid}"
             )
+            if not keep_language(meta):
+                hist_filtered += 1
+                continue
             upsert_work(
                 db, meta, in_history=True, history_read_at=stub.history_read_at
             )
@@ -271,7 +302,7 @@ def main() -> None:
     hist_flagged = mark_in_history(db, flag_only) if flag_only else 0
     print(
         f"History: {hist_fetched} newly stored, {hist_flagged} flagged, "
-        f"{hist_failed} failed."
+        f"{hist_filtered} filtered, {hist_failed} failed."
     )
 
     # ---- Pass 4: tracked tag groups → discover new matches -----------------
@@ -297,9 +328,12 @@ def main() -> None:
                 what=f"tag search '{label}'",
                 broad=True,
             )
-            written = upsert_tag_matches(db, g["id"], metas)
+            kept = [m for m in metas if keep_language(m)]
+            dropped = len(metas) - len(kept)
+            written = upsert_tag_matches(db, g["id"], kept)
             mark_group_checked(db, g["id"])
-            print(f"    '{label}': {written} match(es).")
+            note = f" ({dropped} filtered by language)" if dropped else ""
+            print(f"    '{label}': {written} match(es).{note}")
         except Exception as exc:  # noqa: BLE001
             print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
 

@@ -24,6 +24,9 @@ class WorkMeta:
     summary: str = ""
     # Tag objects in the app's shape: [{"t": name, "k": kind}, ...]
     tags: list[dict] = field(default_factory=list)
+    # Native-script language name as AO3 displays it ("English", "日本語",
+    # "Русский", "Հայերեն", ...). Empty/"Unknown" when not yet determined.
+    language: str = ""
     words: int = 0
     chapters: int = 0
     chapters_total: int | None = None

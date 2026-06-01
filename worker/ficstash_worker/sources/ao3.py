@@ -164,6 +164,7 @@ class AO3Source(Source):
             source_work_id=wid,
             title=getattr(w, "title", "") or "",
             author=_first_author(w),
+            language=_language(w),
             url=f"https://archiveofourown.org/works/{wid}",
         )
 
@@ -287,6 +288,19 @@ def _to_iso(value) -> str | None:
     return iso() if callable(iso) else str(value)
 
 
+def _language(work) -> str:
+    """Read a work's language defensively.
+
+    On search results / listing stubs the language comes from the blurb and is a
+    plain attribute. On unloaded works without it, the `language` cached_property
+    would touch a missing soup and raise — hence the broad guard.
+    """
+    try:
+        return (getattr(work, "language", "") or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _first_author(work: "AO3.Work") -> str:
     authors = getattr(work, "authors", None)
     if authors:
@@ -355,6 +369,7 @@ def _work_to_meta(source: str, source_work_id: str, work: "AO3.Work") -> WorkMet
         pairing=pairing,
         summary=getattr(work, "summary", "") or "",
         tags=_tags(work),
+        language=_language(work),
         words=int(getattr(work, "words", 0) or 0),
         chapters=nchapters,
         chapters_total=chapters_total,
