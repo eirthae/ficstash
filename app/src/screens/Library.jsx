@@ -34,9 +34,11 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
     );
   }
 
+  const archiveAction = { icon: 'solar:history-linear', onClick: () => nav.push('archive') };
+
   return (
     <div className="screen">
-      <Appbar large title="Library" />
+      <Appbar large title="Library" actions={[archiveAction]} />
       <div className="scroll">
         {layout === 'shelves' ? <Shelves works={works} open={open} />
           : layout === 'list' ? (

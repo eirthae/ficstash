@@ -102,6 +102,8 @@ class AO3Source(Source):
         This is the closest thing AO3 exposes to "all-time usage" — every work
         the user has opened (kudos-given history is NOT exposed by AO3). Stored
         metadata-only; we never download full chapter bodies for history items.
+        Each stub carries `history_read_at` (AO3's "last visited" date) so the
+        app can filter by the year the work was read.
         `max_pages` bounds how many history listing pages we walk per run.
         """
         s = self._require_session()
@@ -114,8 +116,16 @@ class AO3Source(Source):
             if _is_rate_limited(exc):
                 raise RateLimitError(str(exc)) from exc
             raise
-        works = [r[0] if isinstance(r, (tuple, list)) else r for r in (rows or [])]
-        return self._stubs(works)
+        out: list[WorkMeta] = []
+        for r in rows or []:
+            work = r[0] if isinstance(r, (tuple, list)) else r
+            last_visit = r[2] if isinstance(r, (tuple, list)) and len(r) > 2 else None
+            stub = self._stub_one(work)
+            if stub is None:
+                continue
+            stub.history_read_at = _to_iso(last_visit)
+            out.append(stub)
+        return out
 
     def import_subscriptions(self) -> list[WorkMeta]:
         """Return the works the user subscribes to (followed for new chapters)."""
@@ -139,19 +149,23 @@ class AO3Source(Source):
         """Build lightweight WorkMeta (id + title) from a list of AO3 works."""
         out: list[WorkMeta] = []
         for w in works or []:
-            wid = str(getattr(w, "id", "") or "")
-            if not wid:
-                continue
-            out.append(
-                WorkMeta(
-                    source=self.id,
-                    source_work_id=wid,
-                    title=getattr(w, "title", "") or "",
-                    author=_first_author(w),
-                    url=f"https://archiveofourown.org/works/{wid}",
-                )
-            )
+            stub = self._stub_one(w)
+            if stub is not None:
+                out.append(stub)
         return out
+
+    def _stub_one(self, w) -> WorkMeta | None:
+        """Build one lightweight WorkMeta (id + title) from an AO3 work."""
+        wid = str(getattr(w, "id", "") or "")
+        if not wid:
+            return None
+        return WorkMeta(
+            source=self.id,
+            source_work_id=wid,
+            title=getattr(w, "title", "") or "",
+            author=_first_author(w),
+            url=f"https://archiveofourown.org/works/{wid}",
+        )
 
     # ---- per-work metadata + chapters --------------------------------------
     def fetch_work_metadata(self, source_work_id: str) -> WorkMeta:
@@ -265,6 +279,14 @@ class AO3Source(Source):
 
 
 # ---- helpers ---------------------------------------------------------------
+def _to_iso(value) -> str | None:
+    """Normalize AO3's last-visited value (datetime/str) to an ISO string."""
+    if value is None:
+        return None
+    iso = getattr(value, "isoformat", None)
+    return iso() if callable(iso) else str(value)
+
+
 def _first_author(work: "AO3.Work") -> str:
     authors = getattr(work, "authors", None)
     if authors:

@@ -41,6 +41,7 @@ from ficstash_worker.supabase_io import (
     make_client,
     mark_flag,
     mark_group_checked,
+    mark_in_history,
     mark_matches_saved,
     upsert_chapters,
     upsert_tag_matches,
@@ -223,24 +224,27 @@ def main() -> None:
     )
     print(f"Found {len(history)} history work(s) (max_pages={max_pages}).")
     hist_fetched = hist_failed = 0
-    flag_only: list[str] = []
+    flag_only: dict[str, str | None] = {}  # source_work_id -> last-read ISO date
     for stub in history:
         wid = stub.source_work_id
         if wid in processed or wid in existing:
-            flag_only.append(wid)  # already stored — just mark in_history
+            # already stored — just mark in_history + stamp the read date
+            flag_only[wid] = stub.history_read_at
             continue
         try:
             space()
             meta = _with_backoff(
                 lambda: ao3.fetch_work_metadata(wid), what=f"history metadata {wid}"
             )
-            upsert_work(db, meta, in_history=True)
+            upsert_work(
+                db, meta, in_history=True, history_read_at=stub.history_read_at
+            )
             processed.add(wid)
             hist_fetched += 1
         except Exception as exc:  # noqa: BLE001
             hist_failed += 1
             print(f"    history {wid} skipped ({type(exc).__name__}: {exc})")
-    hist_flagged = mark_flag(db, flag_only, "in_history") if flag_only else 0
+    hist_flagged = mark_in_history(db, flag_only) if flag_only else 0
     print(
         f"History: {hist_fetched} newly stored, {hist_flagged} flagged, "
         f"{hist_failed} failed."

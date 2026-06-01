@@ -23,6 +23,11 @@ function mapWork(row) {
     frozen: row.frozen,
     frozenDate: row.frozen_date,
     unread: row.unread,
+    offline: row.offline,
+    bookmarked: row.bookmarked,
+    subscribed: row.subscribed,
+    inHistory: row.in_history,
+    historyReadAt: row.history_read_at,
   };
 }
 

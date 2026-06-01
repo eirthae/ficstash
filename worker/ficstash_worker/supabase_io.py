@@ -69,12 +69,19 @@ def fetch_existing_works(client: Client, source: str = "ao3") -> dict[str, dict]
     return {r["source_work_id"]: r for r in (resp.data or [])}
 
 
-def upsert_work(client: Client, meta: WorkMeta, **flags: bool) -> str:
+def upsert_work(
+    client: Client,
+    meta: WorkMeta,
+    *,
+    history_read_at: str | None = None,
+    **flags: bool,
+) -> str:
     """Insert/update one work and return its uuid primary key.
 
     Omits progress/last_chapter/unread/frozen/frozen_date so the reader's state
     survives re-syncs. `flags` (offline/bookmarked/subscribed/in_history) are
     only written when provided, so one sync pass never clobbers another's flag.
+    `history_read_at` (the AO3 last-visited date) is written only when supplied.
     """
     payload = {
         "source": meta.source,
@@ -96,6 +103,8 @@ def upsert_work(client: Client, meta: WorkMeta, **flags: bool) -> str:
     for key in ("offline", "bookmarked", "subscribed", "in_history"):
         if key in flags:
             payload[key] = bool(flags[key])
+    if history_read_at is not None:
+        payload["history_read_at"] = history_read_at
     resp = (
         client.table("works")
         .upsert(payload, on_conflict="source,source_work_id")
@@ -170,6 +179,29 @@ def mark_flag(
         "source_work_id", ids
     ).execute()
     return len(ids)
+
+
+def mark_in_history(
+    client: Client, reads: dict[str, str | None], source: str = "ao3"
+) -> int:
+    """Flag already-stored works as in_history and stamp their last-read date.
+
+    `reads` maps source_work_id -> ISO last-visited date (or None). Works sharing
+    the same read date are updated together to keep this to a few writes.
+    """
+    if not reads:
+        return 0
+    by_date: dict[str | None, list[str]] = {}
+    for wid, read_at in reads.items():
+        by_date.setdefault(read_at, []).append(wid)
+    for read_at, ids in by_date.items():
+        payload: dict = {"in_history": True}
+        if read_at is not None:
+            payload["history_read_at"] = read_at
+        client.table("works").update(payload).eq("source", source).in_(
+            "source_work_id", ids
+        ).execute()
+    return len(reads)
 
 
 def fetch_wanted_matches(client: Client, source: str = "ao3") -> list[str]:
