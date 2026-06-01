@@ -32,7 +32,7 @@ export function Appbar({ title, large, sub, back, actions }) {
 }
 
 const TABS = [
-  { id: 'library', label: 'Library', icon: 'solar:books-minimalistic-linear', iconOn: 'solar:books-minimalistic-bold' },
+  { id: 'library', label: 'Library', icon: 'solar:book-minimalistic-linear', iconOn: 'solar:book-minimalistic-bold' },
   { id: 'whatsnew', label: "What's New", icon: 'solar:bell-linear', iconOn: 'solar:bell-bold', badge: true },
   { id: 'discover', label: 'Discover', icon: 'solar:compass-linear', iconOn: 'solar:compass-bold' },
   { id: 'settings', label: 'Settings', icon: 'solar:settings-linear', iconOn: 'solar:settings-bold' },

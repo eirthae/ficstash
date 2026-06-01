@@ -1,17 +1,19 @@
 import { Fragment, useState, useEffect } from 'react';
 import Icon from '../components/Icon.jsx';
-import { Cover, StatusBadge, FrozenBadge, TagChip, fmtWords, useToast } from '../components/ui.jsx';
+import { StatusBadge, FrozenBadge, TagChip, fmtWords, useToast } from '../components/ui.jsx';
 import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
 import { fetchChapters } from '../lib/library.js';
+import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 
 export function StoryDetailScreen({ work, suggestion, nav }) {
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
   const total = work.chaptersTotal || work.chapters || 1;
 
-  // Real downloaded chapters for this work; suggestions/sample fall back to a
-  // placeholder list so the page always renders something.
+  // Real downloaded chapters for this work. When connected to Supabase we show
+  // only real data — an empty list means nothing's been downloaded yet. The
+  // sample chapter list is used only in the unconnected demo build.
   const [live, setLive] = useState(null);
   useEffect(() => {
     if (suggestion) { setLive([]); return; }
@@ -24,7 +26,9 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
 
   const base = (live && live.length)
     ? live
-    : CHAPTERS.slice(0, total).map(c => ({ ...c, state: suggestion ? 'idle' : c.state }));
+    : hasSupabase
+      ? []
+      : CHAPTERS.slice(0, total).map(c => ({ ...c, state: suggestion ? 'idle' : c.state }));
   const [chState, setChState] = useState({});
   // For suggestions, Save is a request to the worker (idle → queued → saved);
   // for library works there's nothing to save, so the button opens AO3 instead.
@@ -67,10 +71,8 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
       </div>
 
       <div className="scroll" style={{ position: 'relative', zIndex: 2 }}>
-        <div style={{ padding: '6px 20px 0', display: 'flex', gap: 16, alignItems: 'flex-end' }}>
-          <Cover title={work.title} author={work.author} fandom={work.fandom} palette={work.palette} w={108} h={150}
-            style={{ boxShadow: '0 12px 30px -8px rgba(0,0,0,.6)' }} />
-          <div style={{ flex: 1, minWidth: 0, paddingBottom: 4 }}>
+        <div style={{ padding: '48px 20px 0' }}>
+          <div style={{ minWidth: 0, paddingBottom: 4 }}>
             <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#fff', opacity: .9, marginBottom: 6 }}>{work.fandom.split('–')[0].trim()}</div>
             <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, lineHeight: 1.12, color: '#fff', marginBottom: 6 }}>{work.title}</div>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,.85)', fontWeight: 500 }}>by {work.author}</div>
@@ -136,7 +138,13 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
             <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{downloadedCount}/{total} downloaded</span>
           </div>
           <div>
-            {base.map(ch => (
+            {base.length === 0 ? (
+              <div style={{ padding: '16px 2px', fontSize: 13.5, lineHeight: 1.55, color: 'var(--text-tertiary)' }}>
+                {suggestion
+                  ? 'Save this work and the next sync will download it for offline reading.'
+                  : "Chapters haven’t been downloaded yet. Bookmark it on AO3 (or Save it) and the next sync will fetch the full text."}
+              </div>
+            ) : base.map(ch => (
               <Fragment key={ch.n}>
                 <ChapterRow ch={ch} current={!work.frozen && ch.n === work.lastChapter} fetchState={chStateOf(ch)}
                   onOpen={() => openReader(ch)} onFetch={fetchCh} />

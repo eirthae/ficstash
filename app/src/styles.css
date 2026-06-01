@@ -116,7 +116,7 @@ input,textarea { font-family:inherit; }
 
 /* the scrollable app body */
 .viewport { position:relative; flex:1; min-height:0; overflow:hidden; background:var(--surface); }
-.screen { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; }
+.screen { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--surface); }
 .scroll { flex:1; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; }
 
 /* screen push/pop transitions */

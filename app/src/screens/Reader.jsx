@@ -3,6 +3,7 @@ import Icon from '../components/Icon.jsx';
 import { Sheet, fmtWords } from '../components/ui.jsx';
 import { WORKS, CHAPTERS, READER_PARAS } from '../data/sample.js';
 import { fetchChapters } from '../lib/library.js';
+import { hasSupabase } from '../lib/supabase.js';
 
 export const READER_FONTS = [
   { value: 'serif', label: 'Serif', css: 'var(--font-serif)' },
@@ -28,11 +29,17 @@ export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitl
   }, [work.id]);
 
   const hasReal = chapters && chapters.length > 0;
-  const total = hasReal ? chapters.length : (work.chaptersTotal || work.chapters || CHAPTERS.length);
+  // Sample prose only renders in the unconnected demo build. When connected,
+  // an undownloaded work shows an honest message — never fabricated chapters.
+  const demo = !hasSupabase;
+  const total = hasReal ? chapters.length
+    : demo ? (work.chaptersTotal || work.chapters || CHAPTERS.length)
+    : (work.chaptersTotal || work.chapters || 1);
   const [cur, setCur] = useState(chapterN || work.lastChapter || 1);
   const curChapter = hasReal
     ? (chapters.find(c => c.n === cur) || chapters[Math.min(cur, chapters.length) - 1])
-    : (CHAPTERS[Math.min(cur, CHAPTERS.length) - 1] || CHAPTERS[0]);
+    : demo ? (CHAPTERS[Math.min(cur, CHAPTERS.length) - 1] || CHAPTERS[0])
+    : null;
   const ch = curChapter || { title: '', words: 0 };
   const [chrome, setChrome] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
@@ -75,20 +82,24 @@ export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitl
         <div className="reader-article" style={articleStyle}>
           <div className="ch-head">
             <div className="ch-kicker">Chapter {cur} of {total}</div>
-            <div className="ch-h">{chapterTitle && cur === chapterN ? chapterTitle : ch.title}</div>
+            <div className="ch-h">{!hasReal && !demo ? work.title : (chapterTitle && cur === chapterN ? chapterTitle : ch.title)}</div>
           </div>
           {hasReal ? (
             curChapter && curChapter.content
               ? <div className="chapter-body" dangerouslySetInnerHTML={{ __html: curChapter.content }} />
               : <p style={{ color: 'var(--reader-text-dim)' }}>This chapter hasn’t been downloaded yet.</p>
-          ) : (
+          ) : demo ? (
             <>
               {READER_PARAS.map((p, i) => <p key={i}>{p}</p>)}
               {READER_PARAS.slice(0, 4).map((p, i) => <p key={'b' + i}>{p}</p>)}
             </>
+          ) : (
+            <p style={{ color: 'var(--reader-text-dim)' }}>
+              This work hasn’t been downloaded yet. Bookmark it on AO3 (or tap Save on a match) and the next sync will fetch the full text for offline reading.
+            </p>
           )}
 
-          <div className="eoc">
+          <div className="eoc" style={{ display: !hasReal && !demo ? 'none' : undefined }}>
             <div className="star"><span className="ln"></span><Icon icon="solar:asterisk-linear" size={16} /><span className="ln"></span></div>
             {cur < total ? (
               <button className="nextbtn pressable" onClick={(e) => { e.stopPropagation(); goCh(cur + 1); }}>
@@ -135,7 +146,7 @@ export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitl
       </div>
 
       <ReaderSettingsSheet open={showSettings} onClose={() => setShowSettings(false)} settings={settings} setSettings={setSettings} />
-      <ReaderTOCSheet open={showTOC} onClose={() => setShowTOC(false)} total={total} cur={cur} chapters={hasReal ? chapters : null} onPick={(n) => { goCh(n); setShowTOC(false); }} />
+      <ReaderTOCSheet open={showTOC} onClose={() => setShowTOC(false)} total={total} cur={cur} chapters={hasReal ? chapters : null} demo={demo} onPick={(n) => { goCh(n); setShowTOC(false); }} />
     </div>
   );
 }
@@ -193,11 +204,16 @@ function SheetStepperRow({ label, value, onMinus, onPlus }) {
   );
 }
 
-function ReaderTOCSheet({ open, onClose, total, cur, chapters, onPick }) {
-  const list = chapters && chapters.length ? chapters : CHAPTERS.slice(0, total);
+function ReaderTOCSheet({ open, onClose, total, cur, chapters, demo, onPick }) {
+  const list = chapters && chapters.length ? chapters : demo ? CHAPTERS.slice(0, total) : [];
   return (
     <Sheet open={open} onClose={onClose} reader title="Chapters" maxH="78%">
       <div style={{ paddingBottom: 8 }}>
+        {list.length === 0 && (
+          <div style={{ padding: '12px 2px', fontSize: 13.5, lineHeight: 1.5, color: 'var(--reader-text-dim)' }}>
+            No chapters downloaded yet.
+          </div>
+        )}
         {list.map(ch => (
           <button key={ch.n} onClick={() => onPick(ch.n)} className="chrow pressable" style={{ width: '100%', textAlign: 'left' }}>
             <div className="chnum" style={{ color: ch.n === cur ? 'var(--reader-accent)' : 'var(--reader-text-dim)' }}>{ch.n === cur ? <Icon icon="solar:bookmark-bold" size={15} /> : ch.n}</div>

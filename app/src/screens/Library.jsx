@@ -1,7 +1,7 @@
 import { Appbar } from '../components/chrome.jsx';
 import { EmptyState } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
-import { LibraryCard, GridCard, ContinueCard } from '../components/cards.jsx';
+import { LibraryCard, GridCard } from '../components/cards.jsx';
 
 export function LibraryScreen({ works, layout = 'grid', connected = true, nav }) {
   const open = (w) => nav.push('detail', { work: w });
@@ -20,15 +20,12 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
     );
   }
 
-  const reading = works.filter(w => w.progress > 0 && w.progress < 1);
-  const continueList = reading.length ? reading : works.filter(w => w.progress === 0 && !w.unread);
-
   if (!connected || works.length === 0) {
     return (
       <div className="screen">
         <Appbar large title="Library" />
         <div className="scroll" style={{ display: 'flex' }}>
-          <EmptyState icon="solar:books-minimalistic-linear" title="Nothing here yet"
+          <EmptyState icon="solar:book-minimalistic-linear" title="Nothing here yet"
             desc="Connect your AO3 account and your bookmarks will download into your private shelf."
             action={<button className="btn btn-lg btn-primary" onClick={() => nav.push('connect')}>
               <Icon icon="solar:link-circle-bold" size={20} /> Connect to AO3</button>} />
@@ -41,15 +38,6 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
     <div className="screen">
       <Appbar large title="Library" />
       <div className="scroll">
-        {continueList.length > 0 && (
-          <div style={{ marginBottom: 18 }}>
-            <div className="section-label" style={{ padding: '0 20px 9px' }}>Continue reading</div>
-            <div className="crow">
-              {continueList.map(w => <ContinueCard key={w.id} work={w} onOpen={open} />)}
-            </div>
-          </div>
-        )}
-
         {layout === 'shelves' ? <Shelves works={works} open={open} />
           : layout === 'list' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
