@@ -27,4 +27,5 @@ jobs:
           if [ -z "$ref" ]; then echo "Could not derive project ref"; exit 1; fi
           echo "Deploying functions to project: $ref"
           supabase functions deploy tag-autocomplete --project-ref "$ref"
+          supabase functions deploy trigger-sync --project-ref "$ref"
           echo "Done."

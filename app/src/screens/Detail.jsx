@@ -7,7 +7,7 @@ import { fetchChapters } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 
-export function StoryDetailScreen({ work, suggestion, nav }) {
+export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
   const total = work.chaptersTotal || work.chapters || 1;
 
@@ -43,11 +43,21 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
   const chStateOf = (c) => chState[c.n] || c.state || 'idle';
   const downloadedCount = base.filter(c => chStateOf(c) === 'done').length;
 
-  const queueSave = () => {
+  const ongoing = work.status !== 'complete';
+
+  const queueSave = async () => {
     if (saveState !== 'idle') return;
     setSaveState('queued');
-    requestSave(work.matchId || work.id).catch(() => {});
-    showToast('Queued — downloads on next sync', 'solar:clock-circle-linear');
+    try {
+      await requestSave(work.matchId || work.id);
+      onSaved?.();
+      showToast(ongoing
+        ? 'Saved — subscribe on AO3 for new chapters'
+        : 'Saved — downloads in full on next sync', 'solar:check-circle-bold');
+    } catch {
+      setSaveState('idle');
+      showToast("Couldn't save — try again", 'solar:danger-triangle-linear');
+    }
   };
 
   const openReader = (ch) => nav.push('reader', { work, workId: work.id, chapterTitle: ch ? ch.title : null, chapterN: ch ? ch.n : (work.lastChapter || 1) });
@@ -106,6 +116,17 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
             )}
           </div>
 
+          {suggestion && ongoing && (
+            <button className="pressable" onClick={openOnAO3}
+              style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--info-soft)', marginBottom: 18, width: '100%', textAlign: 'left', border: 'none' }}>
+              <Icon icon="solar:bell-bold" size={20} color="var(--info)" style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                <b style={{ color: 'var(--text-primary)' }}>This work is still updating.</b> Saving downloads everything posted so far — subscribe on AO3 and each sync will pull in new chapters as they go up.
+              </div>
+              <Icon icon="solar:arrow-right-up-linear" size={18} color="var(--text-tertiary)" style={{ flexShrink: 0, alignSelf: 'center' }} />
+            </button>
+          )}
+
           {work.frozen && (
             <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--info-soft)', marginBottom: 18 }}>
               <Icon icon="solar:shield-check-bold" size={20} color="var(--info)" style={{ flexShrink: 0, marginTop: 1 }} />
@@ -120,7 +141,7 @@ export function StoryDetailScreen({ work, suggestion, nav }) {
 
           <div className="chiprow" style={{ marginBottom: 22 }}>
             <TagChip t={work.fandom.split('–')[0].trim()} k="fandom" />
-            {work.tags.map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
+            {(work.tags || []).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
           </div>
 
           <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 22 }}

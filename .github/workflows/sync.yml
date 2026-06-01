@@ -6,8 +6,9 @@ name: Sync from AO3
 on:
   workflow_dispatch:
   schedule:
-    # Daily at 07:00 UTC. AO3 is a volunteer nonprofit — keep this infrequent.
-    - cron: "0 7 * * *"
+    # Daily at 04:00 Japan time (JST = UTC+9), i.e. 19:00 UTC.
+    # AO3 is a volunteer nonprofit — keep this to once a day.
+    - cron: "0 19 * * *"
 
 # Don't let a scheduled run and a manual run hammer AO3 at the same time.
 concurrency:

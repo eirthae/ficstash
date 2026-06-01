@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Appbar } from '../components/chrome.jsx';
-import { EmptyState } from '../components/ui.jsx';
+import { EmptyState, useToast } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { LibraryCard, GridCard } from '../components/cards.jsx';
+import { triggerSync } from '../lib/sync.js';
 
 // The fandom name without the author suffix ("Heated Rivalry – Rachel Reid" → "Heated Rivalry").
 function fandomName(work) {
@@ -11,6 +12,18 @@ function fandomName(work) {
 
 export function LibraryScreen({ works, layout = 'grid', connected = true, nav }) {
   const open = (w) => nav.push('detail', { work: w });
+  const [toast, showToast] = useToast();
+  const [syncing, setSyncing] = useState(false);
+
+  const doSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    showToast('Starting sync…');
+    const res = await triggerSync();
+    setSyncing(false);
+    showToast(res.ok ? 'Sync started — new works arrive shortly.' : (res.error || 'Sync failed.'));
+  };
+  const syncAction = { icon: syncing ? 'solar:refresh-circle-bold' : 'solar:refresh-circle-linear', onClick: doSync };
 
   if (works === null) {
     return (
@@ -44,7 +57,8 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
 
   return (
     <div className="screen">
-      <Appbar large title="Library" actions={[archiveAction]} />
+      <Appbar large title="Library" actions={[syncAction, archiveAction]} />
+      {toast}
       <div className="scroll">
         {layout === 'shelves' ? <Shelves works={works} open={open} />
           : layout === 'fandom' ? <FandomSections works={works} open={open} />

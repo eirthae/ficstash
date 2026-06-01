@@ -78,19 +78,29 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
   }, [matches]);
   const matchList = liveMatches || matches;
 
+  const markWanted = (u, wanted = true) =>
+    setLiveMatches((arr) => (arr || matchList).map((x) => (x.id === u.id ? { ...x, wanted } : x)));
+
   const openMatch = (u) => {
     markMatchSeen(u.matchId || u.id).catch(() => {});
-    nav.push('detail', { work: u, suggestion: true });
+    nav.push('detail', { work: u, suggestion: true, onSaved: () => markWanted(u) });
   };
   const dismissMatch = (u) => {
     setLiveMatches((arr) => (arr || matchList).filter((x) => x.id !== u.id));
     markMatchSeen(u.matchId || u.id).catch(() => {});
     showToast('Dismissed', 'solar:eye-closed-linear');
   };
-  const saveMatch = (u) => {
-    setLiveMatches((arr) => (arr || matchList).map((x) => (x.id === u.id ? { ...x, wanted: true } : x)));
-    requestSave(u.matchId || u.id).catch(() => {});
-    showToast('Queued — downloads on next sync', 'solar:clock-circle-linear');
+  const saveMatch = async (u) => {
+    markWanted(u, true);
+    try {
+      await requestSave(u.matchId || u.id);
+      showToast(u.status !== 'complete'
+        ? 'Saved — subscribe on AO3 for new chapters'
+        : 'Saved — downloads in full on next sync', 'solar:check-circle-bold');
+    } catch {
+      markWanted(u, false);
+      showToast("Couldn't save — try again", 'solar:danger-triangle-linear');
+    }
   };
   const saveStateOf = (u) => (u.saved ? 'saved' : u.wanted ? 'queued' : 'idle');
 
