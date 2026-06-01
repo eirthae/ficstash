@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { App as CapApp } from '@capacitor/app';
 import { BottomNav } from './components/chrome.jsx';
 import { LibraryScreen } from './screens/Library.jsx';
 import { WhatsNewScreen } from './screens/WhatsNew.jsx';
@@ -60,6 +61,21 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const switchTab = (id) => { setStack([]); setTab(id); };
+
+  // Android hardware back / swipe-back gesture. Capacitor routes both through
+  // the backButton event; once we register a listener it stops auto-closing the
+  // app, so we drive the in-app stack and only exit from the Library root.
+  const navState = useRef({ stack, tab });
+  navState.current = { stack, tab };
+  useEffect(() => {
+    const handle = CapApp.addListener('backButton', () => {
+      const { stack, tab } = navState.current;
+      if (stack.length) setStack(s => s.slice(0, -1));
+      else if (tab !== 'library') switchTab('library');
+      else CapApp.exitApp();
+    });
+    return () => { handle.then(h => h.remove()).catch(() => {}); };
+  }, []);
 
   const top = stack[stack.length - 1];
   const showNav = !top;
