@@ -351,6 +351,11 @@ def main() -> None:
             for t in tags_raw
         ]
         tag_names = [t for t in tag_names if t]
+        excluded_names = [
+            (t.get("name") if isinstance(t, dict) else str(t))
+            for t in (g.get("excluded_tags") or [])
+        ]
+        excluded_names = [t for t in excluded_names if t]
         label = g.get("label") or " + ".join(tag_names) or g["id"]
         if not tag_names:
             print(f"    '{label}': no tags, skipped.")
@@ -359,7 +364,9 @@ def main() -> None:
             space()
             metas = _with_backoff(
                 lambda: ao3.search_group(
-                    tag_names, match_mode=g.get("match_mode", "all")
+                    tag_names,
+                    match_mode=g.get("match_mode", "all"),
+                    excluded_tags=excluded_names,
                 ),
                 what=f"tag search '{label}'",
                 broad=True,

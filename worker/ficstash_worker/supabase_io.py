@@ -142,7 +142,7 @@ def fetch_tracked_groups(client: Client) -> list[dict]:
     """Return the user's tracked tag groups (created in-app)."""
     resp = (
         client.table("tracked_groups")
-        .select("id,label,tags,match_mode")
+        .select("id,label,tags,excluded_tags,match_mode")
         .execute()
     )
     return list(resp.data or [])

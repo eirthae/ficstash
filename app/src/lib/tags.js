@@ -16,6 +16,7 @@ function paletteIndexFor(seed) {
 // tracked_groups row → TagTile shape, with live counts folded in.
 function mapGroup(g, counts = { total: 0, fresh: 0 }) {
   const tags = Array.isArray(g.tags) ? g.tags : [];
+  const excludedTags = Array.isArray(g.excluded_tags) ? g.excluded_tags : [];
   const names = tags.map((t) => t.name).filter(Boolean);
   const name = g.label || names.join(' + ') || 'Untitled group';
   // A "Browse by language" group is a single tag with kind 'language' whose id
@@ -28,6 +29,8 @@ function mapGroup(g, counts = { total: 0, fresh: 0 }) {
     label: g.label || '',
     tags,
     names,
+    excludedTags,
+    excludedNames: excludedTags.map((t) => t.name).filter(Boolean),
     matchMode: g.match_mode || 'all',
     kind,
     language: langTag ? langTag.id || langTag.name : null,
@@ -93,11 +96,13 @@ export async function fetchTrackedGroups() {
   return (groups || []).map((g) => mapGroup(g, counts[g.id]));
 }
 
-export async function createGroup({ label = '', tags, matchMode = 'all' }) {
+export async function createGroup({ label = '', tags, excludedTags = [], matchMode = 'all' }) {
   if (!hasSupabase) throw new Error('Supabase not configured');
-  const clean = (tags || [])
+  const cleanTags = (list) => (list || [])
     .map((t) => ({ name: t.name, id: t.id ?? '', kind: t.kind || 'freeform' }))
     .filter((t) => t.name);
+  const clean = cleanTags(tags);
+  const excluded = cleanTags(excludedTags);
   if (!clean.length) throw new Error('A group needs at least one tag');
   const seed = label || clean.map((t) => t.name).join(' + ');
   const { data, error } = await supabase
@@ -105,6 +110,7 @@ export async function createGroup({ label = '', tags, matchMode = 'all' }) {
     .insert({
       label,
       tags: clean,
+      excluded_tags: excluded,
       match_mode: matchMode === 'any' ? 'any' : 'all',
       palette: paletteIndexFor(seed),
     })

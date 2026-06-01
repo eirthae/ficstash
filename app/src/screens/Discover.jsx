@@ -115,21 +115,13 @@ export function DiscoverScreen({ nav }) {
   );
 }
 
-// ---- Builder sheet: live AO3 autocomplete → pick tags → save a group -------
-function TagGroupBuilder({ open, onClose, onCreated }) {
+// Search AO3 tags + pick them into a list, shown as removable chips. Reused for
+// both the include set and the exclude set; `accent` recolors the exclude one.
+function TagPicker({ picked, onAdd, onRemove, placeholder, accent }) {
   const [term, setTerm] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [picked, setPicked] = useState([]);
-  const [label, setLabel] = useState('');
-  const [matchMode, setMatchMode] = useState('all');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
   const debounce = useRef();
-
-  useEffect(() => {
-    if (open) { setTerm(''); setResults([]); setPicked([]); setLabel(''); setMatchMode('all'); setErr(''); }
-  }, [open]);
 
   useEffect(() => {
     clearTimeout(debounce.current);
@@ -145,21 +137,69 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
     return () => clearTimeout(debounce.current);
   }, [term]);
 
-  const add = (t) => {
-    if (!picked.some((p) => p.name.toLowerCase() === t.name.toLowerCase())) {
-      setPicked((p) => [...p, t]);
-      setErr('');
-    }
-    setTerm('');
-    setResults([]);
-  };
-  const remove = (name) => setPicked((p) => p.filter((x) => x.name !== name));
+  const add = (t) => { onAdd(t); setTerm(''); setResults([]); };
+
+  return (
+    <div>
+      {picked.length > 0 && (
+        <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {picked.map((t) => {
+            const c = accent || TAG_COLOR[t.kind] || TAG_COLOR.freeform;
+            return (
+              <span key={t.name} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
+                <span className="swatch" style={{ background: c }}></span>{t.name}
+                <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t.name)} aria-label="Remove tag">
+                  <Icon icon="solar:close-circle-bold" size={15} color={c} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <SearchField placeholder={placeholder} value={term} onChange={setTerm} />
+      {searching && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 6, paddingLeft: 2 }}>Searching AO3…</div>}
+      {results.length > 0 && (
+        <div className="tag-suggest" style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+          {results.map((t) => (
+            <button
+              key={`${t.name}-${t.id}`}
+              className="pressable"
+              onClick={() => add(t)}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '11px 14px', background: 'transparent', borderBottom: '1px solid var(--border)' }}
+            >
+              <Icon icon="solar:add-circle-linear" size={18} color={accent || 'var(--accent)'} />
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Builder sheet: live AO3 autocomplete → pick tags → save a group -------
+function TagGroupBuilder({ open, onClose, onCreated }) {
+  const [picked, setPicked] = useState([]);
+  const [excluded, setExcluded] = useState([]);
+  const [matchMode, setMatchMode] = useState('all');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (open) { setPicked([]); setExcluded([]); setMatchMode('all'); setErr(''); }
+  }, [open]);
+
+  const has = (list, t) => list.some((x) => x.name.toLowerCase() === t.name.toLowerCase());
+  const addPicked = (t) => { setPicked((p) => (has(p, t) ? p : [...p, t])); setErr(''); };
+  const removePicked = (name) => setPicked((p) => p.filter((x) => x.name !== name));
+  const addExcluded = (t) => setExcluded((p) => (has(p, t) ? p : [...p, t]));
+  const removeExcluded = (name) => setExcluded((p) => p.filter((x) => x.name !== name));
 
   const save = async () => {
     if (!picked.length) { setErr('Add at least one tag first.'); return; }
     setBusy(true); setErr('');
     try {
-      const g = await createGroup({ label: label.trim(), tags: picked, matchMode });
+      const g = await createGroup({ tags: picked, excludedTags: excluded, matchMode });
       onCreated(g);
     } catch (e) {
       setErr(e?.message ? String(e.message) : 'Could not save — check your connection.');
@@ -170,46 +210,12 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
 
   return (
     <Sheet open={open} onClose={onClose} title="Track a tag group" maxH="88vh">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {picked.length > 0 && (
-          <div>
-            <div className="section-label" style={{ marginBottom: 8 }}>
-              {picked.length === 1 ? 'Tracking this tag' : `Tracking works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`}
-            </div>
-            <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8 }}>
-              {picked.map((t) => {
-                const c = TAG_COLOR[t.kind] || TAG_COLOR.freeform;
-                return (
-                  <span key={t.name} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
-                    <span className="swatch" style={{ background: c }}></span>{t.name}
-                    <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => remove(t.name)} aria-label="Remove tag">
-                      <Icon icon="solar:close-circle-bold" size={15} color={c} />
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <div>
-          <SearchField placeholder="Search AO3 tags…" value={term} onChange={setTerm} />
-          {searching && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 6, paddingLeft: 2 }}>Searching AO3…</div>}
-          {results.length > 0 && (
-            <div className="tag-suggest" style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-              {results.map((t) => (
-                <button
-                  key={`${t.name}-${t.id}`}
-                  className="pressable"
-                  onClick={() => add(t)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '11px 14px', background: 'transparent', borderBottom: '1px solid var(--border)' }}
-                >
-                  <Icon icon="solar:add-circle-linear" size={18} color="var(--accent)" />
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="section-label" style={{ marginBottom: 8 }}>
+            {picked.length <= 1 ? 'Track this tag' : `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`}
+          </div>
+          <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
         </div>
 
         {picked.length > 1 && (
@@ -229,14 +235,11 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
         )}
 
         <div>
-          <div className="section-label" style={{ marginBottom: 8 }}>Name <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
-          <input
-            className="textinput"
-            placeholder={picked.map((t) => t.name).join(' + ') || 'e.g. Soulmates AU — my ship'}
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 15 }}
-          />
+          <div className="section-label" style={{ marginBottom: 8 }}>Exclude <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
+          <TagPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded} placeholder="Search AO3 tags to exclude…" accent="var(--danger, #f5455c)" />
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
+            Works carrying any excluded tag are left out of your matches.
+          </div>
         </div>
 
         {err && <div style={{ color: 'var(--danger, #f5455c)', fontSize: 13 }}>{err}</div>}

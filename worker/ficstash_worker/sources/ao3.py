@@ -254,7 +254,11 @@ class AO3Source(Source):
 
     # ---- tag-group discovery -----------------------------------------------
     def search_group(
-        self, tags: list[str], match_mode: str = "all", limit: int = 30
+        self,
+        tags: list[str],
+        match_mode: str = "all",
+        limit: int = 30,
+        excluded_tags: list[str] | None = None,
     ) -> list[WorkMeta]:
         """Find recent works matching a tracked tag group, via AO3's own search.
 
@@ -263,18 +267,21 @@ class AO3Source(Source):
         under it) — no naive string matching here.
           * match_mode 'all' (AND): one search with all tags included together.
           * match_mode 'any' (OR): one search per tag, results merged.
+        `excluded_tags` are handed to AO3 as excluded_tag_names so any work
+        carrying one is dropped before it becomes a match.
         Results are newest-first by date posted, deduped, capped at `limit`.
         """
         tags = [t for t in (tags or []) if t]
         if not tags:
             return []
+        excluded_csv = ",".join(t for t in (excluded_tags or []) if t)
         queries = [",".join(tags)] if match_mode == "all" else list(tags)
 
         seen: dict[str, WorkMeta] = {}
         for qi, q in enumerate(queries):
             if qi:
                 time.sleep(RATE_LIMIT_SECONDS)  # space multi-tag 'any' searches
-            for w in self._run_tag_search(q, limit):
+            for w in self._run_tag_search(q, limit, excluded_tags=excluded_csv):
                 wid = str(getattr(w, "id", "") or "")
                 if not wid or wid in seen:
                     continue
@@ -314,16 +321,24 @@ class AO3Source(Source):
                 out[wid] = _work_to_meta(self.id, wid, w)
         return list(out.values())[:limit]
 
-    def _run_tag_search(self, tags_csv: str, limit: int):
+    def _run_tag_search(self, tags_csv: str, limit: int, excluded_tags: str = ""):
         s = self._require_session()
         try:
             try:
                 search = AO3.Search(
-                    tags=tags_csv, sort_column="created_at", session=s
+                    tags=tags_csv,
+                    excluded_tags=excluded_tags,
+                    sort_column="created_at",
+                    session=s,
                 )
             except TypeError:
-                # Older ao3-api signatures lack sort_column.
-                search = AO3.Search(tags=tags_csv, session=s)
+                # Older ao3-api signatures lack sort_column / excluded_tags.
+                try:
+                    search = AO3.Search(
+                        tags=tags_csv, excluded_tags=excluded_tags, session=s
+                    )
+                except TypeError:
+                    search = AO3.Search(tags=tags_csv, session=s)
             search.update()
         except Exception as exc:  # noqa: BLE001
             if _is_rate_limited(exc):
