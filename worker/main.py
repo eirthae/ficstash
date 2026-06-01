@@ -207,6 +207,10 @@ def main() -> None:
             is_new = prev is None
             changed = (
                 is_new
+                # Not yet a full offline copy — older builds stored the chapter
+                # *count* from metadata without the chapter *bodies*, so the
+                # counts below would falsely match. Re-download until offline.
+                or not prev.get("offline")
                 or prev.get("chapters") != meta.chapters
                 or prev.get("words") != meta.words
             )

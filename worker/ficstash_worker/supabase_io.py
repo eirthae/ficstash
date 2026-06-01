@@ -62,7 +62,7 @@ def fetch_existing_works(client: Client, source: str = "ao3") -> dict[str, dict]
     """
     resp = (
         client.table("works")
-        .select("id,source_work_id,chapters,words")
+        .select("id,source_work_id,chapters,words,offline")
         .eq("source", source)
         .execute()
     )
