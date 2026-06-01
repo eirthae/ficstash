@@ -112,7 +112,7 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
 // ---- Tag tile (discovery grid) --------------------------------------------
 export function TagTile({ tag, onOpen }) {
   const pal = COVER_PALETTES[tag.palette] || COVER_PALETTES[0];
-  const kindLabel = { relationship: 'Relationship', fandom: 'Fandom', freeform: 'Tag', character: 'Character', group: 'Tag group' }[tag.kind] || 'Tag';
+  const kindLabel = { relationship: 'Relationship', fandom: 'Fandom', freeform: 'Tag', character: 'Character', group: 'Tag group', language: 'Language' }[tag.kind] || 'Tag';
   return (
     <div className="tile pressable" onClick={() => onOpen && onOpen(tag)} style={{ background: `linear-gradient(150deg, ${pal[0]}, ${pal[1]})` }}>
       <div className="grain"></div>

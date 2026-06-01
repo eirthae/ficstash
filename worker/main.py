@@ -310,9 +310,38 @@ def main() -> None:
     groups = fetch_tracked_groups(db)
     print(f"{len(groups)} tracked group(s).")
     for g in groups:
+        tags_raw = g.get("tags") or []
+        # A "Browse by language" group carries a single kind:'language' tag whose
+        # id is AO3's language_id code; it's searched by language, not by tags.
+        lang_tag = next(
+            (t for t in tags_raw if isinstance(t, dict) and t.get("kind") == "language"),
+            None,
+        )
+        if lang_tag is not None:
+            code = str(lang_tag.get("id") or lang_tag.get("name") or "").strip()
+            label = g.get("label") or lang_tag.get("name") or g["id"]
+            if not code:
+                print(f"    '{label}': no language code, skipped.")
+                continue
+            try:
+                space()
+                # The language search IS the filter here, so we keep every
+                # result — including languages outside the import allowlist.
+                metas = _with_backoff(
+                    lambda: ao3.search_language(code),
+                    what=f"language search '{label}'",
+                    broad=True,
+                )
+                written = upsert_tag_matches(db, g["id"], metas)
+                mark_group_checked(db, g["id"])
+                print(f"    '{label}' (language): {written} match(es).")
+            except Exception as exc:  # noqa: BLE001
+                print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
+            continue
+
         tag_names = [
             (t.get("name") if isinstance(t, dict) else str(t))
-            for t in (g.get("tags") or [])
+            for t in tags_raw
         ]
         tag_names = [t for t in tag_names if t]
         label = g.get("label") or " + ".join(tag_names) or g["id"]

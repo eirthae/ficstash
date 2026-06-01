@@ -18,7 +18,10 @@ function mapGroup(g, counts = { total: 0, fresh: 0 }) {
   const tags = Array.isArray(g.tags) ? g.tags : [];
   const names = tags.map((t) => t.name).filter(Boolean);
   const name = g.label || names.join(' + ') || 'Untitled group';
-  const kind = tags.length === 1 ? tags[0].kind || 'freeform' : 'group';
+  // A "Browse by language" group is a single tag with kind 'language' whose id
+  // is AO3's language_id code; the worker searches it by language, not by tags.
+  const langTag = tags.find((t) => t.kind === 'language');
+  const kind = langTag ? 'language' : tags.length === 1 ? tags[0].kind || 'freeform' : 'group';
   return {
     id: g.id,
     name,
@@ -27,6 +30,7 @@ function mapGroup(g, counts = { total: 0, fresh: 0 }) {
     names,
     matchMode: g.match_mode || 'all',
     kind,
+    language: langTag ? langTag.id || langTag.name : null,
     count: counts.total,
     fresh: counts.fresh,
     palette: g.palette ?? 0,
@@ -103,6 +107,26 @@ export async function createGroup({ label = '', tags, matchMode = 'all' }) {
       tags: clean,
       match_mode: matchMode === 'any' ? 'any' : 'all',
       palette: paletteIndexFor(seed),
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return mapGroup(data);
+}
+
+// Start a "Browse by language" group: one kind:'language' tag whose id is AO3's
+// language_id code (e.g. 'hy' Armenian). The worker fills tag_matches via a
+// language search, so it reuses the whole save/dismiss flow tag groups use.
+export async function createLanguageGroup({ code, name, label = '' }) {
+  if (!hasSupabase) throw new Error('Supabase not configured');
+  if (!code) throw new Error('A language needs a code');
+  const { data, error } = await supabase
+    .from('tracked_groups')
+    .insert({
+      label: label || name || code,
+      tags: [{ name: name || code, id: code, kind: 'language' }],
+      match_mode: 'all',
+      palette: paletteIndexFor(code),
     })
     .select()
     .single();

@@ -4,10 +4,14 @@ import Icon from '../components/Icon.jsx';
 import { SearchField, EmptyState, TAG_COLOR, useToast, Sheet, Segmented } from '../components/ui.jsx';
 import { TagTile, SuggestionCard } from '../components/cards.jsx';
 import {
-  fetchTrackedGroups, createGroup, deleteGroup,
+  fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup,
   fetchMatches, markMatchSeen, markGroupSeen, autocompleteTags, requestSave,
 } from '../lib/tags.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
+
+// Languages you can browse straight from Discover. `code` is AO3's language_id
+// (ISO 639); `name` is shown on the tile. Add more entries to offer more.
+const LANGUAGES = [{ code: 'hy', name: 'հայերեն', label: 'Armenian', palette: 3 }];
 
 // ============================================================================
 // Discover — track AO3 tags / tag groups and review the works they turn up.
@@ -26,7 +30,10 @@ export function DiscoverScreen({ nav }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const tags = groups || [];
+  const all = groups || [];
+  // Language groups get their own section; keep them out of the tag grid.
+  const tags = all.filter((t) => t.kind !== 'language');
+  const langGroups = all.filter((t) => t.kind === 'language');
   const fresh = tags.reduce((a, t) => a + (t.fresh || 0), 0);
   const open = (tag) => nav.push('tagresults', { tag, onLeave: load });
 
@@ -34,6 +41,20 @@ export function DiscoverScreen({ nav }) {
     setBuilderOpen(false);
     showToast(`Now tracking “${g.name}”`);
     load();
+  };
+
+  // Tap a language: open its results if already browsing, else start one.
+  const openLanguage = async (lang) => {
+    const existing = langGroups.find((g) => g.language === lang.code);
+    if (existing) { open(existing); return; }
+    try {
+      const g = await createLanguageGroup({ code: lang.code, name: lang.name, label: lang.label });
+      showToast(`Browsing ${lang.label}`);
+      load();
+      open(g);
+    } catch {
+      showToast("Couldn't start — check your connection", 'solar:danger-triangle-linear');
+    }
   };
 
   return (
@@ -71,6 +92,19 @@ export function DiscoverScreen({ nav }) {
               <div className="t-name" style={{ marginTop: 6 }}>Track a new tag</div>
             </button>
           </div>
+        )}
+
+        {groups !== null && (
+          <>
+            <div className="section-label" style={{ marginTop: 26, marginBottom: 12 }}>Browse by language</div>
+            <div className="tilegrid">
+              {LANGUAGES.map((lang) => {
+                const g = langGroups.find((x) => x.language === lang.code);
+                const tile = g || { id: `lang-${lang.code}`, name: lang.name, kind: 'language', count: 0, fresh: 0, palette: lang.palette };
+                return <TagTile key={lang.code} tag={tile} onOpen={() => openLanguage(lang)} />;
+              })}
+            </div>
+          </>
         )}
       </div>
 
@@ -219,7 +253,7 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
   const [items, setItems] = useState(null); // null = loading
   const [toast, showToast] = useToast();
   const c = TAG_COLOR[tag.kind] || 'var(--accent)';
-  const kindLabel = { relationship: 'relationship', fandom: 'fandom', freeform: 'tag', character: 'character', group: 'tag group' }[tag.kind] || 'tag';
+  const kindLabel = { relationship: 'relationship', fandom: 'fandom', freeform: 'tag', character: 'character', group: 'tag group', language: 'language' }[tag.kind] || 'tag';
 
   useEffect(() => {
     let alive = true;

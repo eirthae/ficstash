@@ -261,6 +261,37 @@ class AO3Source(Source):
                     break
         return list(seen.values())[:limit]
 
+    # ---- language discovery ------------------------------------------------
+    def search_language(self, language: str, limit: int = 30) -> list[WorkMeta]:
+        """Find recent works in one AO3 language (newest first, metadata only).
+
+        `language` is AO3's language_id code (e.g. "hy" Armenian, "ja" Japanese).
+        Mirrors search_group so language browsing feeds the same match flow.
+        """
+        language = (language or "").strip()
+        if not language:
+            return []
+        s = self._require_session()
+        try:
+            try:
+                search = AO3.Search(
+                    language=language, sort_column="created_at", session=s
+                )
+            except TypeError:
+                search = AO3.Search(language=language, session=s)
+            search.update()
+        except Exception as exc:  # noqa: BLE001
+            if _is_rate_limited(exc):
+                raise RateLimitError(str(exc)) from exc
+            raise
+
+        out: dict[str, WorkMeta] = {}
+        for w in (getattr(search, "results", None) or [])[:limit]:
+            wid = str(getattr(w, "id", "") or "")
+            if wid and wid not in out:
+                out[wid] = _work_to_meta(self.id, wid, w)
+        return list(out.values())[:limit]
+
     def _run_tag_search(self, tags_csv: str, limit: int):
         s = self._require_session()
         try:
