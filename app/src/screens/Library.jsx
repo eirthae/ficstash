@@ -39,7 +39,12 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
     );
   }
 
-  if (!connected || works.length === 0) {
+  // Hide works that aren't downloaded yet (offline === false). They appear once
+  // the worker has fetched their chapters, so a backfill in progress never
+  // surfaces an unreadable, empty story.
+  const ready = works.filter((w) => w.offline !== false);
+
+  if (!connected || ready.length === 0) {
     return (
       <div className="screen">
         <Appbar large title="Library" />
@@ -60,17 +65,17 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
       <Appbar large title="Library" actions={[syncAction, archiveAction]} />
       {toast}
       <div className="scroll">
-        {layout === 'shelves' ? <Shelves works={works} open={open} />
-          : layout === 'fandom' ? <FandomSections works={works} open={open} />
+        {layout === 'shelves' ? <Shelves works={ready} open={open} />
+          : layout === 'fandom' ? <FandomSections works={ready} open={open} />
           : layout === 'list' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
-              <div className="section-label" style={{ marginBottom: -2 }}>All works · {works.length}</div>
-              {works.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
+              <div className="section-label" style={{ marginBottom: -2 }}>All works · {ready.length}</div>
+              {ready.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
             </div>
           ) : (
             <div style={{ padding: '0 20px 24px' }}>
-              <div className="section-label" style={{ marginBottom: 12 }}>All works · {works.length}</div>
-              <div className="libgrid">{works.map(w => <GridCard key={w.id} work={w} onOpen={open} />)}</div>
+              <div className="section-label" style={{ marginBottom: 12 }}>All works · {ready.length}</div>
+              <div className="libgrid">{ready.map(w => <GridCard key={w.id} work={w} onOpen={open} />)}</div>
             </div>
           )}
       </div>

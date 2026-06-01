@@ -70,9 +70,11 @@ REQUIRED_ENV = (
 RATE_LIMIT_SECONDS = 6
 BACKOFF_SECONDS = (30, 60, 120)
 DEFAULT_HISTORY_MAX_PAGES = 3
-# Per-run cap on how many not-yet-offline works to fully download. Keeps the
-# backfill gradual (and AO3 traffic polite); the rest follow on later runs.
-DEFAULT_OFFLINE_BACKFILL_MAX = 25
+# Per-run cap on how many not-yet-offline works to fully download. Default is
+# unbounded so the library fully populates (no half-empty works); requests are
+# still spaced RATE_LIMIT_SECONDS apart and only missing works are fetched, so
+# AO3 stays polite. Set OFFLINE_BACKFILL_MAX to a number to re-cap a run.
+DEFAULT_OFFLINE_BACKFILL_MAX = None
 
 
 def check_env() -> None:
@@ -412,7 +414,7 @@ def main() -> None:
     print("\n== Offline backfill ==")
     backfill_max = _offline_backfill_max()
     pending = fetch_non_offline_works(db, limit=backfill_max)
-    print(f"{len(pending)} work(s) need offline copies (max {backfill_max}).")
+    print(f"{len(pending)} work(s) need offline copies (max {backfill_max or 'no cap'}).")
     bf_done = bf_failed = 0
     for row in pending:
         wid = row["source_work_id"]
