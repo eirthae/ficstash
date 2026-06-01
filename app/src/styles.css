@@ -208,7 +208,7 @@ input,textarea { font-family:inherit; }
 .libcard .meta { flex:1; min-width:0; display:flex; flex-direction:column; }
 .story-title { font-size:15.5px; font-weight:700; letter-spacing:-.01em; line-height:1.25; }
 .story-sub { font-size:12.5px; color:var(--text-secondary); }
-.summary { font-size:12.5px; line-height:1.5; color:var(--text-secondary); display:-webkit-box; -webkit-line-clamp:2; line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.summary { font-size:12.5px; line-height:1.5; color:var(--text-secondary); white-space:pre-line; }
 .chiprow { display:flex; flex-wrap:wrap; gap:6px; }
 .metarow { display:flex; align-items:center; gap:10px; font-size:11.5px; color:var(--text-tertiary); font-weight:500; }
 .metarow .md { display:flex; align-items:center; gap:4px; }

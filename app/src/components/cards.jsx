@@ -67,12 +67,9 @@ export function GridCard({ work, onOpen }) {
 export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, cta = 'Open' }) {
   return (
     <div className="libcard fade-enter">
-      <div onClick={() => onOpen && onOpen(work)} style={{ cursor: 'pointer' }}>
-        <Cover title={work.title} author={work.author} fandom={work.fandom} palette={work.palette} w={78} h={108} />
-      </div>
       <div className="meta">
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => onOpen && onOpen(work)}>
             <div className="story-title" style={{ marginBottom: 2 }}>{work.title}</div>
             <div className="story-sub">by {work.author}</div>
           </div>
