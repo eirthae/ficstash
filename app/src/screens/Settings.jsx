@@ -2,12 +2,20 @@ import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
 import { Toggle, Segmented, useToast } from '../components/ui.jsx';
+import { fetchOfflineStats } from '../lib/library.js';
 
 export function SettingsScreen({ appMode, setAppMode, nav }) {
   const [notif, setNotif] = useState({ chapters: true, matches: true, frozen: true });
   const [filters, setFilters] = useState({ minWords: true, noPodfic: true, complete: false });
   const [langs, setLangs] = useState({ English: true, Russian: true, Armenian: true, Japanese: true });
   const [defaultTheme] = useState(localStorage.getItem('fs-reader-theme') || 'dark');
+  const [storage, setStorage] = useState(undefined); // undefined=loading, null=unavailable
+  useEffect(() => { fetchOfflineStats().then(setStorage).catch(() => setStorage(null)); }, []);
+  const storageLine = storage === undefined ? 'Counting…'
+    : storage === null ? 'Connect AO3 to see your offline library'
+    : storage.downloaded >= storage.total
+      ? `${storage.total} works · all available offline`
+      : `${storage.downloaded} of ${storage.total} works downloaded · backfill in progress`;
 
   return (
     <div className="screen">
@@ -76,7 +84,7 @@ export function SettingsScreen({ appMode, setAppMode, nav }) {
         <SetSection label="Storage">
           <div className="set-row">
             <div className="set-ic"><Icon icon="solar:database-linear" size={18} /></div>
-            <div className="set-tx"><div className="set-h">Offline library</div><div className="set-d">6 works · 312 KB · all available offline</div></div>
+            <div className="set-tx"><div className="set-h">Offline library</div><div className="set-d">{storageLine}</div></div>
             <Icon icon="solar:wifi-router-minimalistic-linear" size={20} color="var(--text-tertiary)" />
           </div>
         </SetSection>

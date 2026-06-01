@@ -51,6 +51,20 @@ export async function fetchWorks() {
   return (data || []).map(mapWork);
 }
 
+// Live offline-library tally: how many works have full text stored (offline)
+// vs the total tracked. Two head-only count queries, no rows transferred.
+export async function fetchOfflineStats() {
+  if (!hasSupabase) return null;
+  const total = await supabase.from('works').select('*', { count: 'exact', head: true });
+  if (total.error) throw total.error;
+  const dl = await supabase
+    .from('works')
+    .select('*', { count: 'exact', head: true })
+    .eq('offline', true);
+  if (dl.error) throw dl.error;
+  return { downloaded: dl.count ?? 0, total: total.count ?? 0 };
+}
+
 export async function fetchChapters(workId) {
   if (!hasSupabase) return null;
   const { data, error } = await supabase
