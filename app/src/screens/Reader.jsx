@@ -7,6 +7,9 @@ import { hasSupabase } from '../lib/supabase.js';
 
 export const READER_FONTS = [
   { value: 'serif', label: 'Serif', css: 'var(--font-serif)' },
+  { value: 'baskerville', label: 'Baskerville', css: 'var(--font-baskerville)' },
+  { value: 'georgia', label: 'Georgia', css: 'var(--font-georgia)' },
+  { value: 'beaufort', label: 'Beaufort', css: 'var(--font-beaufort)' },
   { value: 'sans', label: 'Sans', css: 'var(--font-sans)' },
   { value: 'dys', label: 'Dyslexic', css: 'var(--font-dys)' },
 ];

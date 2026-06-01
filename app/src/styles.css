@@ -7,6 +7,18 @@
    via @font-face once the user drops the files (then --font-sans/serif/dys swap).
    ========================================================================== */
 
+/* ---- self-hosted reading fonts (bundled, relative urls for file:// APK) --- */
+@font-face { font-family:"Baskerville FS"; font-weight:400; font-style:normal; font-display:swap; src:url('./assets/fonts/Baskerville-Regular.ttf') format('truetype'); }
+@font-face { font-family:"Baskerville FS"; font-weight:700; font-style:normal; font-display:swap; src:url('./assets/fonts/Baskerville-Bold.ttf') format('truetype'); }
+@font-face { font-family:"Baskerville FS"; font-weight:400; font-style:italic; font-display:swap; src:url('./assets/fonts/Baskerville-Italic.ttf') format('truetype'); }
+@font-face { font-family:"Baskerville FS"; font-weight:700; font-style:italic; font-display:swap; src:url('./assets/fonts/Baskerville-BoldItalic.ttf') format('truetype'); }
+@font-face { font-family:"Georgia FS"; font-weight:400; font-style:normal; font-display:swap; src:url('./assets/fonts/Georgia-Regular.ttf') format('truetype'); }
+@font-face { font-family:"Georgia FS"; font-weight:700; font-style:normal; font-display:swap; src:url('./assets/fonts/Georgia-Bold.ttf') format('truetype'); }
+@font-face { font-family:"Georgia FS"; font-weight:400; font-style:italic; font-display:swap; src:url('./assets/fonts/Georgia-Italic.ttf') format('truetype'); }
+@font-face { font-family:"Georgia FS"; font-weight:700; font-style:italic; font-display:swap; src:url('./assets/fonts/Georgia-BoldItalic.ttf') format('truetype'); }
+@font-face { font-family:"Beaufort FS"; font-weight:400; font-style:normal; font-display:swap; src:url('./assets/fonts/Beaufort-Regular.ttf') format('truetype'); }
+@font-face { font-family:"Beaufort FS"; font-weight:700; font-style:normal; font-display:swap; src:url('./assets/fonts/Beaufort-Bold.ttf') format('truetype'); }
+
 /* ---- brand scales (shared) ----------------------------------------------- */
 :root {
   --hu-primary-50:#f2eafa; --hu-primary-100:#e4d4f4; --hu-primary-200:#c9a9e9;
@@ -18,6 +30,9 @@
   --font-sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --font-serif:"Lora",Georgia,"Times New Roman",serif;
   --font-dys:"OpenDyslexic","Comic Sans MS",sans-serif;
+  --font-baskerville:"Baskerville FS","Baskerville",Georgia,serif;
+  --font-georgia:"Georgia FS",Georgia,"Times New Roman",serif;
+  --font-beaufort:"Beaufort FS",Georgia,serif;
 
   /* tag-type colors — color-coded chips by category */
   --tag-fandom:#9353d3;        /* purple  */
