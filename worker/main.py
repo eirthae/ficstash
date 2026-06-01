@@ -53,6 +53,7 @@ from ficstash_worker.supabase_io import (
     mark_group_checked,
     mark_in_history,
     mark_matches_saved,
+    reset_empty_offline,
     upsert_chapters,
     upsert_tag_matches,
     upsert_work,
@@ -423,6 +424,12 @@ def main() -> None:
     # chapter bodies a capped batch at a time so the library fills in gradually
     # without hammering AO3.
     print("\n== Offline backfill ==")
+    # Self-heal: any work flagged offline but with no stored chapter text gets
+    # un-flagged so it's re-fetched below (recovers works mis-flagged by older
+    # builds or by an interrupted fetch).
+    requeued = reset_empty_offline(db)
+    if requeued:
+        print(f"Re-queued {requeued} work(s) flagged offline but missing text.")
     backfill_max = _offline_backfill_max()
     pending = fetch_non_offline_works(db, limit=backfill_max)
     print(f"{len(pending)} work(s) need offline copies (max {backfill_max or 'no cap'}).")

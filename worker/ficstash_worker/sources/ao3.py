@@ -196,12 +196,34 @@ class AO3Source(Source):
         work = self._work_cache.get(source_work_id)
         if work is None:
             s = self._require_session()
+            # Build the work without auto-loading, then reload() ourselves so we
+            # can survive a quirk in ao3-api: its reload() does
+            #   self._soup.find("h2", {"class", "heading"}).text
+            # where the attrs filter is a *set*, not a dict, so on some valid work
+            # layouts find() returns None and .text raises AttributeError —
+            # aborting the whole load. Because _soup is already populated by then,
+            # the metadata is in fact parseable, so we swallow that specific abort
+            # and carry on. A genuine missing work still raises InvalidIdError.
             try:
-                work = AO3.Work(int(source_work_id), session=s, load=True)
+                work = AO3.Work(int(source_work_id), session=s, load=False)
             except Exception as exc:  # noqa: BLE001
                 if _is_rate_limited(exc):
                     raise RateLimitError(str(exc)) from exc
                 raise
+            try:
+                work.reload(load_chapters=False)
+            except Exception as exc:  # noqa: BLE001
+                if _is_rate_limited(exc):
+                    raise RateLimitError(str(exc)) from exc
+                if type(exc).__name__ == "InvalidIdError":
+                    raise
+                if not getattr(work, "loaded", False):
+                    # The page never came back — nothing to salvage.
+                    raise
+                print(
+                    f"    note: tolerated ao3-api load quirk for work "
+                    f"{source_work_id} ({type(exc).__name__}: {exc})"
+                )
             self._work_cache[source_work_id] = work
 
         if with_chapters and source_work_id not in self._chapters_loaded:

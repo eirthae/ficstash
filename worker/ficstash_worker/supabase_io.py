@@ -258,6 +258,53 @@ def mark_matches_saved(
     ).eq("source_work_id", source_work_id).execute()
 
 
+def reset_empty_offline(client: Client, source: str = "ao3") -> int:
+    """Clear the offline flag on works that have no readable chapter text.
+
+    Older worker builds flagged a work `offline=True` before its chapter bodies
+    were actually stored, so a failed fetch could leave a work marked
+    "downloaded" while empty — and the backfill (which only looks at
+    offline=False works) would never retry it. This re-checks every flagged work
+    against the chapters table and resets any with zero fetched chapters back to
+    offline=False so the next backfill pass picks them up. DB-only; no AO3 hits.
+    Idempotent and safe to run every sync.
+    """
+    flagged = (
+        client.table("works")
+        .select("id")
+        .eq("source", source)
+        .eq("offline", True)
+        .execute()
+        .data
+        or []
+    )
+    if not flagged:
+        return 0
+    flagged_ids = [w["id"] for w in flagged]
+
+    chunk = 100
+    have_text: set[str] = set()
+    for i in range(0, len(flagged_ids), chunk):
+        batch = flagged_ids[i : i + chunk]
+        rows = (
+            client.table("chapters")
+            .select("work_id")
+            .in_("work_id", batch)
+            .eq("fetched", True)
+            .execute()
+            .data
+            or []
+        )
+        for r in rows:
+            have_text.add(r["work_id"])
+
+    empty_ids = [wid for wid in flagged_ids if wid not in have_text]
+    for i in range(0, len(empty_ids), chunk):
+        batch = empty_ids[i : i + chunk]
+        client.table("works").update({"offline": False}).in_("id", batch).execute()
+    return len(empty_ids)
+
+
 def upsert_chapters(client: Client, work_id: str, chapters: list[Chapter]) -> int:
     """Insert/update chapter bodies for a work. Returns the count written."""
     rows = [
