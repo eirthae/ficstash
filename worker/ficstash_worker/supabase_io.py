@@ -117,6 +117,46 @@ def fetch_untitled_works(
     return [r["source_work_id"] for r in rows if r.get("source_work_id")]
 
 
+def fetch_plaintext_chapter_works(
+    client: Client, source: str = "ao3", limit: int | None = None
+) -> list[str]:
+    """Return source_work_ids of works whose stored chapter bodies are plain text.
+
+    Early builds stored ao3-api's ``Chapter.text``, which strips all markup, so
+    the reader (which injects bodies as HTML) rendered those chapters as one
+    unbroken blob with no paragraph spacing. Newer builds store the chapter's
+    real HTML. A genuine HTML body always contains at least one ``<`` tag; a
+    stripped plain-text body never does — so chapters whose fetched content has
+    no ``<`` are the legacy ones a repair pass should re-download.
+
+    Ordered most-recently-updated first and capped by ``limit`` to stay polite.
+    """
+    # Fetched chapter rows whose body contains no markup at all. Select only the
+    # work_id so we don't pull the (large) content blobs back over the wire.
+    resp = (
+        client.table("chapters")
+        .select("work_id")
+        .eq("fetched", True)
+        .not_.like("content", "%<%")
+        .execute()
+    )
+    work_uuids = {r["work_id"] for r in (resp.data or []) if r.get("work_id")}
+    if not work_uuids:
+        return []
+    query = (
+        client.table("works")
+        .select("source_work_id,source_updated")
+        .eq("source", source)
+        .eq("hidden", False)
+        .in_("id", list(work_uuids))
+        .order("source_updated", desc=True)
+    )
+    if limit:
+        query = query.limit(limit)
+    rows = list(query.execute().data or [])
+    return [r["source_work_id"] for r in rows if r.get("source_work_id")]
+
+
 def upsert_work(
     client: Client,
     meta: WorkMeta,

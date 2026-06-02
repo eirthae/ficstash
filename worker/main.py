@@ -17,6 +17,10 @@ Optional:
   OFFLINE_BACKFILL_MAX         how many not-yet-offline works to fully download
                                per run (default 25; "all"/0 = no cap). Keeps the
                                offline backfill gradual and polite to AO3.
+  REFLOW_MAX                   how many legacy plain-text works to re-download
+                               with formatting intact per run (default no cap;
+                               "all"/0 = no cap). One-off cleanup of works whose
+                               chapter bodies older builds stored as plain text.
 
 Flow: log in → passes over the user's AO3 activity. The user-initiated
 "requested" passes run first so a freshly pasted link or tapped Save downloads
@@ -32,6 +36,9 @@ right away, instead of waiting behind the full (and slow) library sweep:
   7. Offline backfill → download full chapter text for any work that isn't a
      full offline copy yet (subscriptions), capped per run. The app is
      offline-first: every work should become readable offline by default.
+  8. Reflow legacy plain-text chapters → re-download AO3 works whose chapter
+     bodies older builds stored as markup-stripped plain text, so the reader
+     shows real paragraph spacing again.
 Upserts omit reader-state columns so progress survives re-syncs, and unchanged
 works are never re-downloaded.
 """
@@ -52,6 +59,7 @@ from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_existing_works,
     fetch_non_offline_works,
+    fetch_plaintext_chapter_works,
     fetch_requested_urls,
     fetch_tracked_groups,
     fetch_untitled_works,
@@ -84,6 +92,10 @@ DEFAULT_REPAIR_MAX = 100
 # still spaced RATE_LIMIT_SECONDS apart and only missing works are fetched, so
 # AO3 stays polite. Set OFFLINE_BACKFILL_MAX to a number to re-cap a run.
 DEFAULT_OFFLINE_BACKFILL_MAX = None
+# Per-run cap on how many legacy plain-text works to re-download with formatting
+# intact. Unbounded by default (requests stay RATE_LIMIT_SECONDS apart); set
+# REFLOW_MAX to a number to re-cap a run.
+DEFAULT_REFLOW_MAX = None
 
 
 def check_env() -> None:
@@ -140,6 +152,39 @@ def _offline_backfill_max() -> int | None:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_OFFLINE_BACKFILL_MAX
+
+
+def _link_error_message(exc: Exception) -> str:
+    """Turn a FanFicFare download failure into a message worth showing the user.
+
+    Some sites (notably fanfiction.net) sit behind Cloudflare and return HTTP
+    403 to datacenter IPs like GitHub Actions. There's no polite server-side way
+    around that — it needs a real browser solving the challenge — so we surface
+    an honest, actionable message instead of a raw "HTTPError: 403".
+    """
+    text = f"{type(exc).__name__}: {exc}"
+    low = text.lower()
+    if "403" in low or "cloudflare" in low or "forbidden" in low:
+        return (
+            "This site blocks automated downloads (HTTP 403 / Cloudflare). "
+            "fanfiction.net in particular can't be archived from the server — "
+            "try a Royal Road, Scribble Hub, SpaceBattles or AO3 link instead."
+        )
+    if "404" in low or "not found" in low:
+        return "Story not found (404) — check the URL is correct and public."
+    return text
+
+
+def _reflow_max() -> int | None:
+    raw = os.environ.get("REFLOW_MAX", "").strip()
+    if not raw:
+        return DEFAULT_REFLOW_MAX
+    if raw.lower() in ("0", "all", "none"):
+        return None  # re-download every legacy plain-text work this run
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_REFLOW_MAX
 
 
 def _parse_ts(value) -> datetime | None:
@@ -241,7 +286,7 @@ def main() -> None:
                 link_failed += 1
                 print(f"    unsupported site ({exc}).")
             except Exception as exc:  # noqa: BLE001
-                mark_request(db, rid, status="error", error=f"{type(exc).__name__}: {exc}")
+                mark_request(db, rid, status="error", error=_link_error_message(exc))
                 link_failed += 1
                 print(f"    skipped ({type(exc).__name__}: {exc})")
     print(f"Requested links: {link_done} downloaded, {link_failed} failed.")
@@ -574,6 +619,50 @@ def main() -> None:
             bf_failed += 1
             print(f"    backfill {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Offline backfill: {bf_done} downloaded, {bf_failed} failed.")
+
+    # ---- Pass 8: reflow legacy plain-text chapters -------------------------
+    # Early builds stored ao3-api's Chapter.text (markup stripped), which the
+    # reader rendered as one unbroken blob with no paragraph spacing. Now that
+    # the AO3 source stores real chapter HTML, re-download those legacy works so
+    # their formatting is restored. A capped batch per run keeps AO3 polite.
+    print("\n== Reflow legacy plain-text chapters ==")
+    reflow_max = _reflow_max()
+    reflow_ids = fetch_plaintext_chapter_works(db, limit=reflow_max)
+    print(
+        f"{len(reflow_ids)} work(s) have plain-text chapters to re-download "
+        f"(max {reflow_max or 'no cap'})."
+    )
+    rf_done = rf_failed = 0
+    for wid in reflow_ids:
+        if wid in have_offline:
+            continue  # already re-downloaded with HTML this run
+        try:
+            space()
+            meta = _with_backoff(
+                lambda: ao3.fetch_work_metadata(wid), what=f"reflow metadata {wid}"
+            )
+            work_uuid = upsert_work(db, meta)
+            chapters = []
+            for n in range(1, meta.chapters + 1):
+                space()
+                chapters.append(
+                    _with_backoff(
+                        lambda n=n: ao3.fetch_chapter(wid, n),
+                        what=f"chapter {n} of {wid}",
+                    )
+                )
+            written = upsert_chapters(db, work_uuid, chapters)
+            if not written:
+                rf_failed += 1
+                print(f"    reflow {wid} — no chapters fetched, will retry.")
+                continue
+            have_offline.add(wid)
+            rf_done += 1
+            print(f"    reflowed {wid} — {written} chapter(s).")
+        except Exception as exc:  # noqa: BLE001
+            rf_failed += 1
+            print(f"    reflow {wid} skipped ({type(exc).__name__}: {exc})")
+    print(f"Reflow: {rf_done} re-downloaded, {rf_failed} failed.")
 
     print("\nSync complete.")
 

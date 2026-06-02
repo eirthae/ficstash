@@ -14,6 +14,7 @@ Store the session, never the password.
 
 from __future__ import annotations
 
+import html
 import math
 import time
 from datetime import datetime, timezone
@@ -209,7 +210,7 @@ class AO3Source(Source):
             n=chapter_n,
             title=getattr(ch, "title", "") or "",
             words=int(getattr(ch, "words", 0) or 0),
-            html=_chapter_text(ch),
+            html=_chapter_html(ch),
         )
 
     def _load_work(self, source_work_id: str, with_chapters: bool = False) -> "AO3.Work":
@@ -471,12 +472,48 @@ def _soup_int(soup, selector: str) -> int:
     return int(raw) if raw.isdigit() else 0
 
 
-def _chapter_text(ch) -> str:
+def _chapter_html(ch) -> str:
+    """Return the chapter body as HTML so paragraph breaks and inline
+    formatting survive into the reader.
+
+    ao3-api's ``Chapter.text`` concatenates each paragraph's *plain text* with
+    newlines, stripping all markup. The app injects chapter bodies with
+    ``dangerouslySetInnerHTML``, where those newlines collapse to a single
+    space — so the whole chapter renders as one unbroken blob with no spacing
+    between paragraphs. To preserve formatting we instead pull the inner HTML
+    of AO3's ``<div role="article">`` (the userstuff body), matching what the
+    FanFicFare path already stores for other sources.
+
+    Falls back to wrapping the plain text in ``<p>`` tags when the chapter
+    soup isn't available (e.g. a future ao3-api that doesn't expose it).
+    """
+    soup = getattr(ch, "_soup", None)
+    if soup is not None:
+        try:
+            div = soup.find("div", {"role": "article"})
+            if div is None:
+                div = soup.find("div", class_="userstuff")
+            if div is not None:
+                # Drop AO3's screen-reader landmark heading ("Chapter Text").
+                for landmark in div.find_all("h3", class_="landmark"):
+                    landmark.decompose()
+                inner = div.decode_contents().strip()
+                if inner:
+                    return inner
+        except Exception:  # noqa: BLE001 — fall through to the plain-text path
+            pass
+
+    # Fallback: plain text → one <p> per non-empty line, escaped.
+    raw = ""
     for attr in ("text", "content"):
         val = getattr(ch, attr, None)
         if val:
-            return str(val)
-    return ""
+            raw = str(val)
+            break
+    if not raw:
+        return ""
+    paras = [p.strip() for p in raw.replace("\r", "").split("\n")]
+    return "".join(f"<p>{html.escape(p)}</p>" for p in paras if p)
 
 
 def _status(work: "AO3.Work") -> str:
