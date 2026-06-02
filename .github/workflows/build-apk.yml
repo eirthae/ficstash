@@ -1,8 +1,20 @@
 name: Build APK
 
-# Manual trigger only — run from the Actions tab, download the APK artifact.
+# Two ways to run:
+#  - Manual (workflow_dispatch): builds the APK and uploads it as a throwaway
+#    Actions artifact — for quick test cycles. Artifacts expire (~90 days).
+#  - Push a version tag (e.g. `git tag v0.4.0 && git push origin v0.4.0`):
+#    builds the APK and publishes it as a permanent GitHub Release asset with
+#    a clean versioned filename and auto-generated notes.
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+# Needed for the release step to create a Release with the GITHUB_TOKEN.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -78,3 +90,19 @@ jobs:
           name: ficstash-app-debug
           path: app/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      # ---- Release on a version tag -------------------------------------
+      # Copy the APK to a clean versioned name at the repo root (the default
+      # working-directory for run steps is `app`, so the source path is
+      # relative to that).
+      - name: Stage versioned APK
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/ficstash-${{ github.ref_name }}.apk"
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FicStash ${{ github.ref_name }}
+          files: ficstash-${{ github.ref_name }}.apk
+          generate_release_notes: true

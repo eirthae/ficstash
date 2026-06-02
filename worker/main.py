@@ -18,14 +18,16 @@ Optional:
                                per run (default 25; "all"/0 = no cap). Keeps the
                                offline backfill gradual and polite to AO3.
 
-Flow: log in → passes over the user's AO3 activity:
-  1. Bookmarks   → full offline copies (metadata + chapter bodies).
-  2. Subscriptions → register metadata, flagged for new-chapter tracking.
-  3. Repair blank metadata → re-fetch title/author for works older builds left blank.
-  4. Tracked tag groups → discover new matches.
-  5. Requested saves → full offline copies for in-app Save requests.
-  6. Requested links → full offline copies of works added by pasted URL
+Flow: log in → passes over the user's AO3 activity. The user-initiated
+"requested" passes run first so a freshly pasted link or tapped Save downloads
+right away, instead of waiting behind the full (and slow) library sweep:
+  1. Requested links → full offline copies of works added by pasted URL
      (Royal Road, Scribble Hub, FFN, …) via FanFicFare.
+  2. Requested saves → full offline copies for in-app Save requests.
+  3. Bookmarks   → full offline copies (metadata + chapter bodies).
+  4. Subscriptions → register metadata, flagged for new-chapter tracking.
+  5. Repair blank metadata → re-fetch title/author for works older builds left blank.
+  6. Tracked tag groups → discover new matches.
   7. Offline backfill → download full chapter text for any work that isn't a
      full offline copy yet (subscriptions), capped per run. The app is
      offline-first: every work should become readable offline by default.
@@ -171,7 +173,106 @@ def main() -> None:
             time.sleep(RATE_LIMIT_SECONDS)
         request_count += 1
 
-    # ---- Pass 1: bookmarks → full offline copies ---------------------------
+    # ---- Pass 1: requested links → full offline copies via FanFicFare ------
+    # Works the user added by pasting a URL in the app (Royal Road, Scribble
+    # Hub, FFN, …). Runs first so a just-pasted link downloads promptly rather
+    # than waiting behind the full library sweep. Polite per-chapter spacing.
+    print("\n== Requested links ==")
+    link_requests = fetch_requested_urls(db)
+    print(f"{len(link_requests)} link request(s).")
+    link_done = link_failed = 0
+    if link_requests:
+        from ficstash_worker.sources.link import LinkFetcher, UnsupportedSite
+
+        linker = LinkFetcher()
+        for req in link_requests:
+            rid = req["id"]
+            url = req["url"]
+            print(f"[link] {url}")
+            try:
+                mark_request(db, rid, status="fetching")
+                space()
+                meta, chap_list = linker.prepare(url)
+                work_uuid = upsert_work(db, meta)
+                chapters = []
+                for i, ch in enumerate(chap_list):
+                    space()
+                    chapters.append(linker.fetch_chapter(url, i, ch))
+                written = upsert_chapters(db, work_uuid, chapters)
+                if not written:
+                    mark_request(db, rid, status="error", error="No chapters fetched.")
+                    link_failed += 1
+                    print("    no chapters fetched.")
+                    continue
+                mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
+                mark_request(
+                    db,
+                    rid,
+                    status="done",
+                    source=meta.source,
+                    source_work_id=meta.source_work_id,
+                    title=meta.title,
+                )
+                link_done += 1
+                print(f"    downloaded — {written} chapter(s) from {meta.source}.")
+            except UnsupportedSite as exc:
+                mark_request(db, rid, status="error", error=f"Unsupported site: {exc}")
+                link_failed += 1
+                print(f"    unsupported site ({exc}).")
+            except Exception as exc:  # noqa: BLE001
+                mark_request(db, rid, status="error", error=f"{type(exc).__name__}: {exc}")
+                link_failed += 1
+                print(f"    skipped ({type(exc).__name__}: {exc})")
+    print(f"Requested links: {link_done} downloaded, {link_failed} failed.")
+
+    # ---- Pass 2: requested saves → full offline copies ---------------------
+    # Works the user tapped "Save" on in the app (tag_matches.wanted). Fetch the
+    # full work like a bookmark, store it offline, then mark the match saved.
+    # Runs ahead of the library sweep so a tapped Save lands quickly.
+    print("\n== Requested saves ==")
+    wanted = fetch_wanted_matches(db)
+    print(f"{len(wanted)} work(s) requested.")
+    saved_count = save_failed = 0
+    for wid in wanted:
+        if wid in have_offline:
+            # Already downloaded in full this run — just flag it.
+            mark_matches_saved(db, wid)
+            saved_count += 1
+            continue
+        try:
+            space()
+            meta = _with_backoff(
+                lambda: ao3.fetch_work_metadata(wid), what=f"requested metadata {wid}"
+            )
+            work_uuid = upsert_work(db, meta)
+            chapters = []
+            for n in range(1, meta.chapters + 1):
+                space()
+                chapters.append(
+                    _with_backoff(
+                        lambda n=n: ao3.fetch_chapter(wid, n),
+                        what=f"chapter {n} of {wid}",
+                    )
+                )
+            written = upsert_chapters(db, work_uuid, chapters)
+            if not written:
+                # No text fetched — leave it un-flagged and still wanted so a
+                # later run retries, rather than showing an empty work.
+                save_failed += 1
+                print(f"    requested {wid} — no chapters fetched, will retry.")
+                continue
+            mark_flag(db, [wid], "offline")
+            mark_matches_saved(db, wid)
+            processed.add(wid)
+            have_offline.add(wid)
+            saved_count += 1
+            print(f"    saved {wid} — {written} chapter(s).")
+        except Exception as exc:  # noqa: BLE001
+            save_failed += 1
+            print(f"    requested {wid} skipped ({type(exc).__name__}: {exc})")
+    print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
+
+    # ---- Pass 3: bookmarks → full offline copies ---------------------------
     print("\n== Bookmarks ==")
     bookmarks = _with_backoff(
         ao3.import_reading_list, what="bookmark list", broad=True
@@ -207,6 +308,13 @@ def main() -> None:
             # stored, so a work is never shown as "downloaded" while empty.
             work_uuid = upsert_work(db, meta, bookmarked=True)
             processed.add(wid)
+
+            if wid in have_offline:
+                # A requested save already downloaded this work in full earlier
+                # this run. Keep the bookmarked flag we just set; skip re-fetch.
+                unchanged += 1
+                print("    already downloaded this run — flagged bookmarked.")
+                continue
 
             is_new = prev is None
             changed = (
@@ -248,7 +356,7 @@ def main() -> None:
         f"{failed} failed."
     )
 
-    # ---- Pass 2: subscriptions → metadata + new-chapter tracking -----------
+    # ---- Pass 4: subscriptions → metadata + new-chapter tracking -----------
     print("\n== Subscriptions ==")
     subs = _with_backoff(
         ao3.import_subscriptions, what="subscriptions", broad=True
@@ -285,7 +393,7 @@ def main() -> None:
         f"{sub_filtered} filtered, {sub_failed} failed."
     )
 
-    # ---- Pass 3: repair works with blank metadata --------------------------
+    # ---- Pass 5: repair works with blank metadata --------------------------
     # Older builds tolerated an ao3-api reload() abort without falling back to
     # the soup, so some works landed with an empty title/author/fandom (readable
     # but blank on the library page). Re-fetch their metadata — now soup-backed —
@@ -315,7 +423,7 @@ def main() -> None:
             print(f"    repair {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Repair: {repaired} repaired, {repair_failed} failed.")
 
-    # ---- Pass 4: tracked tag groups → discover new matches -----------------
+    # ---- Pass 6: tracked tag groups → discover new matches -----------------
     print("\n== Tracked tag groups ==")
     groups = fetch_tracked_groups(db)
     print(f"{len(groups)} tracked group(s).")
@@ -382,104 +490,6 @@ def main() -> None:
             print(f"    '{label}': {written} match(es).{note}")
         except Exception as exc:  # noqa: BLE001
             print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
-
-    # ---- Pass 5: requested saves → full offline copies ---------------------
-    # Works the user tapped "Save" on in the app (tag_matches.wanted). Fetch the
-    # full work like a bookmark, store it offline, then mark the match saved.
-    print("\n== Requested saves ==")
-    wanted = fetch_wanted_matches(db)
-    print(f"{len(wanted)} work(s) requested.")
-    saved_count = save_failed = 0
-    for wid in wanted:
-        if wid in have_offline:
-            # Already downloaded in full this run (e.g. also a bookmark) — just flag it.
-            mark_matches_saved(db, wid)
-            saved_count += 1
-            continue
-        try:
-            space()
-            meta = _with_backoff(
-                lambda: ao3.fetch_work_metadata(wid), what=f"requested metadata {wid}"
-            )
-            work_uuid = upsert_work(db, meta)
-            chapters = []
-            for n in range(1, meta.chapters + 1):
-                space()
-                chapters.append(
-                    _with_backoff(
-                        lambda n=n: ao3.fetch_chapter(wid, n),
-                        what=f"chapter {n} of {wid}",
-                    )
-                )
-            written = upsert_chapters(db, work_uuid, chapters)
-            if not written:
-                # No text fetched — leave it un-flagged and still wanted so a
-                # later run retries, rather than showing an empty work.
-                save_failed += 1
-                print(f"    requested {wid} — no chapters fetched, will retry.")
-                continue
-            mark_flag(db, [wid], "offline")
-            mark_matches_saved(db, wid)
-            processed.add(wid)
-            have_offline.add(wid)
-            saved_count += 1
-            print(f"    saved {wid} — {written} chapter(s).")
-        except Exception as exc:  # noqa: BLE001
-            save_failed += 1
-            print(f"    requested {wid} skipped ({type(exc).__name__}: {exc})")
-    print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
-
-    # ---- Pass 6: requested links → full offline copies via FanFicFare ------
-    # Works the user added by pasting a URL in the app (Royal Road, Scribble
-    # Hub, FFN, …). Runs before the long backfill so a just-pasted link
-    # downloads promptly. Same per-chapter spacing as AO3 to stay polite.
-    print("\n== Requested links ==")
-    link_requests = fetch_requested_urls(db)
-    print(f"{len(link_requests)} link request(s).")
-    link_done = link_failed = 0
-    if link_requests:
-        from ficstash_worker.sources.link import LinkFetcher, UnsupportedSite
-
-        linker = LinkFetcher()
-        for req in link_requests:
-            rid = req["id"]
-            url = req["url"]
-            print(f"[link] {url}")
-            try:
-                mark_request(db, rid, status="fetching")
-                space()
-                meta, chap_list = linker.prepare(url)
-                work_uuid = upsert_work(db, meta)
-                chapters = []
-                for i, ch in enumerate(chap_list):
-                    space()
-                    chapters.append(linker.fetch_chapter(url, i, ch))
-                written = upsert_chapters(db, work_uuid, chapters)
-                if not written:
-                    mark_request(db, rid, status="error", error="No chapters fetched.")
-                    link_failed += 1
-                    print("    no chapters fetched.")
-                    continue
-                mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
-                mark_request(
-                    db,
-                    rid,
-                    status="done",
-                    source=meta.source,
-                    source_work_id=meta.source_work_id,
-                    title=meta.title,
-                )
-                link_done += 1
-                print(f"    downloaded — {written} chapter(s) from {meta.source}.")
-            except UnsupportedSite as exc:
-                mark_request(db, rid, status="error", error=f"Unsupported site: {exc}")
-                link_failed += 1
-                print(f"    unsupported site ({exc}).")
-            except Exception as exc:  # noqa: BLE001
-                mark_request(db, rid, status="error", error=f"{type(exc).__name__}: {exc}")
-                link_failed += 1
-                print(f"    skipped ({type(exc).__name__}: {exc})")
-    print(f"Requested links: {link_done} downloaded, {link_failed} failed.")
 
     # ---- Pass 7: offline backfill → full copies for everything else --------
     # The app is offline-first, so every work should be a full offline copy.
