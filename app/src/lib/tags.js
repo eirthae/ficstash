@@ -156,6 +156,7 @@ export async function fetchMatches(groupId) {
     .select('*')
     .eq('group_id', groupId)
     .eq('dismissed', false)
+    .eq('saved', false)
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(mapMatch);
