@@ -7,7 +7,6 @@ import { DiscoverScreen, TagResultsScreen } from './screens/Discover.jsx';
 import { SettingsScreen, ConnectScreen } from './screens/Settings.jsx';
 import { StoryDetailScreen } from './screens/Detail.jsx';
 import { ReaderScreen } from './screens/Reader.jsx';
-import { ArchiveScreen } from './screens/Archive.jsx';
 import { WORKS, NEW_CHAPTERS, NEW_MATCHES } from './data/sample.js';
 import { fetchWorks } from './lib/library.js';
 
@@ -93,7 +92,6 @@ export default function App() {
     if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} nav={n} />;
     if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={setReaderSettings} nav={n} />;
     if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
-    if (top.screen === 'archive') return <ArchiveScreen works={works} nav={n} />;
     if (top.screen === 'connect') return <ConnectScreen nav={n} />;
     return null;
   };

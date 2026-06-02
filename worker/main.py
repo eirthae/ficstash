@@ -11,10 +11,9 @@ Required environment variables:
   AO3_PASSWORD                 AO3 password (used to mint a session, not stored)
 
 Optional:
-  HISTORY_MAX_PAGES            how many reading-history listing pages to walk
-                               per run (default 3 ≈ 60 works). Already-stored
-                               history works are just re-flagged, so history
-                               backfills a little each run rather than all at once.
+  REPAIR_MAX                   how many blank-metadata works to re-fetch per run
+                               (default 100; "all"/0 = no cap). Repairs works
+                               that older builds stored without a title/author.
   OFFLINE_BACKFILL_MAX         how many not-yet-offline works to fully download
                                per run (default 25; "all"/0 = no cap). Keeps the
                                offline backfill gradual and polite to AO3.
@@ -22,13 +21,13 @@ Optional:
 Flow: log in → passes over the user's AO3 activity:
   1. Bookmarks   → full offline copies (metadata + chapter bodies).
   2. Subscriptions → register metadata, flagged for new-chapter tracking.
-  3. Reading history → register metadata ("all-time usage"; new entries backfilled).
+  3. Repair blank metadata → re-fetch title/author for works older builds left blank.
   4. Tracked tag groups → discover new matches.
   5. Requested saves → full offline copies for in-app Save requests.
   6. Requested links → full offline copies of works added by pasted URL
      (Royal Road, Scribble Hub, FFN, …) via FanFicFare.
   7. Offline backfill → download full chapter text for any work that isn't a
-     full offline copy yet (subscriptions/history), capped per run. The app is
+     full offline copy yet (subscriptions), capped per run. The app is
      offline-first: every work should become readable offline by default.
 Upserts omit reader-state columns so progress survives re-syncs, and unchanged
 works are never re-downloaded.
@@ -50,11 +49,11 @@ from ficstash_worker.supabase_io import (
     fetch_non_offline_works,
     fetch_requested_urls,
     fetch_tracked_groups,
+    fetch_untitled_works,
     fetch_wanted_matches,
     make_client,
     mark_flag,
     mark_group_checked,
-    mark_in_history,
     mark_matches_saved,
     mark_request,
     reset_empty_offline,
@@ -74,7 +73,7 @@ REQUIRED_ENV = (
 # (with growing waits) whenever AO3 signals it's being hit too hard.
 RATE_LIMIT_SECONDS = 6
 BACKOFF_SECONDS = (30, 60, 120)
-DEFAULT_HISTORY_MAX_PAGES = 3
+DEFAULT_REPAIR_MAX = 100
 # Per-run cap on how many not-yet-offline works to fully download. Default is
 # unbounded so the library fully populates (no half-empty works); requests are
 # still spaced RATE_LIMIT_SECONDS apart and only missing works are fetched, so
@@ -114,16 +113,16 @@ def _with_backoff(fn, *, what: str, broad: bool = False):
     raise RuntimeError(f"gave up on {what} after backoff")
 
 
-def _history_max_pages() -> int | None:
-    raw = os.environ.get("HISTORY_MAX_PAGES", "").strip()
+def _repair_max() -> int | None:
+    raw = os.environ.get("REPAIR_MAX", "").strip()
     if not raw:
-        return DEFAULT_HISTORY_MAX_PAGES
+        return DEFAULT_REPAIR_MAX
     if raw.lower() in ("0", "all", "none"):
-        return None  # walk every page
+        return None  # repair every blank work this run
     try:
         return max(1, int(raw))
     except ValueError:
-        return DEFAULT_HISTORY_MAX_PAGES
+        return DEFAULT_REPAIR_MAX
 
 
 def _offline_backfill_max() -> int | None:
@@ -280,47 +279,35 @@ def main() -> None:
         f"{sub_filtered} filtered, {sub_failed} failed."
     )
 
-    # ---- Pass 3: reading history → metadata only ("all-time usage") --------
-    print("\n== Reading history ==")
-    max_pages = _history_max_pages()
-    history = _with_backoff(
-        lambda: ao3.import_history(max_pages=max_pages),
-        what="reading history",
-        broad=True,
-    )
-    print(f"Found {len(history)} history work(s) (max_pages={max_pages}).")
-    hist_fetched = hist_failed = hist_filtered = 0
-    flag_only: dict[str, str | None] = {}  # source_work_id -> last-read ISO date
-    for stub in history:
-        wid = stub.source_work_id
-        if wid in processed or wid in existing:
-            # already stored — just mark in_history + stamp the read date
-            flag_only[wid] = stub.history_read_at
-            continue
-        if not keep_language(stub):
-            hist_filtered += 1
-            continue
+    # ---- Pass 3: repair works with blank metadata --------------------------
+    # Older builds tolerated an ao3-api reload() abort without falling back to
+    # the soup, so some works landed with an empty title/author/fandom (readable
+    # but blank on the library page). Re-fetch their metadata — now soup-backed —
+    # a capped batch at a time. Metadata only; no chapter re-download.
+    print("\n== Repair blank metadata ==")
+    repair_ids = fetch_untitled_works(db, limit=_repair_max())
+    print(f"{len(repair_ids)} work(s) with blank metadata to repair.")
+    repaired = repair_failed = 0
+    for wid in repair_ids:
+        if wid in processed:
+            continue  # already re-fetched this run
         try:
             space()
             meta = _with_backoff(
-                lambda: ao3.fetch_work_metadata(wid), what=f"history metadata {wid}"
+                lambda: ao3.fetch_work_metadata(wid), what=f"repair metadata {wid}"
             )
-            if not keep_language(meta):
-                hist_filtered += 1
+            if not meta.title:
+                repair_failed += 1
+                print(f"    repair {wid} — still no title, will retry.")
                 continue
-            upsert_work(
-                db, meta, in_history=True, history_read_at=stub.history_read_at
-            )
+            upsert_work(db, meta)
             processed.add(wid)
-            hist_fetched += 1
+            repaired += 1
+            print(f"    repaired {wid} — {meta.title!r}.")
         except Exception as exc:  # noqa: BLE001
-            hist_failed += 1
-            print(f"    history {wid} skipped ({type(exc).__name__}: {exc})")
-    hist_flagged = mark_in_history(db, flag_only) if flag_only else 0
-    print(
-        f"History: {hist_fetched} newly stored, {hist_flagged} flagged, "
-        f"{hist_filtered} filtered, {hist_failed} failed."
-    )
+            repair_failed += 1
+            print(f"    repair {wid} skipped ({type(exc).__name__}: {exc})")
+    print(f"Repair: {repaired} repaired, {repair_failed} failed.")
 
     # ---- Pass 4: tracked tag groups → discover new matches -----------------
     print("\n== Tracked tag groups ==")

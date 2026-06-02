@@ -377,6 +377,64 @@ def _first_author(work: "AO3.Work") -> str:
     return ""
 
 
+# ---- soup fallbacks --------------------------------------------------------
+# When ao3-api's reload() aborts mid-parse (see _load_work), the Work object's
+# attributes (title/fandoms/authors/…) never populate even though _soup holds
+# the full work page. These read the same fields straight off the soup so a
+# tolerated load still yields complete metadata instead of blank cards.
+def _soup_of(work) -> "object | None":
+    return getattr(work, "_soup", None)
+
+
+def _soup_text(soup, selector: str) -> str:
+    if soup is None:
+        return ""
+    el = soup.select_one(selector)
+    return el.get_text(strip=True) if el else ""
+
+
+def _soup_first_tag(soup, container_cls: str) -> str:
+    """First tag name inside dd.<container_cls>.tags (e.g. fandom/relationship)."""
+    if soup is None:
+        return ""
+    el = soup.select_one(f"dd.{container_cls}.tags a.tag")
+    return el.get_text(strip=True) if el else ""
+
+
+def _soup_tag_list(soup, container_cls: str, kind: str) -> list[dict]:
+    if soup is None:
+        return []
+    out: list[dict] = []
+    for a in soup.select(f"dd.{container_cls}.tags a.tag"):
+        name = a.get_text(strip=True)
+        if name:
+            out.append({"t": name, "k": kind})
+    return out
+
+
+def _soup_chapters(soup) -> tuple[int, int | None]:
+    """Parse 'n/total' (or 'n/?') out of dd.chapters; returns (n, total|None)."""
+    raw = _soup_text(soup, "dd.chapters")
+    if not raw:
+        return 0, None
+    parts = raw.split("/")
+    try:
+        n = int(parts[0].replace(",", "").strip())
+    except ValueError:
+        n = 0
+    total: int | None = None
+    if len(parts) > 1:
+        t = parts[1].replace(",", "").strip()
+        if t.isdigit():
+            total = int(t)
+    return n, total
+
+
+def _soup_int(soup, selector: str) -> int:
+    raw = _soup_text(soup, selector).replace(",", "").strip()
+    return int(raw) if raw.isdigit() else 0
+
+
 def _chapter_text(ch) -> str:
     for attr in ("text", "content"):
         val = getattr(ch, attr, None)
@@ -387,7 +445,11 @@ def _chapter_text(ch) -> str:
 
 def _status(work: "AO3.Work") -> str:
     raw = (getattr(work, "status", "") or "").strip().lower()
-    return "complete" if raw in ("completed", "complete") else "ongoing"
+    if not raw:
+        # On a tolerated reload() abort the attr is blank; the stats block's
+        # dt.status reads "Completed:" for finished works, "Updated:" otherwise.
+        raw = _soup_text(_soup_of(work), "dt.status").strip().lower()
+    return "complete" if raw.startswith(("completed", "complete")) else "ongoing"
 
 
 def _tags(work: "AO3.Work") -> list[dict]:
@@ -407,38 +469,72 @@ def _tags(work: "AO3.Work") -> list[dict]:
 
 
 def _work_to_meta(source: str, source_work_id: str, work: "AO3.Work") -> WorkMeta:
+    # Soup is only consulted to fill blanks left by a tolerated reload() abort;
+    # for cleanly loaded works every attribute is already set and soup is unused.
+    soup = _soup_of(work)
+
     fandoms = getattr(work, "fandoms", None) or []
     fandom = ""
     if fandoms:
         f = fandoms[0]
         fandom = getattr(f, "name", None) or str(f)
+    if not fandom:
+        fandom = _soup_first_tag(soup, "fandom")
 
     relationships = getattr(work, "relationships", None) or []
     pairing = ""
     if relationships:
         r = relationships[0]
         pairing = getattr(r, "name", None) or str(r)
+    if not pairing:
+        pairing = _soup_first_tag(soup, "relationship")
 
     date_updated = getattr(work, "date_updated", None)
     updated_iso = date_updated.isoformat() if date_updated is not None else None
+    if updated_iso is None:
+        updated_iso = _soup_text(soup, "dd.status") or None
 
     nchapters = int(getattr(work, "nchapters", 0) or 0)
     expected = getattr(work, "expected_chapters", None)
     chapters_total = int(expected) if expected else None
+    if not nchapters:
+        nchapters, soup_total = _soup_chapters(soup)
+        if chapters_total is None:
+            chapters_total = soup_total
 
     title = getattr(work, "title", "") or ""
+    if not title:
+        title = _soup_text(soup, "h2.title.heading")
+
+    author = _first_author(work) or _soup_text(soup, "h3.byline.heading a[rel=author]")
+
+    summary = getattr(work, "summary", "") or ""
+    if not summary:
+        summary = _soup_text(soup, "div.summary blockquote")
+
+    tags = _tags(work)
+    if not tags:
+        tags = (
+            _soup_tag_list(soup, "relationship", "relationship")
+            + _soup_tag_list(soup, "character", "character")
+            + _soup_tag_list(soup, "freeform", "freeform")
+        )
+
+    words = int(getattr(work, "words", 0) or 0)
+    if not words:
+        words = _soup_int(soup, "dd.words")
 
     return WorkMeta(
         source=source,
         source_work_id=source_work_id,
         title=title,
-        author=_first_author(work),
+        author=author,
         fandom=fandom,
         pairing=pairing,
-        summary=getattr(work, "summary", "") or "",
-        tags=_tags(work),
+        summary=summary,
+        tags=tags,
         language=_language(work),
-        words=int(getattr(work, "words", 0) or 0),
+        words=words,
         chapters=nchapters,
         chapters_total=chapters_total,
         status=_status(work),

@@ -16,6 +16,7 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
   const [toast, showToast] = useToast();
   const [syncing, setSyncing] = useState(false);
   const [status, setStatus] = useState('all');
+  const [source, setSource] = useState('ao3'); // 'ao3' | 'other' (works added by link)
   const [showAdd, setShowAdd] = useState(false);
   const [pendingLinks, setPendingLinks] = useState([]);
 
@@ -73,40 +74,60 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
     );
   }
 
-  const archiveAction = { icon: 'solar:history-linear', onClick: () => nav.push('archive') };
-
-  // Works added by pasting a link (Royal Road, etc.) get their own section,
-  // separate from the AO3 library that fills the main list.
+  // Split the library by origin. "AO3" is everything synced from AO3; "Other"
+  // is works added by pasting a link (Royal Road, etc.). The toggle by the title
+  // filters the whole page, and the status tabs apply within the chosen source.
   const linkWorks = ready.filter(w => w.source && w.source !== 'ao3');
   const mainWorks = ready.filter(w => !w.source || w.source === 'ao3');
+  const sourceWorks = source === 'other' ? linkWorks : mainWorks;
 
-  // Status filter (All / Ongoing / Complete) over the AO3 library. Counts come
-  // from the full set so the labels stay stable as the user switches.
-  const ongoingCount = mainWorks.filter(w => w.status !== 'complete').length;
-  const completeCount = mainWorks.length - ongoingCount;
-  const shown = status === 'complete' ? mainWorks.filter(w => w.status === 'complete')
-    : status === 'ongoing' ? mainWorks.filter(w => w.status !== 'complete')
-    : mainWorks;
+  // Status filter (All / Ongoing / Complete) over the chosen source. Counts come
+  // from that source's full set so the labels stay stable as the user switches.
+  const ongoingCount = sourceWorks.filter(w => w.status !== 'complete').length;
+  const completeCount = sourceWorks.length - ongoingCount;
+  const shown = status === 'complete' ? sourceWorks.filter(w => w.status === 'complete')
+    : status === 'ongoing' ? sourceWorks.filter(w => w.status !== 'complete')
+    : sourceWorks;
   const label = status === 'complete' ? 'Complete' : status === 'ongoing' ? 'Ongoing' : 'All works';
-  const showLinks = linkWorks.length > 0 || pendingLinks.length > 0;
+  const isOther = source === 'other';
+  const pending = isOther ? pendingLinks : [];
 
   return (
     <div className="screen">
-      <Appbar large title="Library" actions={[addAction, syncAction, archiveAction]} />
+      <Appbar large title="Library" actions={[addAction, syncAction]} />
       {toast}
       <div className="scroll">
-        {mainWorks.length > 0 && (
+        <div className="seg src-seg" style={{ margin: '0 20px 14px' }}>
+          <button className={source === 'ao3' ? 'on' : ''} onClick={() => { setSource('ao3'); setStatus('all'); }}>AO3 · {mainWorks.length}</button>
+          <button className={source === 'other' ? 'on' : ''} onClick={() => { setSource('other'); setStatus('all'); }}>Other · {linkWorks.length}</button>
+        </div>
+        {sourceWorks.length > 0 && (
           <div className="seg" style={{ margin: '0 20px 16px' }}>
-            <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {mainWorks.length}</button>
+            <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {sourceWorks.length}</button>
             <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
             <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
           </div>
         )}
-        {mainWorks.length === 0 ? null
-          : shown.length === 0 ? (
+        {pending.map(r => (
+          <div key={r.id} style={{ padding: '0 20px' }}><LinkRequestRow req={r} /></div>
+        ))}
+        {sourceWorks.length === 0 && pending.length === 0 ? (
+          <div style={{ padding: '0 20px' }}>
+            <EmptyState icon={isOther ? 'solar:link-broken-linear' : 'solar:inbox-line-linear'}
+              title={isOther ? 'No imported works yet' : 'Nothing here yet'}
+              desc={isOther ? 'Tap + to paste a story link from Royal Road, Scribble Hub, FanFiction.net and more.'
+                : 'Your AO3 bookmarks and subscriptions will appear here after a sync.'}
+              action={isOther ? <button className="btn btn-lg btn-primary" onClick={() => setShowAdd(true)}>
+                <Icon icon="solar:add-circle-bold" size={20} /> Add a work by link</button> : undefined} />
+          </div>
+        ) : shown.length === 0 ? (
           <div style={{ padding: '0 20px' }}>
             <EmptyState icon="solar:inbox-line-linear" title={`No ${label.toLowerCase()} works`}
               desc="Nothing here under this filter yet." />
+          </div>
+        ) : isOther ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
+            {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
           </div>
         ) : layout === 'shelves' ? <Shelves works={shown} open={open} />
           : layout === 'fandom' ? <FandomSections works={shown} open={open} />
@@ -121,7 +142,6 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
               <div className="libgrid">{shown.map(w => <GridCard key={w.id} work={w} onOpen={open} />)}</div>
             </div>
           )}
-        {showLinks && <LinkSection works={linkWorks} pending={pendingLinks} open={open} />}
       </div>
       {addSheet}
     </div>
@@ -144,18 +164,6 @@ function LinkRequestRow({ req }) {
         <div className="story-sub" style={{ marginBottom: 7, wordBreak: 'break-all' }}>{prettyUrl(req.url)}</div>
         <div className="metarow" style={{ color }}><Icon icon={icon} size={14} /><span>{label}</span></div>
         {failed && req.error && <div className="summary" style={{ marginTop: 6 }}>{req.error}</div>}
-      </div>
-    </div>
-  );
-}
-
-function LinkSection({ works, pending, open }) {
-  return (
-    <div style={{ padding: '4px 20px 24px' }}>
-      <div className="section-label" style={{ marginBottom: 12 }}>Added by link · {works.length}</div>
-      {pending.map(r => <LinkRequestRow key={r.id} req={r} />)}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-        {works.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
       </div>
     </div>
   );

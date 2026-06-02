@@ -92,6 +92,29 @@ def fetch_non_offline_works(
     return list(query.execute().data or [])
 
 
+def fetch_untitled_works(
+    client: Client, source: str = "ao3", limit: int | None = None
+) -> list[str]:
+    """Return source_work_ids of stored works whose title never populated.
+
+    Older worker builds tolerated an ao3-api reload() abort but didn't fall back
+    to the soup, so those rows landed with a blank title (and blank
+    author/fandom). This finds them so a repair pass can re-fetch their metadata.
+    Ordered most-recently-updated first and capped by `limit` to stay polite.
+    """
+    query = (
+        client.table("works")
+        .select("source_work_id,title")
+        .eq("source", source)
+        .or_("title.is.null,title.eq.")
+        .order("source_updated", desc=True)
+    )
+    if limit:
+        query = query.limit(limit)
+    rows = list(query.execute().data or [])
+    return [r["source_work_id"] for r in rows if r.get("source_work_id")]
+
+
 def upsert_work(
     client: Client,
     meta: WorkMeta,

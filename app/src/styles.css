@@ -357,6 +357,9 @@ input,textarea { font-family:inherit; }
 .reader-sheet .seg button { color:var(--reader-text-dim); }
 .seg button.on { background:var(--surface-elevated); color:var(--text-primary); box-shadow:var(--shadow-card); }
 .reader-sheet .seg button.on { background:var(--reader-surface); color:var(--reader-ui); box-shadow:var(--shadow-card); border:1px solid var(--reader-border); }
+/* source toggle (AO3 / Other) sits above the status tabs — tint it so it reads
+   as the primary filter rather than a second identical row of pills. */
+.src-seg button.on { background:var(--accent); color:#fff; }
 
 /* theme swatch row */
 .themeswatches { display:flex; gap:10px; }
