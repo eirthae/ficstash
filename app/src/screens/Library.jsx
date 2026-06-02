@@ -115,6 +115,11 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
         </div>
         {sourceWorks.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 16px' }}>
+            <div className="seg" style={{ flex: 1 }}>
+              <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {sourceWorks.length}</button>
+              <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
+              <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+            </div>
             {isOther && (
               <button className="iconbtn ghost" onClick={() => setShowAdd(true)} aria-label="Add a work by link"
                 title="Add a work by link"
@@ -129,11 +134,6 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
                 <Icon icon={anyExpanded ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} size={20} />
               </button>
             )}
-            <div className="seg" style={{ flex: 1 }}>
-              <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {sourceWorks.length}</button>
-              <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
-              <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
-            </div>
           </div>
         )}
         {pending.map(r => (
