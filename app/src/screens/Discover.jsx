@@ -5,7 +5,7 @@ import { SearchField, EmptyState, TAG_COLOR, useToast, Sheet, Segmented } from '
 import { TagTile, SuggestionCard } from '../components/cards.jsx';
 import {
   fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup,
-  fetchMatches, markMatchSeen, markGroupSeen, autocompleteTags, requestSave,
+  fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
 } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
@@ -273,7 +273,7 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
 
   const dismiss = (w) => {
     setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
-    markMatchSeen(w.matchId || w.id).catch(() => {});
+    dismissMatch(w.matchId || w.id).catch(() => {});
     showToast('Dismissed', 'solar:eye-closed-linear');
   };
 

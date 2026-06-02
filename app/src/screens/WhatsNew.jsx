@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
 import { StatusBadge, fmtWords, useToast } from '../components/ui.jsx';
-import { fetchNewMatches, markMatchSeen, requestSave } from '../lib/tags.js';
+import { fetchNewMatches, markMatchSeen, dismissMatch, requestSave } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 
 // shared row: a new chapter on a followed work
@@ -94,9 +94,9 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
     markMatchSeen(u.matchId || u.id).catch(() => {});
     nav.push('detail', { work: u, suggestion: true, onSaved: () => markWanted(u) });
   };
-  const dismissMatch = (u) => {
+  const onDismissMatch = (u) => {
     setLiveMatches((arr) => (arr || matchList).filter((x) => x.id !== u.id));
-    markMatchSeen(u.matchId || u.id).catch(() => {});
+    dismissMatch(u.matchId || u.id).catch(() => {});
     showToast('Dismissed', 'solar:eye-closed-linear');
   };
   const saveMatch = async (u) => {
@@ -143,7 +143,7 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               {g.items.map(u => tab === 'chapters'
                 ? <ChapterUpdateRow key={u.id} u={u} nav={nav} />
-                : <MatchUpdateRow key={u.id} u={u} onOpen={openMatch} onDismiss={dismissMatch} onSave={saveMatch} saveState={saveStateOf(u)} />)}
+                : <MatchUpdateRow key={u.id} u={u} onOpen={openMatch} onDismiss={onDismissMatch} onSave={saveMatch} saveState={saveStateOf(u)} />)}
             </div>
           </div>
         ))}

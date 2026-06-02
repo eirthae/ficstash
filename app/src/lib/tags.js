@@ -60,6 +60,7 @@ function mapMatch(row) {
     fresh: !row.seen,
     wanted: !!row.wanted,
     saved: !!row.saved,
+    dismissed: !!row.dismissed,
   };
 }
 
@@ -82,13 +83,15 @@ export async function fetchTrackedGroups() {
   if (error) throw error;
 
   // One extra read to tally total/fresh matches per group, client-side.
+  // Dismissed (hidden) matches don't count toward either tally.
   const { data: matches, error: mErr } = await supabase
     .from('tag_matches')
-    .select('group_id,seen');
+    .select('group_id,seen,dismissed');
   if (mErr) throw mErr;
 
   const counts = {};
   for (const m of matches || []) {
+    if (m.dismissed) continue;
     const c = counts[m.group_id] || (counts[m.group_id] = { total: 0, fresh: 0 });
     c.total += 1;
     if (!m.seen) c.fresh += 1;
@@ -152,17 +155,30 @@ export async function fetchMatches(groupId) {
     .from('tag_matches')
     .select('*')
     .eq('group_id', groupId)
+    .eq('dismissed', false)
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(mapMatch);
 }
 
-// Flip a single match to "seen" (used when the user dismisses one suggestion).
+// Flip a single match to "seen" (clears its fresh badge, e.g. on open).
 export async function markMatchSeen(matchId) {
   if (!hasSupabase) return;
   const { error } = await supabase
     .from('tag_matches')
     .update({ seen: true })
+    .eq('id', matchId);
+  if (error) throw error;
+}
+
+// Permanently hide a match — the user dropped it. Distinct from `seen`: a
+// dismissed work is filtered out of group results and the What's New feed and
+// stays gone across reloads and worker re-runs.
+export async function dismissMatch(matchId) {
+  if (!hasSupabase) return;
+  const { error } = await supabase
+    .from('tag_matches')
+    .update({ dismissed: true, seen: true })
     .eq('id', matchId);
   if (error) throw error;
 }
@@ -215,6 +231,7 @@ export async function fetchNewMatches() {
     .from('tag_matches')
     .select('*')
     .eq('seen', false)
+    .eq('dismissed', false)
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
 

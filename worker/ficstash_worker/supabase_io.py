@@ -155,8 +155,9 @@ def fetch_tracked_groups(client: Client) -> list[dict]:
 def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> int:
     """Store discovered works for a tracked group.
 
-    Omits `seen`/`first_seen_at` so a work already marked seen stays seen across
-    re-runs; brand-new matches default to unseen ("fresh").
+    Omits `seen`/`first_seen_at`/`dismissed` so a work already marked seen stays
+    seen — and a user-dismissed work stays hidden — across re-runs; brand-new
+    matches default to unseen ("fresh") and not dismissed.
     """
     rows = [
         {
