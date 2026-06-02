@@ -454,7 +454,11 @@ def main() -> None:
         # freshly tracked tag pulls works posted from that moment on rather than
         # the tag's whole back-catalogue. Both manual and auto syncs stamp
         # last_checked, so the window always advances to the previous sync.
-        since = _parse_ts(g.get("last_checked")) or _parse_ts(g.get("created_at"))
+        last_checked = _parse_ts(g.get("last_checked"))
+        since = last_checked or _parse_ts(g.get("created_at"))
+        anchor = "last sync" if last_checked else "first run / created"
+        window = since.isoformat() if since else "all-time"
+        print(f"  window: works since {window} ({anchor})")
         tags_raw = g.get("tags") or []
         # A "Browse by language" group carries a single kind:'language' tag whose
         # id is AO3's language_id code; it's searched by language, not by tags.
