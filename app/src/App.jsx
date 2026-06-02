@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { App as CapApp } from '@capacitor/app';
+import { Preferences } from '@capacitor/preferences';
 import { BottomNav } from './components/chrome.jsx';
 import { LibraryScreen } from './screens/Library.jsx';
 import { WhatsNewScreen } from './screens/WhatsNew.jsx';
@@ -27,12 +28,35 @@ export default function App() {
   const resolvedMode = appMode === 'system' ? (systemDark ? 'dark' : 'light') : appMode;
 
   // ---- reader settings (independent of app mode) -------------------------
+  // Persisted through Capacitor Preferences (native key-value store) rather than
+  // WebView localStorage: on Android the WebView can drop localStorage between
+  // cold starts, which silently reset the reader's font/size/margins. Preferences
+  // is backed by SharedPreferences and survives. Hydration is async, so we guard
+  // the write effect until the stored value has loaded — otherwise the initial
+  // default-state render would clobber the saved settings before we read them.
   const [readerSettings, setReaderSettings] = useState(() => {
     let saved = {}; try { saved = JSON.parse(localStorage.getItem('fs-reader') || '{}'); } catch (e) {}
     return { ...READER_DEFAULTS, ...saved };
   });
-  useEffect(() => { try { localStorage.setItem('fs-reader', JSON.stringify(readerSettings)); } catch (e) {} }, [readerSettings]);
-  useEffect(() => { try { localStorage.setItem('fs-reader-theme', readerSettings.theme); } catch (e) {} }, [readerSettings.theme]);
+  const readerHydrated = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    Preferences.get({ key: 'fs-reader' })
+      .then(({ value }) => {
+        if (alive && value) {
+          try { setReaderSettings({ ...READER_DEFAULTS, ...JSON.parse(value) }); } catch (e) {}
+        }
+      })
+      .catch(() => {})
+      .finally(() => { readerHydrated.current = true; });
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (!readerHydrated.current) return;
+    Preferences.set({ key: 'fs-reader', value: JSON.stringify(readerSettings) }).catch(() => {});
+    try { localStorage.setItem('fs-reader', JSON.stringify(readerSettings)); } catch (e) {}
+    try { localStorage.setItem('fs-reader-theme', readerSettings.theme); } catch (e) {}
+  }, [readerSettings]);
 
   // ---- live library from Supabase (null = still loading) -----------------
   // When Supabase isn't configured, fetchWorks() returns null and we fall
