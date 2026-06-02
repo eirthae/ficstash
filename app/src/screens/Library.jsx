@@ -34,7 +34,6 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
     showToast(res.ok ? 'Sync started — new works arrive shortly.' : (res.error || 'Sync failed.'));
   };
   const syncAction = { icon: syncing ? 'solar:refresh-circle-bold' : 'solar:refresh-circle-linear', onClick: doSync };
-  const addAction = { icon: 'solar:add-circle-linear', onClick: () => setShowAdd(true) };
   const addSheet = (
     <AddLinkSheet open={showAdd} onClose={() => setShowAdd(false)} showToast={showToast}
       onAdded={() => { setShowAdd(false); reloadLinks(); }} />
@@ -63,7 +62,7 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
   if (!connected || ready.length === 0) {
     return (
       <div className="screen">
-        <Appbar large title="Library" actions={[addAction]} />
+        <Appbar large title="Library" />
         {toast}
         <div className="scroll" style={{ display: 'flex' }}>
           <EmptyState icon="solar:book-minimalistic-linear" title="Nothing here yet"
@@ -107,7 +106,7 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
 
   return (
     <div className="screen">
-      <Appbar large title="Library" actions={[addAction, syncAction]} />
+      <Appbar large title="Library" actions={[syncAction]} />
       {toast}
       <div className="scroll">
         <div className="seg src-seg" style={{ margin: '0 20px 14px' }}>
@@ -116,6 +115,13 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
         </div>
         {sourceWorks.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 16px' }}>
+            {isOther && (
+              <button className="iconbtn ghost" onClick={() => setShowAdd(true)} aria-label="Add a work by link"
+                title="Add a work by link"
+                style={{ flex: 'none', width: 40, height: 42, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
+                <Icon icon="solar:add-circle-linear" size={20} />
+              </button>
+            )}
             {showCollapseToggle && (
               <button className="iconbtn ghost" onClick={toggleAll} aria-label={anyExpanded ? 'Collapse all' : 'Expand all'}
                 title={anyExpanded ? 'Collapse all' : 'Expand all'}
