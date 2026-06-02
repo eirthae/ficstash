@@ -14,7 +14,9 @@ Store the session, never the password.
 
 from __future__ import annotations
 
+import math
 import time
+from datetime import datetime, timezone
 
 import AO3
 
@@ -41,6 +43,24 @@ def _hash_str(s: str) -> int:
 
 def palette_for(seed: str) -> int:
     return _hash_str(seed or "") % _PALETTE_COUNT
+
+
+def _revised_since(since: datetime | None) -> str:
+    """AO3 'Date' search value selecting works revised on/after `since`.
+
+    AO3's work search exposes only a relative date filter (work_search[revised_at]),
+    e.g. '< 7 days' = revised within the last 7 days. We translate `since` into the
+    smallest whole-day window that still covers it, rounding UP so we never drop a
+    work that's newer than the cutoff (a little over-inclusion is harmless — matches
+    are de-duped on upsert). Returns '' when there's no cutoff (search all-time).
+    """
+    if since is None:
+        return ""
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    secs = (datetime.now(timezone.utc) - since).total_seconds()
+    days = max(1, math.ceil(secs / 86400))
+    return f"< {days} days"
 
 
 def _is_rate_limited(exc: Exception) -> bool:
@@ -259,6 +279,7 @@ class AO3Source(Source):
         match_mode: str = "all",
         limit: int = 30,
         excluded_tags: list[str] | None = None,
+        since: datetime | None = None,
     ) -> list[WorkMeta]:
         """Find recent works matching a tracked tag group, via AO3's own search.
 
@@ -269,19 +290,23 @@ class AO3Source(Source):
           * match_mode 'any' (OR): one search per tag, results merged.
         `excluded_tags` are handed to AO3 as excluded_tag_names so any work
         carrying one is dropped before it becomes a match.
-        Results are newest-first by date posted, deduped, capped at `limit`.
+        `since` constrains results to works revised on/after that moment (AO3's
+        own date filter), so a run only surfaces works new since the last sync;
+        None searches all-time. Results are newest-first by date posted, deduped,
+        capped at `limit`.
         """
         tags = [t for t in (tags or []) if t]
         if not tags:
             return []
         excluded_csv = ",".join(t for t in (excluded_tags or []) if t)
+        revised = _revised_since(since)
         queries = [",".join(tags)] if match_mode == "all" else list(tags)
 
         seen: dict[str, WorkMeta] = {}
         for qi, q in enumerate(queries):
             if qi:
                 time.sleep(RATE_LIMIT_SECONDS)  # space multi-tag 'any' searches
-            for w in self._run_tag_search(q, limit, excluded_tags=excluded_csv):
+            for w in self._run_tag_search(q, limit, excluded_tags=excluded_csv, revised_at=revised):
                 wid = str(getattr(w, "id", "") or "")
                 if not wid or wid in seen:
                     continue
@@ -291,20 +316,28 @@ class AO3Source(Source):
         return list(seen.values())[:limit]
 
     # ---- language discovery ------------------------------------------------
-    def search_language(self, language: str, limit: int = 30) -> list[WorkMeta]:
+    def search_language(
+        self, language: str, limit: int = 30, since: datetime | None = None
+    ) -> list[WorkMeta]:
         """Find recent works in one AO3 language (newest first, metadata only).
 
         `language` is AO3's language_id code (e.g. "hy" Armenian, "ja" Japanese).
-        Mirrors search_group so language browsing feeds the same match flow.
+        `since` constrains results to works revised on/after that moment, so a run
+        only surfaces works new since the last sync (None = all-time). Mirrors
+        search_group so language browsing feeds the same match flow.
         """
         language = (language or "").strip()
         if not language:
             return []
+        revised = _revised_since(since)
         s = self._require_session()
         try:
             try:
                 search = AO3.Search(
-                    language=language, sort_column="created_at", session=s
+                    language=language,
+                    revised_at=revised,
+                    sort_column="created_at",
+                    session=s,
                 )
             except TypeError:
                 search = AO3.Search(language=language, session=s)
@@ -321,18 +354,21 @@ class AO3Source(Source):
                 out[wid] = _work_to_meta(self.id, wid, w)
         return list(out.values())[:limit]
 
-    def _run_tag_search(self, tags_csv: str, limit: int, excluded_tags: str = ""):
+    def _run_tag_search(
+        self, tags_csv: str, limit: int, excluded_tags: str = "", revised_at: str = ""
+    ):
         s = self._require_session()
         try:
             try:
                 search = AO3.Search(
                     tags=tags_csv,
                     excluded_tags=excluded_tags,
+                    revised_at=revised_at,
                     sort_column="created_at",
                     session=s,
                 )
             except TypeError:
-                # Older ao3-api signatures lack sort_column / excluded_tags.
+                # Older ao3-api signatures lack revised_at / sort_column / excluded_tags.
                 try:
                     search = AO3.Search(
                         tags=tags_csv, excluded_tags=excluded_tags, session=s

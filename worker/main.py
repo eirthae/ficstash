@@ -27,7 +27,8 @@ right away, instead of waiting behind the full (and slow) library sweep:
   3. Bookmarks   → full offline copies (metadata + chapter bodies).
   4. Subscriptions → register metadata, flagged for new-chapter tracking.
   5. Repair blank metadata → re-fetch title/author for works older builds left blank.
-  6. Tracked tag groups → discover new matches.
+  6. Tracked tag groups → discover matches new since the group's last sync
+     (first run anchors to when the group was created), not its back-catalogue.
   7. Offline backfill → download full chapter text for any work that isn't a
      full offline copy yet (subscriptions), capped per run. The app is
      offline-first: every work should become readable offline by default.
@@ -38,8 +39,10 @@ works are never re-downloaded.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
@@ -137,6 +140,24 @@ def _offline_backfill_max() -> int | None:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_OFFLINE_BACKFILL_MAX
+
+
+def _parse_ts(value) -> datetime | None:
+    """Parse a Supabase ISO timestamp into an aware datetime, or None.
+
+    Tolerates a trailing 'Z' and over-long fractional seconds (Postgres can emit
+    more than the 6 digits datetime.fromisoformat accepts on older Pythons).
+    """
+    if not value:
+        return None
+    s = str(value).strip().replace("Z", "+00:00")
+    # Clamp fractional seconds to 6 digits so fromisoformat doesn't choke.
+    s = re.sub(r"(\.\d{6})\d+", r"\1", s)
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def main() -> None:
@@ -428,6 +449,12 @@ def main() -> None:
     groups = fetch_tracked_groups(db)
     print(f"{len(groups)} tracked group(s).")
     for g in groups:
+        # Only surface works new since we last searched this group; on the very
+        # first run (never checked) anchor to when the group was created, so a
+        # freshly tracked tag pulls works posted from that moment on rather than
+        # the tag's whole back-catalogue. Both manual and auto syncs stamp
+        # last_checked, so the window always advances to the previous sync.
+        since = _parse_ts(g.get("last_checked")) or _parse_ts(g.get("created_at"))
         tags_raw = g.get("tags") or []
         # A "Browse by language" group carries a single kind:'language' tag whose
         # id is AO3's language_id code; it's searched by language, not by tags.
@@ -446,7 +473,7 @@ def main() -> None:
                 # The language search IS the filter here, so we keep every
                 # result — including languages outside the import allowlist.
                 metas = _with_backoff(
-                    lambda: ao3.search_language(code),
+                    lambda: ao3.search_language(code, since=since),
                     what=f"language search '{label}'",
                     broad=True,
                 )
@@ -478,6 +505,7 @@ def main() -> None:
                     tag_names,
                     match_mode=g.get("match_mode", "all"),
                     excluded_tags=excluded_names,
+                    since=since,
                 ),
                 what=f"tag search '{label}'",
                 broad=True,
