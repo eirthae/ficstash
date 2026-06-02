@@ -46,20 +46,38 @@ export async function fetchWorks() {
   const { data, error } = await supabase
     .from('works')
     .select('*')
+    .eq('hidden', false)
     .order('source_updated', { ascending: false, nullsFirst: false });
   if (error) throw error;
   return (data || []).map(mapWork);
+}
+
+// "Remove from library" = hide the work. We don't hard-delete: the work may
+// still be bookmarked on AO3, and a delete would just reappear on the next sync.
+// Setting hidden=true is durable — the app filters it out and the worker skips
+// re-adding it. Reading state and the downloaded copy stay in the DB untouched.
+export async function removeWork(workId) {
+  if (!hasSupabase) return;
+  const { error } = await supabase
+    .from('works')
+    .update({ hidden: true })
+    .eq('id', workId);
+  if (error) throw error;
 }
 
 // Live offline-library tally: how many works have full text stored (offline)
 // vs the total tracked. Two head-only count queries, no rows transferred.
 export async function fetchOfflineStats() {
   if (!hasSupabase) return null;
-  const total = await supabase.from('works').select('*', { count: 'exact', head: true });
+  const total = await supabase
+    .from('works')
+    .select('*', { count: 'exact', head: true })
+    .eq('hidden', false);
   if (total.error) throw total.error;
   const dl = await supabase
     .from('works')
     .select('*', { count: 'exact', head: true })
+    .eq('hidden', false)
     .eq('offline', true);
   if (dl.error) throw dl.error;
   return { downloaded: dl.count ?? 0, total: total.count ?? 0 };

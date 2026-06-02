@@ -1,14 +1,14 @@
 import { Fragment, useState, useEffect } from 'react';
 import Icon from '../components/Icon.jsx';
-import { StatusBadge, FrozenBadge, TagChip, fmtWords, useToast } from '../components/ui.jsx';
+import { StatusBadge, FrozenBadge, TagChip, fmtWords, useToast, Sheet } from '../components/ui.jsx';
 import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
-import { fetchChapters } from '../lib/library.js';
+import { fetchChapters, removeWork } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 
-export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
+export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav }) {
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
   const total = work.chaptersTotal || work.chapters || 1;
 
@@ -35,6 +35,8 @@ export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
   // for library works there's nothing to save, so the button opens AO3 instead.
   const [saveState, setSaveState] = useState(work.saved ? 'saved' : work.wanted ? 'queued' : 'idle');
   const [toast, showToast] = useToast();
+  const [showMenu, setShowMenu] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const fetchCh = (ch) => {
     if (chState[ch.n] === 'done' || chState[ch.n] === 'busy') return;
@@ -73,6 +75,20 @@ export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
     window.open(`https://archiveofourown.org/works/${work.sourceWorkId}`, '_blank', 'noopener');
   };
 
+  const remove = async () => {
+    if (removing) return;
+    setRemoving(true);
+    try {
+      await removeWork(work.id);
+      onRemoved?.(work.id);
+      setShowMenu(false);
+      nav.pop();
+    } catch {
+      setRemoving(false);
+      showToast("Couldn't remove — try again", 'solar:danger-triangle-linear');
+    }
+  };
+
   return (
     <div className="screen view-enter">
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 260, background: `linear-gradient(170deg, ${pal[0]}, ${pal[1]})`, opacity: .9 }}>
@@ -82,7 +98,8 @@ export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
         <button className="iconbtn" style={{ background: 'rgba(0,0,0,.28)', backdropFilter: 'blur(4px)', color: '#fff' }} onClick={() => nav.pop()}>
           <Icon icon="solar:arrow-left-linear" size={22} /></button>
         <div style={{ flex: 1 }}></div>
-        <button className="iconbtn" style={{ background: 'rgba(0,0,0,.28)', backdropFilter: 'blur(4px)', color: '#fff' }} onClick={openOnAO3}>
+        <button className="iconbtn" style={{ background: 'rgba(0,0,0,.28)', backdropFilter: 'blur(4px)', color: '#fff' }}
+          onClick={() => (suggestion ? openOnAO3() : setShowMenu(true))}>
           <Icon icon="solar:menu-dots-bold" size={22} /></button>
       </div>
 
@@ -189,6 +206,25 @@ export function StoryDetailScreen({ work, suggestion, onSaved, nav }) {
         </div>
         {toast}
       </div>
+
+      <Sheet open={showMenu} onClose={() => setShowMenu(false)} title={work.title}>
+        <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 10 }}
+          onClick={() => { setShowMenu(false); openOnAO3(); }}>
+          <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="set-h">Open on AO3</div>
+            <div className="set-d">View this work on the site.</div>
+          </div>
+        </button>
+        <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left' }}
+          onClick={remove} disabled={removing}>
+          <div className="set-ic" style={{ color: 'var(--danger)' }}><Icon icon="solar:trash-bin-trash-linear" size={18} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="set-h" style={{ color: 'var(--danger)' }}>{removing ? 'Removing…' : 'Remove from library'}</div>
+            <div className="set-d">Hides it in the app. Your AO3 bookmark stays untouched.</div>
+          </div>
+        </button>
+      </Sheet>
     </div>
   );
 }

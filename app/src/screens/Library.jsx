@@ -11,14 +11,16 @@ function fandomName(work) {
   return (work.fandom || 'Other').split('–')[0].split(' - ')[0].trim() || 'Other';
 }
 
-export function LibraryScreen({ works, layout = 'grid', connected = true, nav }) {
-  const open = (w) => nav.push('detail', { work: w });
+export function LibraryScreen({ works, layout = 'grid', connected = true, onRemove, nav }) {
+  const open = (w) => nav.push('detail', { work: w, onRemoved: onRemove });
   const [toast, showToast] = useToast();
   const [syncing, setSyncing] = useState(false);
   const [status, setStatus] = useState('all');
   const [source, setSource] = useState('ao3'); // 'ao3' | 'other' (works added by link)
   const [showAdd, setShowAdd] = useState(false);
   const [pendingLinks, setPendingLinks] = useState([]);
+  const [collapsed, setCollapsed] = useState({}); // fandom name -> collapsed?
+  const toggleSection = (name) => setCollapsed(c => ({ ...c, [name]: !c[name] }));
 
   const reloadLinks = () => fetchPendingLinks().then(setPendingLinks).catch(() => {});
   useEffect(() => { reloadLinks(); }, []);
@@ -92,6 +94,17 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
   const isOther = source === 'other';
   const pending = isOther ? pendingLinks : [];
 
+  // Collapse/expand-all only applies to the AO3 fandom-section layout. The
+  // button collapses every section if any is open, otherwise expands them all.
+  const fandomLayout = !isOther && layout === 'fandom';
+  const fandomNames = fandomLayout ? [...new Set(shown.map(fandomName))] : [];
+  const anyExpanded = fandomNames.some(n => !collapsed[n]);
+  const showCollapseToggle = fandomLayout && fandomNames.length > 1 && shown.length > 0;
+  const toggleAll = () => {
+    if (anyExpanded) { const all = {}; fandomNames.forEach(n => { all[n] = true; }); setCollapsed(all); }
+    else setCollapsed({});
+  };
+
   return (
     <div className="screen">
       <Appbar large title="Library" actions={[addAction, syncAction]} />
@@ -102,10 +115,19 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
           <button className={source === 'other' ? 'on' : ''} onClick={() => { setSource('other'); setStatus('all'); }}>Other · {linkWorks.length}</button>
         </div>
         {sourceWorks.length > 0 && (
-          <div className="seg" style={{ margin: '0 20px 16px' }}>
-            <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {sourceWorks.length}</button>
-            <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
-            <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 16px' }}>
+            {showCollapseToggle && (
+              <button className="iconbtn ghost" onClick={toggleAll} aria-label={anyExpanded ? 'Collapse all' : 'Expand all'}
+                title={anyExpanded ? 'Collapse all' : 'Expand all'}
+                style={{ flex: 'none', width: 40, height: 42, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
+                <Icon icon={anyExpanded ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} size={20} />
+              </button>
+            )}
+            <div className="seg" style={{ flex: 1 }}>
+              <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {sourceWorks.length}</button>
+              <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
+              <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+            </div>
           </div>
         )}
         {pending.map(r => (
@@ -130,7 +152,7 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, nav })
             {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
           </div>
         ) : layout === 'shelves' ? <Shelves works={shown} open={open} />
-          : layout === 'fandom' ? <FandomSections works={shown} open={open} />
+          : layout === 'fandom' ? <FandomSections works={shown} open={open} collapsed={collapsed} toggle={toggleSection} />
           : layout === 'list' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
               <div className="section-label" style={{ marginBottom: -2 }}>{label} · {shown.length}</div>
@@ -203,7 +225,7 @@ function AddLinkSheet({ open, onClose, onAdded, showToast }) {
   );
 }
 
-function FandomSections({ works, open }) {
+function FandomSections({ works, open, collapsed, toggle }) {
   // Group works under their fandom, preserving the works' existing sort order.
   const groups = [];
   const byName = new Map();
@@ -214,9 +236,6 @@ function FandomSections({ works, open }) {
     g.items.push(w);
   }
   groups.sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name));
-
-  const [collapsed, setCollapsed] = useState({});
-  const toggle = (name) => setCollapsed(c => ({ ...c, [name]: !c[name] }));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '0 20px 24px' }}>

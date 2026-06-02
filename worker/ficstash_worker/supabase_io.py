@@ -62,7 +62,7 @@ def fetch_existing_works(client: Client, source: str = "ao3") -> dict[str, dict]
     """
     resp = (
         client.table("works")
-        .select("id,source_work_id,chapters,words,offline")
+        .select("id,source_work_id,chapters,words,offline,hidden")
         .eq("source", source)
         .execute()
     )
@@ -85,6 +85,7 @@ def fetch_non_offline_works(
         .select("id,source_work_id,chapters,words")
         .eq("source", source)
         .eq("offline", False)
+        .eq("hidden", False)
         .order("source_updated", desc=True)
     )
     if limit:
@@ -106,6 +107,7 @@ def fetch_untitled_works(
         client.table("works")
         .select("source_work_id,title")
         .eq("source", source)
+        .eq("hidden", False)
         .or_("title.is.null,title.eq.")
         .order("source_updated", desc=True)
     )

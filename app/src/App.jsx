@@ -45,6 +45,9 @@ export default function App() {
       .catch(() => { if (alive) setWorks(WORKS); });
     return () => { alive = false; };
   }, []);
+  // Drop a removed work from the in-memory list so the library updates at once
+  // (the row is already flagged hidden in the DB by the Detail screen).
+  const removeFromLibrary = (id) => setWorks(ws => (ws || []).filter(w => w.id !== id));
 
   // ---- navigation stack --------------------------------------------------
   const [tab, setTab] = useState('library');
@@ -82,14 +85,14 @@ export default function App() {
 
   const renderTab = () => {
     const n = nav.current;
-    if (tab === 'library') return <LibraryScreen works={works} layout="fandom" nav={n} />;
+    if (tab === 'library') return <LibraryScreen works={works} layout="fandom" onRemove={removeFromLibrary} nav={n} />;
     if (tab === 'whatsnew') return <WhatsNewScreen chapters={NEW_CHAPTERS} matches={NEW_MATCHES} nav={n} />;
     if (tab === 'discover') return <DiscoverScreen nav={n} />;
     if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} nav={n} />;
   };
   const renderTop = () => {
     const n = nav.current, p = top.props || {};
-    if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} nav={n} />;
+    if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} nav={n} />;
     if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={setReaderSettings} nav={n} />;
     if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
     if (top.screen === 'connect') return <ConnectScreen nav={n} />;

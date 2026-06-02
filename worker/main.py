@@ -179,9 +179,15 @@ def main() -> None:
     total = len(bookmarks)
     print(f"Found {total} bookmarked work(s).")
 
-    new_count = updated_count = unchanged = failed = filtered = 0
+    new_count = updated_count = unchanged = failed = filtered = hidden_skipped = 0
     for i, stub in enumerate(bookmarks, start=1):
         wid = stub.source_work_id
+        # The user removed this work in the app (hidden=true). Honor that: don't
+        # re-add or re-download it just because it's still bookmarked on AO3.
+        prev = existing.get(wid)
+        if prev and prev.get("hidden"):
+            hidden_skipped += 1
+            continue
         # Cheap pre-filter on the listing-blurb language — skips a request when
         # the work is plainly in a language we don't import.
         if not keep_language(stub):
@@ -202,7 +208,6 @@ def main() -> None:
             work_uuid = upsert_work(db, meta, bookmarked=True)
             processed.add(wid)
 
-            prev = existing.get(wid)
             is_new = prev is None
             changed = (
                 is_new
@@ -239,7 +244,8 @@ def main() -> None:
             print(f"    skipped (error: {type(exc).__name__}: {exc})")
     print(
         f"Bookmarks: {new_count} new, {updated_count} updated, "
-        f"{unchanged} unchanged, {filtered} filtered, {failed} failed."
+        f"{unchanged} unchanged, {filtered} filtered, {hidden_skipped} hidden, "
+        f"{failed} failed."
     )
 
     # ---- Pass 2: subscriptions → metadata + new-chapter tracking -----------
