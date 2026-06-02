@@ -1,15 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- FicStash mascot: an owl reading an open book. Transparent foreground for
-       the Android adaptive icon; the purple background lives in icon-background. -->
-  <g>
+  <!-- FicStash mascot: the owl's head only (book/body dropped), scaled up and
+       centred for the Android adaptive icon. Transparent foreground; the purple
+       background lives in icon-background. The head art keeps its original
+       coordinates and is enlarged via the group transform, so it stays within
+       the adaptive safe zone. -->
+  <g transform="translate(512 512) scale(1.85) translate(-512 -389)">
     <!-- ear tufts -->
     <path d="M405 322 L360 232 L470 300 Z" fill="#e7d4af"/>
     <path d="M619 322 L664 232 L554 300 Z" fill="#e7d4af"/>
-    <!-- body -->
-    <ellipse cx="512" cy="502" rx="188" ry="214" fill="#f4ead6"/>
-    <!-- wings -->
-    <path d="M344 452 C 300 566 322 694 412 744 C 374 662 370 548 396 472 Z" fill="#e6d1ab"/>
-    <path d="M680 452 C 724 566 702 694 612 744 C 650 662 654 548 628 472 Z" fill="#e6d1ab"/>
     <!-- face disc -->
     <ellipse cx="512" cy="452" rx="152" ry="124" fill="#fbf4e4"/>
     <!-- eyes -->
@@ -17,31 +15,14 @@
     <circle cx="578" cy="450" r="84" fill="#ffffff"/>
     <circle cx="446" cy="450" r="80" fill="none" stroke="#6f2bbf" stroke-width="11"/>
     <circle cx="578" cy="450" r="80" fill="none" stroke="#6f2bbf" stroke-width="11"/>
-    <!-- irises, looking down at the book -->
-    <circle cx="448" cy="486" r="42" fill="#481878"/>
-    <circle cx="576" cy="486" r="42" fill="#481878"/>
-    <circle cx="448" cy="486" r="23" fill="#1b0d33"/>
-    <circle cx="576" cy="486" r="23" fill="#1b0d33"/>
-    <circle cx="437" cy="475" r="10" fill="#ffffff"/>
-    <circle cx="565" cy="475" r="10" fill="#ffffff"/>
+    <!-- irises, looking forward -->
+    <circle cx="448" cy="460" r="42" fill="#481878"/>
+    <circle cx="576" cy="460" r="42" fill="#481878"/>
+    <circle cx="448" cy="460" r="23" fill="#1b0d33"/>
+    <circle cx="576" cy="460" r="23" fill="#1b0d33"/>
+    <circle cx="437" cy="449" r="10" fill="#ffffff"/>
+    <circle cx="565" cy="449" r="10" fill="#ffffff"/>
     <!-- beak -->
     <path d="M489 496 L535 496 L512 545 Z" fill="#f5a524"/>
-    <!-- open book -->
-    <path d="M512 610 L352 586 C 338 584 332 592 332 606 L332 760 C 332 774 340 782 354 784 L512 826 Z" fill="#7a2fd0"/>
-    <path d="M512 610 L672 586 C 686 584 692 592 692 606 L692 760 C 692 774 684 782 670 784 L512 826 Z" fill="#5f1f9e"/>
-    <path d="M512 624 L372 602 C 360 600 356 608 356 620 L356 748 C 356 760 362 766 374 768 L512 808 Z" fill="#fffaf0"/>
-    <path d="M512 624 L652 602 C 664 600 668 608 668 620 L668 748 C 668 760 662 766 650 768 L512 808 Z" fill="#fdf3e0"/>
-    <g stroke="#c3a6e3" stroke-width="8" stroke-linecap="round">
-      <line x1="398" y1="650" x2="484" y2="662"/>
-      <line x1="392" y1="688" x2="484" y2="700"/>
-      <line x1="392" y1="726" x2="478" y2="738"/>
-      <line x1="540" y1="662" x2="626" y2="650"/>
-      <line x1="540" y1="700" x2="632" y2="688"/>
-      <line x1="546" y1="738" x2="632" y2="726"/>
-    </g>
-    <line x1="512" y1="624" x2="512" y2="812" stroke="#caa9e6" stroke-width="7"/>
-    <!-- feet -->
-    <path d="M468 814 C 452 838 430 842 410 836 C 430 852 462 848 478 832 Z" fill="#f5a524"/>
-    <path d="M556 814 C 572 838 594 842 614 836 C 594 852 562 848 546 832 Z" fill="#f5a524"/>
   </g>
 </svg>
