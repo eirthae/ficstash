@@ -93,6 +93,17 @@ def dump_series_links(body: str) -> None:
     # Title/anchor class used for each result, so the real parser knows selectors.
     for cls in ("fic_title", "search_title", "search_body_box", "mb_box"):
         print(f"    contains {cls!r}: {cls in body}")
+    # Dump every <select> + its options so we learn the sort param name/values.
+    for sm in re.finditer(r"<select\b[^>]*>(.*?)</select>", body, re.I | re.S):
+        tag = sm.group(0)[: sm.group(0).find(">") + 1]
+        opts = re.findall(r'<option[^>]*value="([^"]*)"[^>]*>\s*([^<]*?)\s*</option>', sm.group(1), re.I)
+        print(f"    SELECT {tag}")
+        for val, txt in opts[:20]:
+            print(f"        value={val!r} -> {txt!r}")
+    # Pagination anchor shapes (page numbers may be plain links, not ?pg=).
+    for m in re.finditer(r'href="(https://www\.scribblehub\.com/genre/[^"]*)"', body):
+        print(f"    genre-link: {m.group(1)}")
+        break
     print("---- end genre-page series links ----")
 
 
