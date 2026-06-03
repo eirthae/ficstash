@@ -18,11 +18,13 @@ from .base import (
     WorkMeta,
 )
 from .ao3 import AO3Source
+from .books import BooksSource
 from .royalroad import RoyalRoadSource
 from .scribblehub import ScribbleHubSource
 
 SOURCES: dict[str, Source] = {
-    s.id: s for s in (AO3Source(), RoyalRoadSource(), ScribbleHubSource())
+    s.id: s
+    for s in (AO3Source(), RoyalRoadSource(), ScribbleHubSource(), BooksSource())
 }
 
 

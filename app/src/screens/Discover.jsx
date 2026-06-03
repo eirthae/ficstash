@@ -18,6 +18,12 @@ const GENRES_BY_SOURCE = {
   scribblehub: SCRIBBLEHUB_GENRES,
 };
 
+// Whether a discovered work can be saved into the library. AO3 downloads
+// directly; Royal Road / Scribble Hub download server-side via the FanFicFare
+// link path. "Books" is notify-only — a commercial release can't be fetched, so
+// its cards just link out to Open Library and the user buys + uploads the EPUB.
+const isSavableSource = (src) => src !== 'books';
+
 // Languages you can browse straight from Discover. `code` is AO3's language_id
 // (ISO 639); `name` is shown on the tile. Add more entries to offer more.
 const LANGUAGES = [{ code: 'hy', name: 'հայերեն', label: 'Armenian', palette: 3 }];
@@ -245,8 +251,54 @@ function GenrePicker({ genres, label, picked, onAdd, onRemove }) {
   );
 }
 
+// Free-text author entry for the Books watcher. There's no fixed taxonomy and
+// no live autocomplete — the user types an author name and it becomes a chip.
+// Stored as {name, id:'', kind:'author'} so the worker queries Open Library by it.
+function AuthorPicker({ picked, onAdd, onRemove }) {
+  const [term, setTerm] = useState('');
+  const commit = () => {
+    const name = term.trim();
+    if (!name) return;
+    onAdd({ name, id: '', kind: 'author' });
+    setTerm('');
+  };
+
+  return (
+    <div>
+      {picked.length > 0 && (
+        <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {picked.map((t) => {
+            const c = TAG_COLOR.character || 'var(--accent)';
+            return (
+              <span key={t.name} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
+                <span className="swatch" style={{ background: c }}></span>{t.name}
+                <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t.name)} aria-label="Remove author">
+                  <Icon icon="solar:close-circle-bold" size={15} color={c} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <SearchField
+            placeholder="Type an author's name…"
+            value={term}
+            onChange={setTerm}
+            onSubmit={commit}
+          />
+        </div>
+        <button className="btn btn-flat" onClick={commit} disabled={!term.trim()} style={{ opacity: term.trim() ? 1 : 0.5 }}>
+          <Icon icon="solar:add-circle-linear" size={18} /> Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---- Builder sheet: pick a source, pick tags/genres → save a group ----------
-const BUILDER_SOURCES = ['ao3', 'royalroad', 'scribblehub'];
+const BUILDER_SOURCES = ['ao3', 'royalroad', 'scribblehub', 'books'];
 
 function TagGroupBuilder({ open, onClose, onCreated }) {
   const [source, setSource] = useState('ao3');
@@ -264,7 +316,8 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
   const changeSource = (s) => { setSource(s); setPicked([]); setExcluded([]); setMatchMode('all'); setErr(''); };
 
   const isAo3 = source === 'ao3';
-  const noun = isAo3 ? 'tag' : 'genre';
+  const isBooks = source === 'books';
+  const noun = isAo3 ? 'tag' : isBooks ? 'author' : 'genre';
   const has = (list, t) => list.some((x) => x.name.toLowerCase() === t.name.toLowerCase());
   const addPicked = (t) => { setPicked((p) => (has(p, t) ? p : [...p, t])); setErr(''); };
   const removePicked = (name) => setPicked((p) => p.filter((x) => x.name !== name));
@@ -306,13 +359,17 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
         <div>
           <div className="section-label" style={{ marginBottom: 8 }}>
             {picked.length <= 1
-              ? `Track this ${noun}`
+              ? isBooks ? 'Watch this author' : `Track this ${noun}`
               : isAo3
                 ? `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`
-                : 'Track works in ANY of these genres'}
+                : isBooks
+                  ? 'Watch new releases from these authors'
+                  : 'Track works in ANY of these genres'}
           </div>
           {isAo3 ? (
             <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
+          ) : isBooks ? (
+            <AuthorPicker picked={picked} onAdd={addPicked} onRemove={removePicked} />
           ) : (
             <GenrePicker
               genres={GENRES_BY_SOURCE[source] || []}
@@ -321,6 +378,11 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
               onAdd={addPicked}
               onRemove={removePicked}
             />
+          )}
+          {isBooks && (
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
+              Notify-only — FicStash can't download bought books. New releases show up to review, then you buy the EPUB and upload it.
+            </div>
           )}
         </div>
 
@@ -432,7 +494,7 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
               <Swipeable key={w.id} onSwipeRight={() => dismiss(w)} onSwipeLeft={() => later(w)}>
                 <SuggestionCard
                   work={w}
-                  onSave={save}
+                  onSave={isSavableSource(w.source) ? save : null}
                   saveState={saveStateOf(w)}
                   onDismiss={() => dismiss(w)}
                   onOpen={() => nav.push('detail', { work: w, suggestion: true })}
@@ -498,7 +560,7 @@ export function LaterScreen({ nav, onLeave }) {
                 left={{ icon: 'solar:undo-left-round-linear', label: 'Discover', color: 'var(--accent)' }}>
                 <SuggestionCard
                   work={w}
-                  onSave={save}
+                  onSave={isSavableSource(w.source) ? save : null}
                   saveState={saveStateOf(w)}
                   onDismiss={() => remove(w)}
                   onOpen={() => nav.push('detail', { work: w, suggestion: true })}

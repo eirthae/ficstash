@@ -55,6 +55,16 @@ const SOURCES = {
     capabilities: new Set([CAP.TAG_SEARCH, CAP.GENRE_LIST, CAP.WORK_URL]),
     workUrl: (id) => `https://www.scribblehub.com/series/${id}/`,
   },
+  // Books — published-book release watcher (Open Library). Notify-only: tracks
+  // an AUTHOR (not a genre) and surfaces new releases; the user buys the EPUB and
+  // adds it through the upload path. No DOWNLOAD here, so the swipe feed hides the
+  // Save button and just links out to Open Library.
+  books: {
+    id: 'books',
+    label: 'Books',
+    capabilities: new Set([CAP.TAG_SEARCH, CAP.WORK_URL]),
+    workUrl: (id) => `https://openlibrary.org/works/${id}`,
+  },
   // A user-uploaded file (EPUB/HTML/TXT). Fully offline, no site to link back to.
   upload: {
     id: 'upload',
