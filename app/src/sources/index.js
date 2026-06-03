@@ -46,6 +46,15 @@ const SOURCES = {
     capabilities: new Set([CAP.TAG_SEARCH, CAP.GENRE_LIST, CAP.WORK_URL]),
     workUrl: (id) => `https://www.royalroad.com/fiction/${id}`,
   },
+  // Scribble Hub — original-fiction site. Discovery by genre (via the genre RSS
+  // feed, server-side); saved works download through the FanFicFare link path,
+  // so the app only needs genre search + a canonical link here.
+  scribblehub: {
+    id: 'scribblehub',
+    label: 'Scribble Hub',
+    capabilities: new Set([CAP.TAG_SEARCH, CAP.GENRE_LIST, CAP.WORK_URL]),
+    workUrl: (id) => `https://www.scribblehub.com/series/${id}/`,
+  },
   // A user-uploaded file (EPUB/HTML/TXT). Fully offline, no site to link back to.
   upload: {
     id: 'upload',
@@ -110,6 +119,37 @@ export const ROYALROAD_GENRES = [
   { name: 'War and Military', slug: 'war_and_military' },
   { name: 'Wuxia', slug: 'wuxia' },
   { name: 'Xianxia', slug: 'xianxia' },
+];
+
+// Scribble Hub's genres — kept in sync with the worker's scribblehub.GENRES.
+// `slug` is the value /genre/<slug>/feed/ expects; `name` is the label. Stored
+// as a tracked tag's {name, id:slug} so the worker searches by the exact slug.
+export const SCRIBBLEHUB_GENRES = [
+  { name: 'Action', slug: 'action' },
+  { name: 'Adventure', slug: 'adventure' },
+  { name: 'Comedy', slug: 'comedy' },
+  { name: 'Drama', slug: 'drama' },
+  { name: 'Fantasy', slug: 'fantasy' },
+  { name: 'Gender Bender', slug: 'gender-bender' },
+  { name: 'Harem', slug: 'harem' },
+  { name: 'Historical', slug: 'historical' },
+  { name: 'Horror', slug: 'horror' },
+  { name: 'Isekai', slug: 'isekai' },
+  { name: 'Josei', slug: 'josei' },
+  { name: 'LitRPG', slug: 'litrpg' },
+  { name: 'Martial Arts', slug: 'martial-arts' },
+  { name: 'Mature', slug: 'mature' },
+  { name: 'Mecha', slug: 'mecha' },
+  { name: 'Mystery', slug: 'mystery' },
+  { name: 'Psychological', slug: 'psychological' },
+  { name: 'Romance', slug: 'romance' },
+  { name: 'School Life', slug: 'school-life' },
+  { name: 'Sci-fi', slug: 'sci-fi' },
+  { name: 'Seinen', slug: 'seinen' },
+  { name: 'Slice of Life', slug: 'slice-of-life' },
+  { name: 'Sports', slug: 'sports' },
+  { name: 'Supernatural', slug: 'supernatural' },
+  { name: 'Tragedy', slug: 'tragedy' },
 ];
 
 export function getSource(sourceId) {

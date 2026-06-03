@@ -19,9 +19,10 @@ from .base import (
 )
 from .ao3 import AO3Source
 from .royalroad import RoyalRoadSource
+from .scribblehub import ScribbleHubSource
 
 SOURCES: dict[str, Source] = {
-    s.id: s for s in (AO3Source(), RoyalRoadSource())
+    s.id: s for s in (AO3Source(), RoyalRoadSource(), ScribbleHubSource())
 }
 
 

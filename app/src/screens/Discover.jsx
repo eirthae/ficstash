@@ -10,7 +10,13 @@ import {
 } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
-import { ROYALROAD_GENRES, sourceLabel } from '../sources/index.js';
+import { ROYALROAD_GENRES, SCRIBBLEHUB_GENRES, sourceLabel } from '../sources/index.js';
+
+// Genre lists per source, for the builder's fixed-taxonomy picker.
+const GENRES_BY_SOURCE = {
+  royalroad: ROYALROAD_GENRES,
+  scribblehub: SCRIBBLEHUB_GENRES,
+};
 
 // Languages you can browse straight from Discover. `code` is AO3's language_id
 // (ISO 639); `name` is shown on the tile. Add more entries to offer more.
@@ -190,13 +196,13 @@ function TagPicker({ picked, onAdd, onRemove, placeholder, accent }) {
   );
 }
 
-// Pick from Royal Road's fixed genre taxonomy (no live search — the list is
+// Pick from a source's fixed genre taxonomy (no live search — the list is
 // shipped in the source registry). Stores each pick as {name, id:slug, kind}.
-function RoyalRoadGenrePicker({ picked, onAdd, onRemove }) {
+function GenrePicker({ genres, label, picked, onAdd, onRemove }) {
   const [term, setTerm] = useState('');
   const q = term.trim().toLowerCase();
   const pickedSlugs = new Set(picked.map((t) => t.id));
-  const matches = ROYALROAD_GENRES
+  const matches = genres
     .filter((g) => !pickedSlugs.has(g.slug))
     .filter((g) => !q || g.name.toLowerCase().includes(q))
     .slice(0, 12);
@@ -219,7 +225,7 @@ function RoyalRoadGenrePicker({ picked, onAdd, onRemove }) {
           })}
         </div>
       )}
-      <SearchField placeholder="Filter Royal Road genres…" value={term} onChange={setTerm} />
+      <SearchField placeholder={`Filter ${label} genres…`} value={term} onChange={setTerm} />
       {matches.length > 0 && (
         <div className="tag-suggest" style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
           {matches.map((g) => (
@@ -240,7 +246,7 @@ function RoyalRoadGenrePicker({ picked, onAdd, onRemove }) {
 }
 
 // ---- Builder sheet: pick a source, pick tags/genres → save a group ----------
-const BUILDER_SOURCES = ['ao3', 'royalroad'];
+const BUILDER_SOURCES = ['ao3', 'royalroad', 'scribblehub'];
 
 function TagGroupBuilder({ open, onClose, onCreated }) {
   const [source, setSource] = useState('ao3');
@@ -308,7 +314,13 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
           {isAo3 ? (
             <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
           ) : (
-            <RoyalRoadGenrePicker picked={picked} onAdd={addPicked} onRemove={removePicked} />
+            <GenrePicker
+              genres={GENRES_BY_SOURCE[source] || []}
+              label={sourceLabel(source)}
+              picked={picked}
+              onAdd={addPicked}
+              onRemove={removePicked}
+            />
           )}
         </div>
 
