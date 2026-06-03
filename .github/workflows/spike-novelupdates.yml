@@ -23,8 +23,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install requests
-        run: pip install requests
+      - name: Install cloudscraper
+        run: pip install cloudscraper
 
       - name: Probe NovelUpdates
         run: python spike_novelupdates.py
