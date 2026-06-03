@@ -1,97 +1,20 @@
-import { useState, useRef } from 'react';
 import Icon from './Icon.jsx';
 import { Cover, FetchButton, StatusBadge, FrozenBadge, OriginBadges, TagChip, fmtWords } from './ui.jsx';
 import { COVER_PALETTES } from '../data/sample.js';
 
-// ---- Swipeable row wrapper ------------------------------------------------
-// Drag a card to act on it. Swipe RIGHT past the threshold fires `onSwipeRight`
-// (used for delete-forever); swipe LEFT fires `onSwipeLeft` (used for "Later").
-// As you drag, the action behind the card is revealed on the side you're
-// swiping toward, brightening as you approach the threshold. Below threshold
-// the card springs back. Pointer events cover both touch and mouse.
-export function Swipeable({
-  children,
-  onSwipeRight,
-  onSwipeLeft,
-  right = { icon: 'solar:trash-bin-trash-bold', label: 'Delete', color: '#f5455c' },
-  left = { icon: 'solar:bookmark-linear', label: 'Later', color: '#f0a020' },
-  threshold = 96,
-}) {
-  const [dx, setDx] = useState(0);
-  const [snap, setSnap] = useState(false); // animate the transform (release/exit)
-  const startX = useRef(null);
-  const startY = useRef(null);
-  const locked = useRef(false); // committed to a horizontal swipe (not a scroll)
-
-  const down = (e) => {
-    startX.current = e.clientX;
-    startY.current = e.clientY;
-    locked.current = false;
-    setSnap(false);
-  };
-  const move = (e) => {
-    if (startX.current == null) return;
-    const d = e.clientX - startX.current;
-    const dy = e.clientY - startY.current;
-    // Don't hijack a vertical scroll: only lock into a swipe once horizontal
-    // movement clearly dominates.
-    if (!locked.current) {
-      if (Math.abs(d) < 8) return;
-      if (Math.abs(d) < Math.abs(dy)) { startX.current = null; return; }
-      locked.current = true;
-      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
-    }
-    // Ignore a direction that has no handler.
-    if ((d > 0 && !onSwipeRight) || (d < 0 && !onSwipeLeft)) return;
-    setDx(d);
-  };
-  const finish = (fn, toX) => { setSnap(true); setDx(toX); setTimeout(() => fn(), 180); };
-  const up = () => {
-    if (startX.current == null) return;
-    startX.current = null;
-    if (dx > threshold && onSwipeRight) return finish(onSwipeRight, window.innerWidth);
-    if (dx < -threshold && onSwipeLeft) return finish(onSwipeLeft, -window.innerWidth);
-    setSnap(true);
-    setDx(0);
-  };
-
-  const progress = Math.min(Math.abs(dx) / threshold, 1);
-  const act = dx > 0 ? right : left;
-  return (
-    <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 'var(--radius-lg, 16px)' }}>
-      {dx !== 0 && (
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-          justifyContent: dx > 0 ? 'flex-start' : 'flex-end', padding: '0 22px',
-          background: act.color, opacity: 0.35 + progress * 0.65, color: '#fff', gap: 9,
-        }}>
-          <Icon icon={act.icon} size={22} color="#fff" />
-          <span style={{ fontWeight: 700, fontSize: 13, letterSpacing: '.02em' }}>{act.label}</span>
-        </div>
-      )}
-      <div
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        onPointerCancel={up}
-        style={{
-          transform: `translateX(${dx}px)`,
-          transition: snap ? 'transform .18s ease-out' : 'none',
-          touchAction: 'pan-y',
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
 // ---- Library list card (horizontal) --------------------------------------
-export function LibraryCard({ work, onOpen }) {
+export function LibraryCard({ work, onOpen, onDelete }) {
   return (
-    <div className="libcard pressable" onClick={() => onOpen && onOpen(work)}>
+    <div className="libcard pressable" onClick={() => onOpen && onOpen(work)} style={{ position: 'relative' }}>
+      {onDelete && (
+        <button className="iconbtn ghost" aria-label="Remove from library" title="Remove from library"
+          onClick={(e) => { e.stopPropagation(); onDelete(work); }}
+          style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, zIndex: 2 }}>
+          <Icon icon="solar:close-circle-linear" size={19} color="var(--text-tertiary)" />
+        </button>
+      )}
       <div className="meta">
-        <div className="story-title" style={{ marginBottom: 2 }}>{work.title}</div>
+        <div className="story-title" style={{ marginBottom: 2, paddingRight: onDelete ? 30 : 0 }}>{work.title}</div>
         <div className="story-sub" style={{ marginBottom: 7 }}>by {work.author}</div>
         <div className="chiprow" style={{ marginBottom: 8 }}>
           {work.frozen ? <FrozenBadge /> : <StatusBadge status={work.status} updated={work.updated} />}
@@ -148,7 +71,7 @@ export function GridCard({ work, onOpen }) {
 
 // ---- Suggestion card (+ save / dismiss) -----------------------------------
 // saveState: 'idle' → 'queued' (worker will fetch on next sync) → 'saved' (in library)
-export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, cta = 'Open' }) {
+export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, cta = 'Open', onLater, laterIcon = 'solar:bookmark-linear', laterTitle = 'Save for later' }) {
   return (
     <div className="libcard fade-enter">
       <div className="meta">
@@ -165,8 +88,15 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
         <div className="chiprow" style={{ marginBottom: 9 }}>
           {work.tags.slice(0, 3).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <div className="metarow"><StatusBadge status={work.status} /><span>·</span><span>{fmtWords(work.words)}</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {onLater && (
+            <button className="iconbtn ghost" onClick={() => onLater(work)} aria-label={laterTitle} title={laterTitle}
+              style={{ width: 36, height: 32, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)', flex: 'none' }}>
+              <Icon icon={laterIcon} size={18} />
+            </button>
+          )}
           {onSave ? (
             <button
               className={`btn btn-sm ${saveState === 'idle' ? 'btn-primary' : 'btn-flat'}`}
@@ -184,6 +114,7 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
               <Icon icon="solar:arrow-right-linear" size={16} /> {cta}
             </button>
           )}
+          </div>
         </div>
       </div>
     </div>

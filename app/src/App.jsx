@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import { Preferences } from '@capacitor/preferences';
 import { BottomNav } from './components/chrome.jsx';
+import { AddMenu } from './components/AddMenu.jsx';
 import { LibraryScreen } from './screens/Library.jsx';
 import { WhatsNewScreen } from './screens/WhatsNew.jsx';
 import { DiscoverScreen, TagResultsScreen, LaterScreen } from './screens/Discover.jsx';
@@ -76,6 +77,13 @@ export default function App() {
   // (the row is already flagged hidden in the DB by the Detail screen).
   const removeFromLibrary = (id) => setWorks(ws => (ws || []).filter(w => w.id !== id));
 
+  // ---- global Add menu (centered + in the bottom nav) --------------------
+  // Bumping refreshKey tells the Library to re-pull its works + pending links
+  // after a file upload or add-by-link from the FAB on any tab.
+  const [addOpen, setAddOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const onLibraryChanged = () => { reloadWorks(); setRefreshKey(k => k + 1); };
+
   // ---- navigation stack --------------------------------------------------
   const [tab, setTab] = useState('library');
   const [stack, setStack] = useState([]);
@@ -112,7 +120,7 @@ export default function App() {
 
   const renderTab = () => {
     const n = nav.current;
-    if (tab === 'library') return <LibraryScreen works={works} layout="fandom" onRemove={removeFromLibrary} onReload={reloadWorks} nav={n} />;
+    if (tab === 'library') return <LibraryScreen works={works} layout="fandom" onRemove={removeFromLibrary} onReload={reloadWorks} refreshKey={refreshKey} nav={n} />;
     if (tab === 'whatsnew') return <WhatsNewScreen chapters={NEW_CHAPTERS} matches={NEW_MATCHES} nav={n} />;
     if (tab === 'discover') return <DiscoverScreen nav={n} />;
     if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} nav={n} />;
@@ -133,7 +141,8 @@ export default function App() {
         {renderTab()}
         {top && <div className="screen" style={{ zIndex: 30 }}>{renderTop()}</div>}
       </div>
-      {showNav && <BottomNav active={tab} onTab={switchTab} />}
+      {showNav && <BottomNav active={tab} onTab={(id) => { setAddOpen(false); switchTab(id); }} onAdd={() => setAddOpen(o => !o)} addActive={addOpen} />}
+      {showNav && <AddMenu open={addOpen} onClose={() => setAddOpen(false)} onChanged={onLibraryChanged} />}
     </div>
   );
 }

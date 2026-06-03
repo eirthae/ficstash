@@ -38,16 +38,24 @@ const TABS = [
   { id: 'settings', label: 'Settings', icon: 'solar:settings-linear', iconOn: 'solar:settings-bold' },
 ];
 
-export function BottomNav({ active, onTab }) {
+export function BottomNav({ active, onTab, onAdd, addActive }) {
+  // Split the four tabs around a centered, half-floating + button (Add menu).
+  const left = TABS.slice(0, 2);
+  const right = TABS.slice(2);
+  const renderTab = (t) => (
+    <button key={t.id} className={`navitem ${active === t.id ? 'active' : ''}`} onClick={() => onTab(t.id)}>
+      <span className="navicon"><Icon icon={active === t.id ? t.iconOn : t.icon} size={25} /></span>
+      {t.badge && active !== t.id && <span className="dot"></span>}
+      <span className="navlabel">{t.label}</span>
+    </button>
+  );
   return (
     <div className="bottomnav">
-      {TABS.map(t => (
-        <button key={t.id} className={`navitem ${active === t.id ? 'active' : ''}`} onClick={() => onTab(t.id)}>
-          <span className="navicon"><Icon icon={active === t.id ? t.iconOn : t.icon} size={25} /></span>
-          {t.badge && active !== t.id && <span className="dot"></span>}
-          <span className="navlabel">{t.label}</span>
-        </button>
-      ))}
+      {left.map(renderTab)}
+      <button className={`navfab ${addActive ? 'open' : ''}`} onClick={onAdd} aria-label="Add to library" aria-expanded={!!addActive}>
+        <Icon icon="solar:add-circle-bold" size={30} />
+      </button>
+      {right.map(renderTab)}
     </div>
   );
 }

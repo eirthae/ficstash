@@ -9,6 +9,8 @@ function mapWork(row) {
     sourceUrl: row.source_url || '',
     origin: row.origin || 'bookmark',
     follow: !!row.follow,
+    createdAt: row.created_at,        // when it entered the library (for "Last added")
+    sourceUpdated: row.source_updated, // real last-updated time (for "Last updated")
     title: row.title,
     author: row.author,
     fandom: row.fandom,

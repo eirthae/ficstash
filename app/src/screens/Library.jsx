@@ -1,35 +1,58 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import { EmptyState, useToast, Sheet } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
-import { LibraryCard, GridCard } from '../components/cards.jsx';
+import { LibraryCard } from '../components/cards.jsx';
 import { triggerSync } from '../lib/sync.js';
-import { requestUrl, fetchPendingLinks, removeRequest } from '../lib/links.js';
-import { uploadFile, isSupportedUpload } from '../lib/upload.js';
+import { fetchPendingLinks, removeRequest } from '../lib/links.js';
+import { removeWork } from '../lib/library.js';
 
 // The fandom name without the author suffix ("Heated Rivalry – Rachel Reid" → "Heated Rivalry").
 function fandomName(work) {
   return (work.fandom || 'Other').split('–')[0].split(' - ')[0].trim() || 'Other';
 }
 
-export function LibraryScreen({ works, layout = 'grid', connected = true, onRemove, onReload, nav }) {
+// Which shelf a work belongs to. Routing is automatic by how it entered the
+// library: uploaded EPUBs are Books; AO3 works (bookmarks, tag saves, AO3 links)
+// are Fics; everything else added from another site is a Story.
+function shelfOf(work) {
+  if ((work.origin || '') === 'upload') return 'books';
+  if (work.source === 'ao3') return 'fics';
+  return 'stories';
+}
+
+const SHELVES = [
+  { id: 'fics', label: 'Fics' },
+  { id: 'stories', label: 'Stories' },
+  { id: 'books', label: 'Books' },
+];
+
+// Sort a list without mutating it. Timestamps are ISO strings (sortable as text);
+// 'default' preserves the incoming order (source_updated desc from the query).
+function sortWorks(list, sort) {
+  const arr = [...list];
+  if (sort === 'added') arr.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  else if (sort === 'updated') arr.sort((a, b) => (b.sourceUpdated || '').localeCompare(a.sourceUpdated || ''));
+  else if (sort === 'title') arr.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  return arr;
+}
+
+export function LibraryScreen({ works, layout = 'fandom', connected = true, onRemove, onReload, refreshKey, nav }) {
   const open = (w) => nav.push('detail', { work: w, onRemoved: onRemove });
   const [toast, showToast] = useToast();
   const [syncing, setSyncing] = useState(false);
-  const [status, setStatus] = useState('all');
-  const [source, setSource] = useState('ao3'); // 'ao3' | 'other' (works added by link)
-  const [showAdd, setShowAdd] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const fileInput = useRef(null);
+  const [shelf, setShelf] = useState('fics');
+  const [status, setStatus] = useState('all');     // all | ongoing | complete (fics/stories)
+  const [sort, setSort] = useState('default');      // default | added | updated | title
   const [pendingLinks, setPendingLinks] = useState([]);
-  const [collapsed, setCollapsed] = useState({}); // fandom name -> collapsed?
+  const [collapsed, setCollapsed] = useState({});   // fandom name -> collapsed?
+  const [pendingDelete, setPendingDelete] = useState(null);
   const toggleSection = (name) => setCollapsed(c => ({ ...c, [name]: !c[name] }));
 
   const reloadLinks = () => fetchPendingLinks().then(setPendingLinks).catch(() => {});
-  useEffect(() => { reloadLinks(); }, []);
+  useEffect(() => { reloadLinks(); }, [refreshKey]);
 
   const removeLink = async (id) => {
-    // Optimistically drop it so the list updates instantly; reload to reconcile.
     setPendingLinks(list => list.filter(r => r.id !== id));
     const res = await removeRequest(id);
     if (res.ok) showToast('Removed.');
@@ -45,30 +68,16 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
     showToast(res.ok ? 'Sync started — new works arrive shortly.' : (res.error || 'Sync failed.'));
   };
   const syncAction = { icon: syncing ? 'solar:refresh-circle-bold' : 'solar:refresh-circle-linear', onClick: doSync };
-  const addSheet = (
-    <AddLinkSheet open={showAdd} onClose={() => setShowAdd(false)} showToast={showToast}
-      onAdded={() => { setShowAdd(false); reloadLinks(); }} />
-  );
 
-  // Upload an EPUB/HTML/TXT: parsed in the browser, stored as a fully-offline
-  // work. No worker round-trip — the file never leaves the device unparsed.
-  const pickFile = () => { if (!uploading && fileInput.current) fileInput.current.click(); };
-  const onFileChosen = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = ''; // allow re-picking the same file
-    if (!file) return;
-    if (!isSupportedUpload(file)) { showToast('Upload an EPUB, HTML, or TXT file.', 'solar:danger-triangle-bold'); return; }
-    setUploading(true);
-    showToast(`Importing “${file.name}”…`);
-    const res = await uploadFile(file);
-    setUploading(false);
-    if (res.ok) { showToast('Added to your library.'); onReload && onReload(); }
-    else showToast(res.error || 'Could not import that file.', 'solar:danger-triangle-bold');
+  // "Remove from library" with a confirm step (no more accidental swipe deletes).
+  const confirmDelete = async () => {
+    const w = pendingDelete;
+    setPendingDelete(null);
+    if (!w) return;
+    onRemove?.(w.id); // optimistic
+    try { await removeWork(w.id); showToast('Removed from library'); }
+    catch { showToast('Could not remove — try again', 'solar:danger-triangle-bold'); onReload?.(); }
   };
-  const uploadInput = (
-    <input ref={fileInput} type="file" accept=".epub,.html,.htm,.txt" onChange={onFileChosen}
-      style={{ display: 'none' }} />
-  );
 
   if (works === null) {
     return (
@@ -84,58 +93,53 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
     );
   }
 
-  // Show every work, including those still downloading. The cards mark
-  // not-yet-downloaded works as "Queued" / "Downloads on next sync", and Detail
-  // won't open them for reading until their chapters arrive — so a backfill in
-  // progress is visible rather than making the library look half-empty.
   const ready = works;
+  const isBooks = shelf === 'books';
 
-  if (!connected || ready.length === 0) {
-    return (
-      <div className="screen">
-        <Appbar large title="Library" />
-        {toast}
-        <div className="scroll" style={{ display: 'flex' }}>
-          <EmptyState icon="solar:book-minimalistic-linear" title="Nothing here yet"
-            desc="Track tags, paste a link, or upload a file — stories download into your private offline shelf."
-            action={<button className="btn btn-lg btn-primary" onClick={() => nav.reset('discover')}>
-              <Icon icon="solar:compass-bold" size={20} /> Discover stories</button>} />
-        </div>
-        {addSheet}
-        {uploadInput}
-      </div>
-    );
-  }
+  // Counts per shelf (for the tab labels) and the works for the active shelf.
+  const counts = { fics: 0, stories: 0, books: 0 };
+  for (const w of ready) counts[shelfOf(w)]++;
+  const shelfWorks = ready.filter(w => shelfOf(w) === shelf);
 
-  // Split the library by how each work entered it. "Bookmarks" is the kept AO3
-  // bookmark import (origin 'bookmark'); "Added" is everything the user curated
-  // since — pasted links, Saved tag matches, uploads. The toggle by the title
-  // filters the whole page, and the status tabs apply within the chosen lane.
-  const addedWorks = ready.filter(w => (w.origin || 'bookmark') !== 'bookmark');
-  const bookmarkWorks = ready.filter(w => (w.origin || 'bookmark') === 'bookmark');
-  const sourceWorks = source === 'other' ? addedWorks : bookmarkWorks;
+  // Status filter (fics/stories only).
+  const ongoingCount = shelfWorks.filter(w => w.status !== 'complete').length;
+  const completeCount = shelfWorks.length - ongoingCount;
+  const statusFiltered = isBooks ? shelfWorks
+    : status === 'complete' ? shelfWorks.filter(w => w.status === 'complete')
+    : status === 'ongoing' ? shelfWorks.filter(w => w.status !== 'complete')
+    : shelfWorks;
+  const shown = sortWorks(statusFiltered, sort);
 
-  // Status filter (All / Ongoing / Complete) over the chosen source. Counts come
-  // from that source's full set so the labels stay stable as the user switches.
-  const ongoingCount = sourceWorks.filter(w => w.status !== 'complete').length;
-  const completeCount = sourceWorks.length - ongoingCount;
-  const shown = status === 'complete' ? sourceWorks.filter(w => w.status === 'complete')
-    : status === 'ongoing' ? sourceWorks.filter(w => w.status !== 'complete')
-    : sourceWorks;
-  const label = status === 'complete' ? 'Complete' : status === 'ongoing' ? 'Ongoing' : 'All works';
-  const isOther = source === 'other';
-  const pending = isOther ? pendingLinks : [];
+  // Pending (still-downloading) link requests belong to the Stories shelf.
+  const pending = shelf === 'stories' ? pendingLinks : [];
 
-  // Collapse/expand-all only applies to the AO3 fandom-section layout. The
-  // button collapses every section if any is open, otherwise expands them all.
-  const fandomLayout = !isOther && layout === 'fandom';
-  const fandomNames = fandomLayout ? [...new Set(shown.map(fandomName))] : [];
+  // Fandom sections only for Fics in Default sort; otherwise a flat sorted list.
+  const useFandom = shelf === 'fics' && sort === 'default';
+  const fandomNames = useFandom ? [...new Set(shown.map(fandomName))] : [];
   const anyExpanded = fandomNames.some(n => !collapsed[n]);
-  const showCollapseToggle = fandomLayout && fandomNames.length > 1 && shown.length > 0;
+  const showCollapseToggle = useFandom && fandomNames.length > 1 && shown.length > 0;
   const toggleAll = () => {
     if (anyExpanded) { const all = {}; fandomNames.forEach(n => { all[n] = true; }); setCollapsed(all); }
     else setCollapsed({});
   };
+
+  const SORTS = isBooks
+    ? [{ v: 'added', l: 'Last added' }, { v: 'title', l: 'A–Z' }]
+    : [{ v: 'default', l: 'Default' }, { v: 'added', l: 'Last added' }, { v: 'updated', l: 'Last updated' }];
+  // Keep sort valid when switching shelves (books has no 'default'/'updated').
+  const activeSort = SORTS.some(s => s.v === sort) ? sort : SORTS[0].v;
+
+  const switchShelf = (id) => {
+    setShelf(id);
+    setStatus('all');
+    setSort(id === 'books' ? 'added' : 'default');
+  };
+
+  const emptyCopy = {
+    fics: { icon: 'solar:notebook-linear', title: 'No fics yet', desc: 'AO3 works land here — track a tag in Discover, or tap + to add one by link.' },
+    stories: { icon: 'solar:book-linear', title: 'No stories yet', desc: 'Royal Road, Scribble Hub and other sites land here — tap + to add one by link.' },
+    books: { icon: 'solar:book-2-linear', title: 'No books yet', desc: 'Tap + to upload an EPUB of a book you own.' },
+  }[shelf];
 
   return (
     <div className="screen">
@@ -143,30 +147,28 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
       {toast}
       <div className="scroll">
         <div className="seg src-seg" style={{ margin: '0 20px 14px' }}>
-          <button className={source === 'ao3' ? 'on' : ''} onClick={() => { setSource('ao3'); setStatus('all'); }}>Bookmarks · {bookmarkWorks.length}</button>
-          <button className={source === 'other' ? 'on' : ''} onClick={() => { setSource('other'); setStatus('all'); }}>Added · {addedWorks.length}</button>
+          {SHELVES.map(s => (
+            <button key={s.id} className={shelf === s.id ? 'on' : ''} onClick={() => switchShelf(s.id)}>
+              {s.label} · {counts[s.id]}
+            </button>
+          ))}
         </div>
-        {sourceWorks.length > 0 && (
+
+        {(shelfWorks.length > 0 || pending.length > 0) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 16px' }}>
-            <div className="seg" style={{ flex: 1 }}>
-              <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {sourceWorks.length}</button>
-              <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
-              <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+            {!isBooks && (
+              <div className="seg" style={{ flex: 1 }}>
+                <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {shelfWorks.length}</button>
+                <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
+                <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+              </div>
+            )}
+            <div className="sortpick" style={isBooks ? { flex: 1 } : undefined}>
+              <Icon icon="solar:sort-vertical-linear" size={16} color="var(--text-tertiary)" />
+              <select value={activeSort} onChange={e => setSort(e.target.value)} aria-label="Sort">
+                {SORTS.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
+              </select>
             </div>
-            {isOther && (
-              <button className="iconbtn ghost" onClick={pickFile} aria-label="Upload a file"
-                title="Upload an EPUB, HTML, or TXT file" disabled={uploading}
-                style={{ flex: 'none', width: 40, height: 42, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
-                <Icon icon={uploading ? 'solar:refresh-circle-linear' : 'solar:upload-minimalistic-linear'} size={20} />
-              </button>
-            )}
-            {isOther && (
-              <button className="iconbtn ghost" onClick={() => setShowAdd(true)} aria-label="Add a work by link"
-                title="Add a work by link"
-                style={{ flex: 'none', width: 40, height: 42, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
-                <Icon icon="solar:add-circle-linear" size={20} />
-              </button>
-            )}
             {showCollapseToggle && (
               <button className="iconbtn ghost" onClick={toggleAll} aria-label={anyExpanded ? 'Collapse all' : 'Expand all'}
                 title={anyExpanded ? 'Collapse all' : 'Expand all'}
@@ -176,49 +178,41 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
             )}
           </div>
         )}
+
         {pending.map(r => (
           <div key={r.id} style={{ padding: '0 20px' }}><LinkRequestRow req={r} onRemove={() => removeLink(r.id)} /></div>
         ))}
-        {sourceWorks.length === 0 && pending.length === 0 ? (
+
+        {shelfWorks.length === 0 && pending.length === 0 ? (
           <div style={{ padding: '0 20px' }}>
-            <EmptyState icon={isOther ? 'solar:link-broken-linear' : 'solar:inbox-line-linear'}
-              title={isOther ? 'Nothing added yet' : 'No bookmarks here'}
-              desc={isOther ? 'Paste a story link, upload a file, or Save a work you discover by tag. Royal Road, Scribble Hub, EPUB and more.'
-                : 'Works you kept from your AO3 bookmark import live here.'}
-              action={isOther ? (
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-                  <button className="btn btn-lg btn-primary" onClick={() => setShowAdd(true)}>
-                    <Icon icon="solar:add-circle-bold" size={20} /> Add by link</button>
-                  <button className="btn btn-lg btn-surface" onClick={pickFile} disabled={uploading}>
-                    <Icon icon="solar:upload-minimalistic-bold" size={20} /> Upload a file</button>
-                </div>
-              ) : undefined} />
+            <EmptyState icon={emptyCopy.icon} title={emptyCopy.title} desc={emptyCopy.desc} />
           </div>
         ) : shown.length === 0 ? (
           <div style={{ padding: '0 20px' }}>
-            <EmptyState icon="solar:inbox-line-linear" title={`No ${label.toLowerCase()} works`}
-              desc="Nothing here under this filter yet." />
+            <EmptyState icon="solar:inbox-line-linear" title="Nothing under this filter"
+              desc="Try a different status filter." />
           </div>
-        ) : isOther ? (
+        ) : useFandom ? (
+          <FandomSections works={shown} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
+        ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
-            {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
+            {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => setPendingDelete(w)} />)}
           </div>
-        ) : layout === 'shelves' ? <Shelves works={shown} open={open} />
-          : layout === 'fandom' ? <FandomSections works={shown} open={open} collapsed={collapsed} toggle={toggleSection} />
-          : layout === 'list' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
-              <div className="section-label" style={{ marginBottom: -2 }}>{label} · {shown.length}</div>
-              {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
-            </div>
-          ) : (
-            <div style={{ padding: '0 20px 24px' }}>
-              <div className="section-label" style={{ marginBottom: 12 }}>{label} · {shown.length}</div>
-              <div className="libgrid">{shown.map(w => <GridCard key={w.id} work={w} onOpen={open} />)}</div>
-            </div>
-          )}
+        )}
       </div>
-      {addSheet}
-      {uploadInput}
+
+      <Sheet open={!!pendingDelete} onClose={() => setPendingDelete(null)} title="Remove from library?">
+        <div style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--text-secondary)', marginBottom: 16 }}>
+          “{pendingDelete?.title}” will be hidden from your library.{pendingDelete?.origin === 'upload'
+            ? ' The uploaded copy stays on your device.'
+            : ' Your copy at the source is untouched.'}
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-lg btn-surface" style={{ flex: 1 }} onClick={() => setPendingDelete(null)}>Cancel</button>
+          <button className="btn btn-lg" style={{ flex: 1, background: 'var(--danger)', color: '#fff' }} onClick={confirmDelete}>
+            <Icon icon="solar:trash-bin-trash-bold" size={18} /> Remove</button>
+        </div>
+      </Sheet>
     </div>
   );
 }
@@ -250,42 +244,7 @@ function LinkRequestRow({ req, onRemove }) {
   );
 }
 
-function AddLinkSheet({ open, onClose, onAdded, showToast }) {
-  const [url, setUrl] = useState('');
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    if (busy || !url.trim()) return;
-    setBusy(true);
-    const res = await requestUrl(url);
-    setBusy(false);
-    if (res.ok) {
-      setUrl('');
-      showToast('Downloading… it’ll appear here shortly.');
-      onAdded && onAdded();
-    } else {
-      showToast(res.error || 'Could not add link.', 'solar:danger-triangle-bold');
-    }
-  };
-  return (
-    <Sheet open={open} onClose={onClose} title="Add a work by link">
-      <div style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
-        Paste a story link — Royal Road, Scribble Hub, FanFiction.net and many more. FicStash downloads a full offline copy.
-      </div>
-      <div className="searchfield" style={{ marginBottom: 14 }}>
-        <Icon icon="solar:link-linear" size={20} color="var(--text-tertiary)" />
-        <input placeholder="https://www.royalroad.com/fiction/…" value={url}
-          onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()}
-          autoCapitalize="off" autoCorrect="off" spellCheck={false} inputMode="url" />
-      </div>
-      <button className="btn btn-lg btn-primary" style={{ width: '100%' }} onClick={submit} disabled={busy || !url.trim()}>
-        {busy ? 'Adding…' : <><Icon icon="solar:download-minimalistic-bold" size={18} /> Download work</>}
-      </button>
-    </Sheet>
-  );
-}
-
-function FandomSections({ works, open, collapsed, toggle }) {
-  // Group works under their fandom, preserving the works' existing sort order.
+function FandomSections({ works, open, onDelete, collapsed, toggle }) {
   const groups = [];
   const byName = new Map();
   for (const w of works) {
@@ -310,31 +269,12 @@ function FandomSections({ works, open, collapsed, toggle }) {
             </button>
             {isOpen && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 13, paddingTop: 11 }}>
-                {g.items.map(w => <LibraryCard key={w.id} work={w} onOpen={open} />)}
+                {g.items.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => onDelete(w)} />)}
               </div>
             )}
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function Shelves({ works, open }) {
-  const shelves = [
-    { label: 'Reading', items: works.filter(w => w.progress > 0 && w.progress < 1) },
-    { label: 'Up next', items: works.filter(w => w.progress === 0) },
-    { label: 'Finished', items: works.filter(w => w.progress >= 1 && !w.frozen) },
-    { label: 'Saved copies', items: works.filter(w => w.frozen) },
-  ].filter(s => s.items.length);
-  return (
-    <div style={{ padding: '0 0 24px', display: 'flex', flexDirection: 'column', gap: 22 }}>
-      {shelves.map(s => (
-        <div key={s.label}>
-          <div className="section-label" style={{ padding: '0 20px 10px' }}>{s.label} · {s.items.length}</div>
-          <div className="crow">{s.items.map(w => <div key={w.id} style={{ width: 130, flex: 'none', scrollSnapAlign: 'start' }}><GridCard work={w} onOpen={open} /></div>)}</div>
-        </div>
-      ))}
     </div>
   );
 }
