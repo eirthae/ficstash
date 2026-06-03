@@ -4,7 +4,7 @@ import { EmptyState, useToast, Sheet } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { LibraryCard, GridCard } from '../components/cards.jsx';
 import { triggerSync } from '../lib/sync.js';
-import { requestUrl, fetchPendingLinks } from '../lib/links.js';
+import { requestUrl, fetchPendingLinks, removeRequest } from '../lib/links.js';
 
 // The fandom name without the author suffix ("Heated Rivalry – Rachel Reid" → "Heated Rivalry").
 function fandomName(work) {
@@ -24,6 +24,14 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
 
   const reloadLinks = () => fetchPendingLinks().then(setPendingLinks).catch(() => {});
   useEffect(() => { reloadLinks(); }, []);
+
+  const removeLink = async (id) => {
+    // Optimistically drop it so the list updates instantly; reload to reconcile.
+    setPendingLinks(list => list.filter(r => r.id !== id));
+    const res = await removeRequest(id);
+    if (res.ok) showToast('Removed.');
+    else { showToast(res.error || 'Could not remove.', 'solar:danger-triangle-bold'); reloadLinks(); }
+  };
 
   const doSync = async () => {
     if (syncing) return;
@@ -137,7 +145,7 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
           </div>
         )}
         {pending.map(r => (
-          <div key={r.id} style={{ padding: '0 20px' }}><LinkRequestRow req={r} /></div>
+          <div key={r.id} style={{ padding: '0 20px' }}><LinkRequestRow req={r} onRemove={() => removeLink(r.id)} /></div>
         ))}
         {sourceWorks.length === 0 && pending.length === 0 ? (
           <div style={{ padding: '0 20px' }}>
@@ -180,19 +188,25 @@ function prettyUrl(url) {
   return (url || '').replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
 }
 
-function LinkRequestRow({ req }) {
+function LinkRequestRow({ req, onRemove }) {
   const failed = req.status === 'error';
   const label = req.status === 'fetching' ? 'Downloading…' : failed ? 'Couldn’t download' : 'Queued for download';
   const icon = failed ? 'solar:danger-triangle-bold' : req.status === 'fetching' ? 'solar:download-minimalistic-linear' : 'solar:clock-circle-linear';
   const color = failed ? 'var(--danger, #f5455c)' : 'var(--text-tertiary)';
   return (
-    <div className="libcard" style={{ marginBottom: 13 }}>
+    <div className="libcard" style={{ marginBottom: 13, position: 'relative' }}>
       <div className="meta">
-        <div className="story-title" style={{ marginBottom: 2 }}>{req.title || prettyUrl(req.url)}</div>
+        <div className="story-title" style={{ marginBottom: 2, paddingRight: 38 }}>{req.title || prettyUrl(req.url)}</div>
         <div className="story-sub" style={{ marginBottom: 7, wordBreak: 'break-all' }}>{prettyUrl(req.url)}</div>
         <div className="metarow" style={{ color }}><Icon icon={icon} size={14} /><span>{label}</span></div>
         {failed && req.error && <div className="summary" style={{ marginTop: 6 }}>{req.error}</div>}
       </div>
+      {onRemove && (
+        <button className="iconbtn ghost" onClick={onRemove} aria-label="Remove" title="Remove"
+          style={{ position: 'absolute', top: 10, right: 10, width: 32, height: 32, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
+          <Icon icon="solar:trash-bin-trash-linear" size={18} />
+        </button>
+      )}
     </div>
   );
 }

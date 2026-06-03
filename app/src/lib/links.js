@@ -18,6 +18,15 @@ export async function requestUrl(url) {
   return { ok: true };
 }
 
+// Remove a link request the user no longer wants — e.g. a failed download
+// cluttering the "Other" tab. Returns { ok, error? }.
+export async function removeRequest(id) {
+  if (!hasSupabase) return { ok: false, error: 'Connect your account first.' };
+  const { error } = await supabase.from('requested_urls').delete().eq('id', id);
+  if (error) return { ok: false, error: error.message || String(error) };
+  return { ok: true };
+}
+
 // In-flight / failed link requests, newest first. Completed requests are dropped
 // here because the finished work shows up in the library's "Added by link"
 // section instead.
