@@ -109,6 +109,28 @@ def dump_series_links(body: str) -> None:
     print("---- end genre-page series links ----")
 
 
+def dump_genre_slugs(body: str) -> None:
+    """Extract the canonical genre name -> slug map from /genre/<slug>/ links."""
+    print("---- genre name -> slug ----")
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    # Anchor whose href is a genre page and whose text is the genre label.
+    for m in re.finditer(
+        r'href="https://www\.scribblehub\.com/genre/([a-z0-9-]+)/"[^>]*>([^<]{2,40})<',
+        body,
+        re.I,
+    ):
+        slug, name = m.group(1), m.group(2).strip()
+        if slug in seen or slug == "feed":
+            continue
+        seen.add(slug)
+        pairs.append((name, slug))
+    print(f"    distinct genres: {len(pairs)}")
+    for name, slug in pairs:
+        print(f"    {name!r}: {slug!r}")
+    print("---- end genre name -> slug ----")
+
+
 def dump_feed(body: str) -> None:
     """Inspect the genre RSS feed: item count + first item's fields."""
     print("---- genre RSS feed ----")
@@ -167,6 +189,7 @@ def main() -> int:
         # The Series Finder is the page that decides viability.
         if label == "series-finder" and verdict.startswith("OK"):
             any_ok = True
+            dump_genre_slugs(resp.text)
         if label == "genre-page" and resp is not None:
             dump_series_links(resp.text)
         if label == "genre-feed" and resp is not None:
