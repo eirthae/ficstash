@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
-import { Toggle, Segmented } from '../components/ui.jsx';
+import { Segmented } from '../components/ui.jsx';
 import { fetchOfflineStats } from '../lib/library.js';
 
 export function SettingsScreen({ appMode, setAppMode, nav }) {
-  const [notif, setNotif] = useState({ chapters: true, matches: true, frozen: true });
-  const [filters, setFilters] = useState({ minWords: true, noPodfic: true, complete: false });
-  const [langs, setLangs] = useState({ English: true, Russian: true, Armenian: true, Japanese: true });
   const [defaultTheme] = useState(localStorage.getItem('fs-reader-theme') || 'dark');
   const [storage, setStorage] = useState(undefined); // undefined=loading, null=unavailable
   useEffect(() => { fetchOfflineStats().then(setStorage).catch(() => setStorage(null)); }, []);
@@ -52,33 +49,6 @@ export function SettingsScreen({ appMode, setAppMode, nav }) {
             <span style={{ fontSize: 13, color: 'var(--text-secondary)', textTransform: 'capitalize', fontWeight: 600 }}>{defaultTheme}</span>
             <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
           </button>
-          <ToggleRow icon="solar:lock-keyhole-minimalistic-linear" h="Keep screen awake" d="While reading" on={true} onChange={() => {}} />
-        </SetSection>
-
-        <SetSection label="Discovery filters" note="Applied to tag matches before they reach What's New.">
-          <ToggleRow icon="solar:text-field-linear" h="Min. 300 words" d="Skip drabbles and stubs" on={filters.minWords} onChange={v => setFilters({ ...filters, minWords: v })} />
-          <ToggleRow icon="solar:microphone-linear" h="Exclude podfics" d="Text works only" on={filters.noPodfic} onChange={v => setFilters({ ...filters, noPodfic: v })} />
-          <ToggleRow icon="solar:check-circle-linear" h="Complete works only" d="Hide ongoing fics from matches" on={filters.complete} onChange={v => setFilters({ ...filters, complete: v })} />
-          <div className="set-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div className="set-ic"><Icon icon="solar:global-linear" size={18} /></div>
-              <div className="set-tx"><div className="set-h">Languages</div><div className="set-d">{Object.keys(langs).filter(l => langs[l]).length} selected</div></div>
-            </div>
-            <div className="chiprow">
-              {Object.keys(langs).map(l => (
-                <button key={l} className="chip pressable" onClick={() => setLangs({ ...langs, [l]: !langs[l] })}
-                  style={{ height: 30, padding: '0 13px', fontSize: 13, background: langs[l] ? 'var(--accent-soft)' : 'var(--surface-2)', color: langs[l] ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                  {langs[l] && <Icon icon="solar:check-circle-bold" size={14} />}{l}
-                </button>
-              ))}
-            </div>
-          </div>
-        </SetSection>
-
-        <SetSection label="Notifications">
-          <ToggleRow icon="solar:bell-linear" h="New chapters" d="On works you follow" on={notif.chapters} onChange={v => setNotif({ ...notif, chapters: v })} />
-          <ToggleRow icon="solar:magnifer-linear" h="New tag matches" d="Works matching tracked tags" on={notif.matches} onChange={v => setNotif({ ...notif, matches: v })} />
-          <ToggleRow icon="solar:shield-warning-linear" h="Work went offline" d="When a saved work disappears from its source" on={notif.frozen} onChange={v => setNotif({ ...notif, frozen: v })} />
         </SetSection>
 
         <SetSection label="Storage">
@@ -101,16 +71,6 @@ function SetSection({ label, note, children }) {
       <div className="section-label" style={{ marginBottom: 10, padding: '0 2px' }}>{label}</div>
       <div className="set-group">{children}</div>
       {note && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '8px 4px 0', lineHeight: 1.45 }}>{note}</div>}
-    </div>
-  );
-}
-
-function ToggleRow({ icon, h, d, on, onChange }) {
-  return (
-    <div className="set-row">
-      <div className="set-ic"><Icon icon={icon} size={18} /></div>
-      <div className="set-tx"><div className="set-h">{h}</div>{d && <div className="set-d">{d}</div>}</div>
-      <Toggle on={on} onChange={onChange} />
     </div>
   );
 }

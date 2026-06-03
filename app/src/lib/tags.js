@@ -146,6 +146,27 @@ export async function createLanguageGroup({ code, name, label = '' }) {
   return mapGroup(data);
 }
 
+// Append a tag to an existing tracked group (from a tappable tag in a fic's
+// detail page). No-op if the group already carries a tag with the same name.
+export async function addTagToGroup(groupId, tag) {
+  if (!hasSupabase) throw new Error('Supabase not configured');
+  const t = { name: tag.name, id: tag.id ?? '', kind: tag.kind || 'freeform' };
+  if (!t.name) throw new Error('Tag needs a name');
+  const { data, error } = await supabase
+    .from('tracked_groups')
+    .select('tags')
+    .eq('id', groupId)
+    .single();
+  if (error) throw error;
+  const existing = Array.isArray(data.tags) ? data.tags : [];
+  if (existing.some((x) => (x.name || '').toLowerCase() === t.name.toLowerCase())) return;
+  const { error: uErr } = await supabase
+    .from('tracked_groups')
+    .update({ tags: [...existing, t] })
+    .eq('id', groupId);
+  if (uErr) throw uErr;
+}
+
 export async function deleteGroup(id) {
   if (!hasSupabase) return;
   const { error } = await supabase.from('tracked_groups').delete().eq('id', id);

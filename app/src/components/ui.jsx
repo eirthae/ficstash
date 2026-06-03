@@ -7,10 +7,18 @@ export const TAG_COLOR = {
   character: 'var(--tag-character)', freeform: 'var(--tag-freeform)', warning: 'var(--tag-warning)',
 };
 
-export function TagChip({ t, k = 'freeform' }) {
+export function TagChip({ t, k = 'freeform', onClick }) {
   const c = TAG_COLOR[k] || TAG_COLOR.freeform;
+  const style = { background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c };
+  if (onClick) {
+    return (
+      <button className="chip pressable" style={{ ...style, border: 'none', cursor: 'pointer' }} onClick={onClick}>
+        <span className="swatch" style={{ background: c }}></span>{t}
+      </button>
+    );
+  }
   return (
-    <span className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c }}>
+    <span className="chip" style={style}>
       <span className="swatch" style={{ background: c }}></span>{t}
     </span>
   );

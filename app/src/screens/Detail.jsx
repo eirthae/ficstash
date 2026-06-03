@@ -5,7 +5,7 @@ import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
 import { fetchChapters, removeWork } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
-import { requestSave } from '../lib/tags.js';
+import { requestSave, createGroup, addTagToGroup, fetchTrackedGroups } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 import { workUrl, sourceLabel } from '../sources/index.js';
 
@@ -14,9 +14,16 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
   const total = work.chaptersTotal || work.chapters || 1;
   const srcLabel = sourceLabel(work.source);
   // Uploaded works (and anything without a resolvable link) have no site to open
-  // back to — hide the "Open at source" affordances for them.
-  const sourceUrl = workUrl(work.source, work.sourceWorkId, work.sourceUrl);
+  // back to — hide the "Open at source" affordances for them. AO3 works that are
+  // missing a stored work id/url fall back to an AO3 title search so there's
+  // always a way to find the work at the source.
+  const directUrl = workUrl(work.source, work.sourceWorkId, work.sourceUrl);
+  const searchFallback = !directUrl && work.source === 'ao3' && work.title
+    ? `https://archiveofourown.org/works/search?work_search%5Bquery%5D=${encodeURIComponent(work.title)}`
+    : '';
+  const sourceUrl = directUrl || searchFallback;
   const canOpenAtSource = !!sourceUrl;
+  const openLabel = searchFallback ? `Find on ${srcLabel}` : `Open on ${srcLabel}`;
 
   // Real downloaded chapters for this work. When connected to Supabase we show
   // only real data — an empty list means nothing's been downloaded yet. The
@@ -43,6 +50,32 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
   const [toast, showToast] = useToast();
   const [showMenu, setShowMenu] = useState(false);
   const [removing, setRemoving] = useState(false);
+  // Tappable tags → "track this tag" / "add to a group". `tagSheet` holds the
+  // tapped tag ({name, kind}); groups are this source's existing tracked groups.
+  const [tagSheet, setTagSheet] = useState(null);
+  const [groups, setGroups] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    fetchTrackedGroups()
+      .then(gs => { if (alive) setGroups((gs || []).filter(g => (g.source || 'ao3') === work.source && g.kind !== 'language')); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [work.source]);
+
+  const trackTag = async (tag) => {
+    try {
+      if (hasSupabase) await createGroup({ tags: [{ name: tag.name, kind: tag.kind }], source: work.source });
+      showToast(`Tracking “${tag.name}”`, 'solar:check-circle-bold');
+    } catch { showToast("Couldn't track tag — try again", 'solar:danger-triangle-linear'); }
+    setTagSheet(null);
+  };
+  const addToGroup = async (tag, group) => {
+    try {
+      if (hasSupabase) await addTagToGroup(group.id, { name: tag.name, kind: tag.kind });
+      showToast(`Added to “${group.name}”`, 'solar:check-circle-bold');
+    } catch { showToast("Couldn't add to group — try again", 'solar:danger-triangle-linear'); }
+    setTagSheet(null);
+  };
 
   const fetchCh = (ch) => {
     if (chState[ch.n] === 'done' || chState[ch.n] === 'busy') return;
@@ -147,7 +180,7 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
               >
                 <Icon icon={saveState === 'saved' ? 'solar:check-read-linear' : saveState === 'queued' ? 'solar:clock-circle-linear' : 'solar:download-minimalistic-bold'} size={22} /></button>
             ) : canOpenAtSource ? (
-              <button className="btn btn-lg btn-surface" onClick={openAtSource} style={{ flex: 'none', width: 56, padding: 0 }} title={`Open on ${srcLabel}`}>
+              <button className="btn btn-lg btn-surface" onClick={openAtSource} style={{ flex: 'none', width: 56, padding: 0 }} title={openLabel}>
                 <Icon icon="solar:square-top-down-linear" size={22} /></button>
             ) : null}
           </div>
@@ -175,17 +208,21 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
           <div className="section-label" style={{ marginBottom: 8 }}>Summary</div>
           <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text-secondary)', margin: '0 0 16px' }}>{work.summary}</p>
 
-          <div className="chiprow" style={{ marginBottom: 22 }}>
-            <TagChip t={work.fandom.split('–')[0].trim()} k="fandom" />
-            {(work.tags || []).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
+          <div className="chiprow" style={{ marginBottom: 10 }}>
+            <TagChip t={work.fandom.split('–')[0].trim()} k="fandom"
+              onClick={() => setTagSheet({ name: work.fandom.split('–')[0].trim(), kind: 'fandom' })} />
+            {(work.tags || []).map((t, i) => (
+              <TagChip key={i} t={t.t} k={t.k} onClick={() => setTagSheet({ name: t.t, kind: t.k })} />
+            ))}
           </div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 22 }}>Tap a tag to track it or add it to a group.</div>
 
           {canOpenAtSource && (
             <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 22 }}
               onClick={openAtSource}>
               <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
               <div style={{ flex: 1 }}>
-                <div className="set-h">Open on {srcLabel}</div>
+                <div className="set-h">{openLabel}</div>
                 <div className="set-d">Follow or bookmark on the site — FicStash never touches your account.</div>
               </div>
               <Icon icon="solar:arrow-right-up-linear" size={18} color="var(--text-tertiary)" />
@@ -221,7 +258,7 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
             onClick={() => { setShowMenu(false); openAtSource(); }}>
             <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
             <div style={{ flex: 1 }}>
-              <div className="set-h">Open on {srcLabel}</div>
+              <div className="set-h">{openLabel}</div>
               <div className="set-d">View this work on the site.</div>
             </div>
           </button>
@@ -234,6 +271,36 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
             <div className="set-d">{work.origin === 'upload' ? 'Hides it in the app. The downloaded copy stays in your shelf.' : 'Hides it in the app. Your AO3 bookmark stays untouched.'}</div>
           </div>
         </button>
+      </Sheet>
+
+      <Sheet open={!!tagSheet} onClose={() => setTagSheet(null)} title={tagSheet ? tagSheet.name : ''}>
+        <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)', marginBottom: 12 }}>Track new {srcLabel} works carrying this tag.</div>
+        <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 10 }}
+          onClick={() => trackTag(tagSheet)}>
+          <div className="set-ic" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon icon="solar:add-circle-bold" size={18} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="set-h">Track this tag</div>
+            <div className="set-d">Starts a new tracked tag — matches show up in What’s New.</div>
+          </div>
+        </button>
+        {groups.length > 0 && (
+          <>
+            <div className="section-label" style={{ margin: '6px 2px 8px' }}>Add to a group</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {groups.map(g => (
+                <button key={g.id} className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 12, width: '100%', textAlign: 'left' }}
+                  onClick={() => addToGroup(tagSheet, g)}>
+                  <div className="set-ic"><Icon icon="solar:layers-minimalistic-linear" size={18} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="set-h" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</div>
+                    <div className="set-d">{g.names.length} tag{g.names.length === 1 ? '' : 's'} · {g.matchMode === 'all' ? 'match all' : 'match any'}</div>
+                  </div>
+                  <Icon icon="solar:add-circle-linear" size={18} color="var(--text-tertiary)" />
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </Sheet>
     </div>
   );
