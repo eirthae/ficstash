@@ -113,7 +113,13 @@ class AO3Source(Source):
 
     def _require_session(self) -> "AO3.Session":
         if self._session is None:
-            raise RuntimeError("AO3Source.authenticate() must run before fetching.")
+            # FicStash is a curated reader now, not an account mirror: it runs
+            # logged-out (see main.py — no AO3 creds in REQUIRED_ENV). Public work
+            # metadata, chapter bodies and tag/language search all work as a guest,
+            # so lazily mint a guest session the first time one is needed.
+            # authenticate() can still install a logged-in session for any future
+            # account feature; until then this keeps every AO3 path working.
+            self._session = AO3.GuestSession()
         return self._session
 
     # ---- reading list ------------------------------------------------------
