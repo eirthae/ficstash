@@ -10,6 +10,7 @@ import {
 } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
+import { ROYALROAD_GENRES, sourceLabel } from '../sources/index.js';
 
 // Languages you can browse straight from Discover. `code` is AO3's language_id
 // (ISO 639); `name` is shown on the tile. Add more entries to offer more.
@@ -189,8 +190,60 @@ function TagPicker({ picked, onAdd, onRemove, placeholder, accent }) {
   );
 }
 
-// ---- Builder sheet: live AO3 autocomplete → pick tags → save a group -------
+// Pick from Royal Road's fixed genre taxonomy (no live search — the list is
+// shipped in the source registry). Stores each pick as {name, id:slug, kind}.
+function RoyalRoadGenrePicker({ picked, onAdd, onRemove }) {
+  const [term, setTerm] = useState('');
+  const q = term.trim().toLowerCase();
+  const pickedSlugs = new Set(picked.map((t) => t.id));
+  const matches = ROYALROAD_GENRES
+    .filter((g) => !pickedSlugs.has(g.slug))
+    .filter((g) => !q || g.name.toLowerCase().includes(q))
+    .slice(0, 12);
+  const add = (g) => { onAdd({ name: g.name, id: g.slug, kind: 'genre' }); setTerm(''); };
+
+  return (
+    <div>
+      {picked.length > 0 && (
+        <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {picked.map((t) => {
+            const c = TAG_COLOR.freeform;
+            return (
+              <span key={t.id} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
+                <span className="swatch" style={{ background: c }}></span>{t.name}
+                <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t.name)} aria-label="Remove genre">
+                  <Icon icon="solar:close-circle-bold" size={15} color={c} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <SearchField placeholder="Filter Royal Road genres…" value={term} onChange={setTerm} />
+      {matches.length > 0 && (
+        <div className="tag-suggest" style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+          {matches.map((g) => (
+            <button
+              key={g.slug}
+              className="pressable"
+              onClick={() => add(g)}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '11px 14px', background: 'transparent', borderBottom: '1px solid var(--border)' }}
+            >
+              <Icon icon="solar:add-circle-linear" size={18} color="var(--accent)" />
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Builder sheet: pick a source, pick tags/genres → save a group ----------
+const BUILDER_SOURCES = ['ao3', 'royalroad'];
+
 function TagGroupBuilder({ open, onClose, onCreated }) {
+  const [source, setSource] = useState('ao3');
   const [picked, setPicked] = useState([]);
   const [excluded, setExcluded] = useState([]);
   const [matchMode, setMatchMode] = useState('all');
@@ -198,9 +251,14 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    if (open) { setPicked([]); setExcluded([]); setMatchMode('all'); setErr(''); }
+    if (open) { setSource('ao3'); setPicked([]); setExcluded([]); setMatchMode('all'); setErr(''); }
   }, [open]);
 
+  // Switching source clears picks — AO3 tags and RR genres aren't interchangeable.
+  const changeSource = (s) => { setSource(s); setPicked([]); setExcluded([]); setMatchMode('all'); setErr(''); };
+
+  const isAo3 = source === 'ao3';
+  const noun = isAo3 ? 'tag' : 'genre';
   const has = (list, t) => list.some((x) => x.name.toLowerCase() === t.name.toLowerCase());
   const addPicked = (t) => { setPicked((p) => (has(p, t) ? p : [...p, t])); setErr(''); };
   const removePicked = (name) => setPicked((p) => p.filter((x) => x.name !== name));
@@ -208,10 +266,17 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
   const removeExcluded = (name) => setExcluded((p) => p.filter((x) => x.name !== name));
 
   const save = async () => {
-    if (!picked.length) { setErr('Add at least one tag first.'); return; }
+    if (!picked.length) { setErr(`Add at least one ${noun} first.`); return; }
     setBusy(true); setErr('');
     try {
-      const g = await createGroup({ tags: picked, excludedTags: excluded, matchMode });
+      // Royal Road searches one genre at a time and unions the results, so a
+      // multi-genre group is always "any". AO3 honours the chosen match mode.
+      const g = await createGroup({
+        source,
+        tags: picked,
+        excludedTags: isAo3 ? excluded : [],
+        matchMode: isAo3 ? matchMode : 'any',
+      });
       onCreated(g);
     } catch (e) {
       setErr(e?.message ? String(e.message) : 'Could not save — check your connection.');
@@ -224,13 +289,30 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
     <Sheet open={open} onClose={onClose} title="Track a tag group" maxH="88vh">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <div>
-          <div className="section-label" style={{ marginBottom: 8 }}>
-            {picked.length <= 1 ? 'Track this tag' : `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`}
-          </div>
-          <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
+          <div className="section-label" style={{ marginBottom: 8 }}>Source</div>
+          <Segmented
+            value={source}
+            onChange={changeSource}
+            options={BUILDER_SOURCES.map((s) => ({ value: s, label: sourceLabel(s) }))}
+          />
         </div>
 
-        {picked.length > 1 && (
+        <div>
+          <div className="section-label" style={{ marginBottom: 8 }}>
+            {picked.length <= 1
+              ? `Track this ${noun}`
+              : isAo3
+                ? `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`
+                : 'Track works in ANY of these genres'}
+          </div>
+          {isAo3 ? (
+            <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
+          ) : (
+            <RoyalRoadGenrePicker picked={picked} onAdd={addPicked} onRemove={removePicked} />
+          )}
+        </div>
+
+        {isAo3 && picked.length > 1 && (
           <div>
             <div className="section-label" style={{ marginBottom: 8 }}>Match</div>
             <Segmented
@@ -246,18 +328,20 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
           </div>
         )}
 
-        <div>
-          <div className="section-label" style={{ marginBottom: 8 }}>Exclude <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
-          <TagPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded} placeholder="Search AO3 tags to exclude…" accent="var(--danger, #f5455c)" />
-          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
-            Works carrying any excluded tag are left out of your matches.
+        {isAo3 && (
+          <div>
+            <div className="section-label" style={{ marginBottom: 8 }}>Exclude <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
+            <TagPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded} placeholder="Search AO3 tags to exclude…" accent="var(--danger, #f5455c)" />
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
+              Works carrying any excluded tag are left out of your matches.
+            </div>
           </div>
-        </div>
+        )}
 
         {err && <div style={{ color: 'var(--danger, #f5455c)', fontSize: 13 }}>{err}</div>}
 
         <button className="btn btn-primary" disabled={busy || !picked.length} onClick={save} style={{ width: '100%', opacity: busy || !picked.length ? 0.6 : 1 }}>
-          {busy ? 'Saving…' : <><Icon icon="solar:check-circle-bold" size={18} /> Track this {picked.length > 1 ? 'group' : 'tag'}</>}
+          {busy ? 'Saving…' : <><Icon icon="solar:check-circle-bold" size={18} /> Track this {picked.length > 1 ? 'group' : noun}</>}
         </button>
       </div>
     </Sheet>
@@ -269,7 +353,8 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
   const [items, setItems] = useState(null); // null = loading
   const [toast, showToast] = useToast();
   const c = TAG_COLOR[tag.kind] || 'var(--accent)';
-  const kindLabel = { relationship: 'relationship', fandom: 'fandom', freeform: 'tag', character: 'character', group: 'tag group', language: 'language' }[tag.kind] || 'tag';
+  const kindLabel = { relationship: 'relationship', fandom: 'fandom', freeform: 'tag', character: 'character', group: 'tag group', language: 'language', genre: 'genre' }[tag.kind] || 'tag';
+  const srcLabel = sourceLabel(tag.source || 'ao3');
 
   useEffect(() => {
     let alive = true;
@@ -328,7 +413,7 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
         {items === null ? (
           <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Loading…</div>
         ) : list.length === 0 ? (
-          <EmptyState icon="solar:inbox-line-linear" title="No matches yet" desc="When the worker next checks AO3, new works for this tag will appear here." />
+          <EmptyState icon="solar:inbox-line-linear" title="No matches yet" desc={`When the worker next checks ${srcLabel}, new works for this ${kindLabel} will appear here.`} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
             {list.map((w) => (

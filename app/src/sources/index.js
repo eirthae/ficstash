@@ -37,6 +37,15 @@ const SOURCES = {
     ]),
     workUrl: (id) => `https://archiveofourown.org/works/${id}`,
   },
+  // Royal Road — original-fiction site. Discovery by genre/tag; saved works are
+  // downloaded server-side through the FanFicFare link path, so the app only
+  // needs tag search + a canonical link here.
+  royalroad: {
+    id: 'royalroad',
+    label: 'Royal Road',
+    capabilities: new Set([CAP.TAG_SEARCH, CAP.GENRE_LIST, CAP.WORK_URL]),
+    workUrl: (id) => `https://www.royalroad.com/fiction/${id}`,
+  },
   // A user-uploaded file (EPUB/HTML/TXT). Fully offline, no site to link back to.
   upload: {
     id: 'upload',
@@ -44,6 +53,64 @@ const SOURCES = {
     capabilities: new Set(),
   },
 };
+
+// Royal Road's fiction tags — kept in sync with the worker's royalroad.GENRES.
+// `slug` is the value the site's search expects; `name` is the label. Stored as
+// a tracked tag's {name, id:slug} so the worker searches by the exact slug.
+export const ROYALROAD_GENRES = [
+  { name: 'Action', slug: 'action' },
+  { name: 'Adventure', slug: 'adventure' },
+  { name: 'Comedy', slug: 'comedy' },
+  { name: 'Contemporary', slug: 'contemporary' },
+  { name: 'Drama', slug: 'drama' },
+  { name: 'Fantasy', slug: 'fantasy' },
+  { name: 'Historical', slug: 'historical' },
+  { name: 'Horror', slug: 'horror' },
+  { name: 'Mystery', slug: 'mystery' },
+  { name: 'Psychological', slug: 'psychological' },
+  { name: 'Romance', slug: 'romance' },
+  { name: 'Satire', slug: 'satire' },
+  { name: 'Sci-fi', slug: 'sci_fi' },
+  { name: 'Tragedy', slug: 'tragedy' },
+  { name: 'Anti-Hero Lead', slug: 'anti-hero_lead' },
+  { name: 'Artificial Intelligence', slug: 'artificial_intelligence' },
+  { name: 'Cyberpunk', slug: 'cyberpunk' },
+  { name: 'Dungeon', slug: 'dungeon' },
+  { name: 'Dystopia', slug: 'dystopia' },
+  { name: 'Female Lead', slug: 'female_lead' },
+  { name: 'GameLit', slug: 'gamelit' },
+  { name: 'Grimdark', slug: 'grimdark' },
+  { name: 'Harem', slug: 'harem' },
+  { name: 'High Fantasy', slug: 'high_fantasy' },
+  { name: 'LitRPG', slug: 'litrpg' },
+  { name: 'Low Fantasy', slug: 'low_fantasy' },
+  { name: 'Magic', slug: 'magic' },
+  { name: 'Male Lead', slug: 'male_lead' },
+  { name: 'Martial Arts', slug: 'martial_arts' },
+  { name: 'Mythos', slug: 'mythos' },
+  { name: 'Non-Human Lead', slug: 'non-human_lead' },
+  { name: 'Portal Fantasy / Isekai', slug: 'summoned_hero' },
+  { name: 'Post Apocalyptic', slug: 'post_apocalyptic' },
+  { name: 'Progression', slug: 'progression' },
+  { name: 'Reincarnation', slug: 'reincarnation' },
+  { name: 'School Life', slug: 'school_life' },
+  { name: 'Slice of Life', slug: 'slice_of_life' },
+  { name: 'Space Opera', slug: 'space_opera' },
+  { name: 'Sports', slug: 'sports' },
+  { name: 'Steampunk', slug: 'steampunk' },
+  { name: 'Strategy', slug: 'strategy' },
+  { name: 'Strong Lead', slug: 'strong_lead' },
+  { name: 'Super Heroes', slug: 'super_heroes' },
+  { name: 'Supernatural', slug: 'supernatural' },
+  { name: 'Time Loop', slug: 'loop' },
+  { name: 'Time Travel', slug: 'time_travel' },
+  { name: 'Urban Fantasy', slug: 'urban_fantasy' },
+  { name: 'Villainous Lead', slug: 'villainous_lead' },
+  { name: 'Virtual Reality', slug: 'virtual_reality' },
+  { name: 'War and Military', slug: 'war_and_military' },
+  { name: 'Wuxia', slug: 'wuxia' },
+  { name: 'Xianxia', slug: 'xianxia' },
+];
 
 export function getSource(sourceId) {
   return SOURCES[sourceId] || null;

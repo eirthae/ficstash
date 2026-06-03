@@ -27,6 +27,7 @@ function mapGroup(g, counts = { total: 0, fresh: 0 }) {
     id: g.id,
     name,
     label: g.label || '',
+    source: g.source || 'ao3',
     tags,
     names,
     excludedTags,
@@ -100,7 +101,7 @@ export async function fetchTrackedGroups() {
   return (groups || []).map((g) => mapGroup(g, counts[g.id]));
 }
 
-export async function createGroup({ label = '', tags, excludedTags = [], matchMode = 'all' }) {
+export async function createGroup({ label = '', tags, excludedTags = [], matchMode = 'all', source = 'ao3' }) {
   if (!hasSupabase) throw new Error('Supabase not configured');
   const cleanTags = (list) => (list || [])
     .map((t) => ({ name: t.name, id: t.id ?? '', kind: t.kind || 'freeform' }))
@@ -113,6 +114,7 @@ export async function createGroup({ label = '', tags, excludedTags = [], matchMo
     .from('tracked_groups')
     .insert({
       label,
+      source,
       tags: clean,
       excluded_tags: excluded,
       match_mode: matchMode === 'any' ? 'any' : 'all',

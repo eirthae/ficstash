@@ -57,7 +57,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from ficstash_worker.lang import allowed_language_set, language_allowed
-from ficstash_worker.sources import get_source
+from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_non_offline_works,
@@ -65,7 +65,7 @@ from ficstash_worker.supabase_io import (
     fetch_requested_urls,
     fetch_tracked_groups,
     fetch_untitled_works,
-    fetch_wanted_matches,
+    fetch_wanted_matches_all,
     make_client,
     mark_flag,
     mark_group_checked,
@@ -226,6 +226,18 @@ def main() -> None:
     have_offline: set[str] = set()  # work ids whose chapter text we stored this run
     request_count = 0
 
+    # FanFicFare is heavy to import, so build the link fetcher lazily and share
+    # the one instance between the requested-links pass and non-AO3 saves (Royal
+    # Road, …), which both download full offline copies through it.
+    _linker_box: dict = {}
+
+    def get_linker():
+        if "l" not in _linker_box:
+            from ficstash_worker.sources.link import LinkFetcher
+
+            _linker_box["l"] = LinkFetcher()
+        return _linker_box["l"]
+
     def space() -> None:
         # Sleep between AO3 requests, but not before the very first one.
         nonlocal request_count
@@ -242,9 +254,9 @@ def main() -> None:
     print(f"{len(link_requests)} link request(s).")
     link_done = link_failed = 0
     if link_requests:
-        from ficstash_worker.sources.link import LinkFetcher, UnsupportedSite
+        from ficstash_worker.sources.link import UnsupportedSite
 
-        linker = LinkFetcher()
+        linker = get_linker()
         for req in link_requests:
             rid = req["id"]
             url = req["url"]
@@ -286,50 +298,87 @@ def main() -> None:
     print(f"Requested links: {link_done} downloaded, {link_failed} failed.")
 
     # ---- Pass 2: requested saves → full offline copies ---------------------
-    # Works the user tapped "Save" on in the app (tag_matches.wanted). Fetch the
-    # full work like a bookmark, store it offline, then mark the match saved.
-    # Runs ahead of the library sweep so a tapped Save lands quickly.
+    # Works the user tapped "Save" on in the app (tag_matches.wanted), across
+    # every source. AO3 works are fetched directly via the AO3 source; non-AO3
+    # works (Royal Road, …) are downloaded through the FanFicFare link path using
+    # the source's canonical work URL. Runs ahead of the library sweep so a
+    # tapped Save lands quickly. Marks the match saved once it's in the library.
     print("\n== Requested saves ==")
-    wanted = fetch_wanted_matches(db)
+    wanted = fetch_wanted_matches_all(db)
     print(f"{len(wanted)} work(s) requested.")
     saved_count = save_failed = 0
-    for wid in wanted:
-        if wid in have_offline:
-            # Already downloaded in full this run — just flag it.
-            mark_matches_saved(db, wid)
-            saved_count += 1
-            continue
+    for w in wanted:
+        src_id = w["source"]
+        wid = w["source_work_id"]
         try:
-            space()
-            meta = _with_backoff(
-                lambda: ao3.fetch_work_metadata(wid), what=f"requested metadata {wid}"
-            )
-            work_uuid = upsert_work(db, meta, origin="tag")
-            chapters = []
-            for n in range(1, meta.chapters + 1):
+            if src_id == "ao3":
+                if wid in have_offline:
+                    # Already downloaded in full this run — just flag it.
+                    mark_matches_saved(db, wid)
+                    saved_count += 1
+                    continue
                 space()
-                chapters.append(
-                    _with_backoff(
-                        lambda n=n: ao3.fetch_chapter(wid, n),
-                        what=f"chapter {n} of {wid}",
-                    )
+                meta = _with_backoff(
+                    lambda: ao3.fetch_work_metadata(wid),
+                    what=f"requested metadata {wid}",
                 )
-            written = upsert_chapters(db, work_uuid, chapters)
-            if not written:
-                # No text fetched — leave it un-flagged and still wanted so a
-                # later run retries, rather than showing an empty work.
-                save_failed += 1
-                print(f"    requested {wid} — no chapters fetched, will retry.")
-                continue
-            mark_flag(db, [wid], "offline")
-            mark_matches_saved(db, wid)
-            processed.add(wid)
-            have_offline.add(wid)
-            saved_count += 1
-            print(f"    saved {wid} — {written} chapter(s).")
+                work_uuid = upsert_work(db, meta, origin="tag")
+                chapters = []
+                for n in range(1, meta.chapters + 1):
+                    space()
+                    chapters.append(
+                        _with_backoff(
+                            lambda n=n: ao3.fetch_chapter(wid, n),
+                            what=f"chapter {n} of {wid}",
+                        )
+                    )
+                written = upsert_chapters(db, work_uuid, chapters)
+                if not written:
+                    # No text fetched — leave it un-flagged and still wanted so a
+                    # later run retries, rather than showing an empty work.
+                    save_failed += 1
+                    print(f"    requested {wid} — no chapters fetched, will retry.")
+                    continue
+                mark_flag(db, [wid], "offline")
+                mark_matches_saved(db, wid)
+                processed.add(wid)
+                have_offline.add(wid)
+                saved_count += 1
+                print(f"    saved {wid} — {written} chapter(s).")
+            else:
+                # Non-AO3: download a full offline copy via FanFicFare, using the
+                # source's canonical link. The FanFicFare metadata stamps the same
+                # source id we stored the match under, so flags line up.
+                try:
+                    source = get_source(src_id)
+                except KeyError:
+                    save_failed += 1
+                    print(f"    requested {src_id}:{wid} — unknown source, skipped.")
+                    continue
+                url = source.work_url(wid)
+                linker = get_linker()
+                space()
+                meta, chap_list = linker.prepare(url)
+                work_uuid = upsert_work(db, meta, origin="tag")
+                chapters = []
+                for i, ch in enumerate(chap_list):
+                    space()
+                    chapters.append(linker.fetch_chapter(url, i, ch))
+                written = upsert_chapters(db, work_uuid, chapters)
+                if not written:
+                    save_failed += 1
+                    print(f"    requested {src_id}:{wid} — no chapters, will retry.")
+                    continue
+                mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
+                mark_matches_saved(db, wid, source=src_id)
+                saved_count += 1
+                print(
+                    f"    saved {src_id}:{wid} — {written} chapter(s) "
+                    f"({meta.source})."
+                )
         except Exception as exc:  # noqa: BLE001
             save_failed += 1
-            print(f"    requested {wid} skipped ({type(exc).__name__}: {exc})")
+            print(f"    requested {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
 
     # ---- Pass 3: repair works with blank metadata --------------------------
@@ -376,15 +425,17 @@ def main() -> None:
         since = last_checked or _parse_ts(g.get("created_at"))
         anchor = "last sync" if last_checked else "first run / created"
         window = since.isoformat() if since else "all-time"
-        print(f"  window: works since {window} ({anchor})")
+        source_id = g.get("source") or "ao3"
+        print(f"  window: works since {window} ({anchor}) · source {source_id}")
         tags_raw = g.get("tags") or []
         # A "Browse by language" group carries a single kind:'language' tag whose
         # id is AO3's language_id code; it's searched by language, not by tags.
+        # Language browsing is AO3-only.
         lang_tag = next(
             (t for t in tags_raw if isinstance(t, dict) and t.get("kind") == "language"),
             None,
         )
-        if lang_tag is not None:
+        if lang_tag is not None and source_id == "ao3":
             code = str(lang_tag.get("id") or lang_tag.get("name") or "").strip()
             label = g.get("label") or lang_tag.get("name") or g["id"]
             if not code:
@@ -420,24 +471,63 @@ def main() -> None:
         if not tag_names:
             print(f"    '{label}': no tags, skipped.")
             continue
+
+        if source_id == "ao3":
+            try:
+                space()
+                metas = _with_backoff(
+                    lambda: ao3.search_group(
+                        tag_names,
+                        match_mode=g.get("match_mode", "all"),
+                        excluded_tags=excluded_names,
+                        since=since,
+                    ),
+                    what=f"tag search '{label}'",
+                    broad=True,
+                )
+                kept = [m for m in metas if keep_language(m)]
+                dropped = len(metas) - len(kept)
+                written = upsert_tag_matches(db, g["id"], kept)
+                mark_group_checked(db, g["id"])
+                note = f" ({dropped} filtered by language)" if dropped else ""
+                print(f"    '{label}': {written} match(es).{note}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
+            continue
+
+        # ---- non-AO3 sources (Royal Road, …) -------------------------------
+        # Capability-gated discovery: search each tag and merge. Sites without a
+        # "since" filter just return newest-first; matches are deduped on upsert
+        # and stay `seen`, so re-surfacing the same work is harmless. Multi-tag
+        # groups are treated as ANY (the union) for these sources.
         try:
-            space()
-            metas = _with_backoff(
-                lambda: ao3.search_group(
-                    tag_names,
-                    match_mode=g.get("match_mode", "all"),
-                    excluded_tags=excluded_names,
-                    since=since,
-                ),
-                what=f"tag search '{label}'",
-                broad=True,
-            )
-            kept = [m for m in metas if keep_language(m)]
-            dropped = len(metas) - len(kept)
-            written = upsert_tag_matches(db, g["id"], kept)
+            source = get_source(source_id)
+        except KeyError:
+            print(f"    '{label}': unknown source '{source_id}', skipped.")
+            continue
+        if not source.supports(TAG_SEARCH):
+            print(f"    '{label}': source '{source_id}' has no tag search, skipped.")
+            continue
+        # Prefer each tag's stored id (the site's tag slug) over its display name.
+        tag_terms = [
+            (t.get("id") or t.get("name")) if isinstance(t, dict) else str(t)
+            for t in tags_raw
+        ]
+        tag_terms = [t for t in tag_terms if t]
+        try:
+            merged: dict[str, object] = {}
+            for term in tag_terms:
+                space()
+                for m in _with_backoff(
+                    lambda term=term: source.search_by_tag(term, limit=30),
+                    what=f"{source_id} tag search '{term}'",
+                    broad=True,
+                ):
+                    merged.setdefault(m.source_work_id, m)
+            metas = list(merged.values())
+            written = upsert_tag_matches(db, g["id"], metas)
             mark_group_checked(db, g["id"])
-            note = f" ({dropped} filtered by language)" if dropped else ""
-            print(f"    '{label}': {written} match(es).{note}")
+            print(f"    '{label}' ({source_id}): {written} match(es).")
         except Exception as exc:  # noqa: BLE001
             print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
 

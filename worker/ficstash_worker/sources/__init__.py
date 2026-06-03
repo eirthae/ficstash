@@ -18,9 +18,10 @@ from .base import (
     WorkMeta,
 )
 from .ao3 import AO3Source
+from .royalroad import RoyalRoadSource
 
 SOURCES: dict[str, Source] = {
-    s.id: s for s in (AO3Source(),)
+    s.id: s for s in (AO3Source(), RoyalRoadSource())
 }
 
 

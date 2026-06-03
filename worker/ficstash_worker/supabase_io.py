@@ -216,7 +216,9 @@ def fetch_tracked_groups(client: Client) -> list[dict]:
     """Return the user's tracked tag groups (created in-app)."""
     resp = (
         client.table("tracked_groups")
-        .select("id,label,tags,excluded_tags,match_mode,last_checked,created_at")
+        .select(
+            "id,label,tags,excluded_tags,match_mode,source,last_checked,created_at"
+        )
         .execute()
     )
     return list(resp.data or [])
@@ -323,6 +325,32 @@ def fetch_wanted_matches(client: Client, source: str = "ao3") -> list[str]:
         if wid and wid not in seen:
             seen.append(wid)
     return seen
+
+
+def fetch_wanted_matches_all(client: Client) -> list[dict]:
+    """Return distinct (source, source_work_id) the app requested be saved.
+
+    Like fetch_wanted_matches but across every source, so non-AO3 matches (Royal
+    Road, …) get downloaded too. Each entry is {"source", "source_work_id"};
+    saves are downloaded via the source's own path in the worker.
+    """
+    resp = (
+        client.table("tag_matches")
+        .select("source,source_work_id")
+        .eq("wanted", True)
+        .eq("saved", False)
+        .execute()
+    )
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for r in resp.data or []:
+        src = r.get("source") or "ao3"
+        wid = r.get("source_work_id")
+        if not wid or (src, wid) in seen:
+            continue
+        seen.add((src, wid))
+        out.append({"source": src, "source_work_id": wid})
+    return out
 
 
 def mark_matches_saved(
