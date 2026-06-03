@@ -38,6 +38,10 @@ URLS = [
         "series-finder",
         "https://www.scribblehub.com/series-finder/?sf=1&sort=ratings&order=desc&pg=1",
     ),
+    # Per-genre landing page — if this lists series, we can discover by slug and
+    # never need the finder's numeric genre ids.
+    ("genre-page", "https://www.scribblehub.com/genre/fantasy/"),
+    ("genre-page-2", "https://www.scribblehub.com/genre/fantasy/?pg=2"),
 ]
 
 # A real Cloudflare interstitial is a *small* page whose <title> says so and
@@ -67,25 +71,29 @@ _GENRE_INPUT_RE = re.compile(
 )
 
 
-def dump_genres(body: str) -> None:
-    print("---- genre filter options (name -> id) ----")
-    found: list[tuple[str, str]] = []
-    # The finder lists each genre as a checkbox followed by its label text. Be
-    # liberal: capture any value="N" near the word "genre", then any data-id.
-    for m in re.finditer(
-        r'data-id="(\d+)"[^>]*>\s*([^<]{2,40}?)\s*<', body
-    ):
-        found.append((m.group(2).strip(), m.group(1)))
-    # De-dup, keep first occurrence order.
+_SERIES_LINK_RE = re.compile(r'href="(https://www\.scribblehub\.com/series/\d+/[^"#?]+)"')
+
+
+def dump_series_links(body: str) -> None:
+    """On a genre landing page, confirm it lists series + show pagination."""
+    print("---- genre-page series links ----")
+    links: list[str] = []
     seen: set[str] = set()
-    uniq = [(n, i) for n, i in found if not (i in seen or seen.add(i))]
-    for name, gid in uniq[:80]:
-        print(f"    {name!r}: {gid}")
-    if not uniq:
-        print("    (no data-id pairs found — dump a slice of the genre section)")
-        idx = body.lower().find("genre")
-        print(body[idx : idx + 1500] if idx >= 0 else body[:1500])
-    print("---- end genre options ----")
+    for m in _SERIES_LINK_RE.finditer(body):
+        u = m.group(1)
+        if u not in seen:
+            seen.add(u)
+            links.append(u)
+    print(f"    distinct /series/ links: {len(links)}")
+    for u in links[:8]:
+        print(f"      {u}")
+    # Pagination hint: does the page reference ?pg=N links?
+    pg = sorted(set(re.findall(r"[?&]pg=(\d+)", body)), key=lambda x: int(x))
+    print(f"    pg= values referenced: {pg[:12]}")
+    # Title/anchor class used for each result, so the real parser knows selectors.
+    for cls in ("fic_title", "search_title", "search_body_box", "mb_box"):
+        print(f"    contains {cls!r}: {cls in body}")
+    print("---- end genre-page series links ----")
 
 
 def classify(status: int, body: str) -> str:
@@ -129,7 +137,8 @@ def main() -> int:
         # The Series Finder is the page that decides viability.
         if label == "series-finder" and verdict.startswith("OK"):
             any_ok = True
-            dump_genres(resp.text)
+        if label == "genre-page" and resp is not None:
+            dump_series_links(resp.text)
 
     print("=" * 48)
     if any_ok:
