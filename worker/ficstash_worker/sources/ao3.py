@@ -21,7 +21,16 @@ from datetime import datetime, timezone
 
 import AO3
 
-from .base import Source, WorkMeta, Chapter
+from .base import (
+    DOWNLOAD,
+    FOLLOW,
+    GENRE_LIST,
+    TAG_SEARCH,
+    WORK_URL,
+    Chapter,
+    Source,
+    WorkMeta,
+)
 
 RATE_LIMIT_SECONDS = 5
 
@@ -75,6 +84,13 @@ def _is_rate_limited(exc: Exception) -> bool:
 
 class AO3Source(Source):
     id = "ao3"
+    # AO3's public pages give us tag/language search, full downloads, ongoing-work
+    # re-checks, and canonical links. No tag autocomplete yet (the app types tags
+    # freehand and AO3's own search canonicalizes them).
+    capabilities = frozenset({TAG_SEARCH, GENRE_LIST, DOWNLOAD, FOLLOW, WORK_URL})
+
+    def work_url(self, source_work_id: str) -> str:
+        return f"https://archiveofourown.org/works/{source_work_id}"
 
     def __init__(self) -> None:
         self._session: AO3.Session | None = None

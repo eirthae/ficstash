@@ -4,11 +4,16 @@ Reads secrets from the environment ONLY. Never hard-code or print credential
 values. The service_role key lives here (server-side) and never ships in the
 app, which uses the anon key behind Row Level Security.
 
+FicStash no longer logs in to AO3. It's a curated reader now, not an account
+mirror: works enter the library by add-by-link, by tapping Save on a discovered
+tag match, or (later) by file upload — never by auto-importing someone's
+bookmarks or subscriptions. Everything AO3 needs (public work metadata, chapter
+bodies, tag/language search) works logged-out, which also keeps us off AO3's
+session machinery entirely.
+
 Required environment variables:
   SUPABASE_URL                 Supabase project URL
   SUPABASE_SERVICE_ROLE_KEY    server-side key (NEVER in the app/repo)
-  AO3_USERNAME                 AO3 login
-  AO3_PASSWORD                 AO3 password (used to mint a session, not stored)
 
 Optional:
   REPAIR_MAX                   how many blank-metadata works to re-fetch per run
@@ -22,21 +27,19 @@ Optional:
                                "all"/0 = no cap). One-off cleanup of works whose
                                chapter bodies older builds stored as plain text.
 
-Flow: log in → passes over the user's AO3 activity. The user-initiated
-"requested" passes run first so a freshly pasted link or tapped Save downloads
-right away, instead of waiting behind the full (and slow) library sweep:
+Flow: the user-initiated "requested" passes run first so a freshly pasted link
+or tapped Save downloads right away, instead of waiting behind the slower
+discovery/backfill sweeps:
   1. Requested links → full offline copies of works added by pasted URL
      (Royal Road, Scribble Hub, FFN, …) via FanFicFare.
   2. Requested saves → full offline copies for in-app Save requests.
-  3. Bookmarks   → full offline copies (metadata + chapter bodies).
-  4. Subscriptions → register metadata, flagged for new-chapter tracking.
-  5. Repair blank metadata → re-fetch title/author for works older builds left blank.
-  6. Tracked tag groups → discover matches new since the group's last sync
+  3. Repair blank metadata → re-fetch title/author for works older builds left blank.
+  4. Tracked tag groups → discover matches new since the group's last sync
      (first run anchors to when the group was created), not its back-catalogue.
-  7. Offline backfill → download full chapter text for any work that isn't a
-     full offline copy yet (subscriptions), capped per run. The app is
-     offline-first: every work should become readable offline by default.
-  8. Reflow legacy plain-text chapters → re-download AO3 works whose chapter
+  5. Offline backfill → download full chapter text for any work that isn't a
+     full offline copy yet, capped per run. The app is offline-first: every
+     work should become readable offline by default.
+  6. Reflow legacy plain-text chapters → re-download AO3 works whose chapter
      bodies older builds stored as markup-stripped plain text, so the reader
      shows real paragraph spacing again.
 Upserts omit reader-state columns so progress survives re-syncs, and unchanged
@@ -57,7 +60,6 @@ from ficstash_worker.lang import allowed_language_set, language_allowed
 from ficstash_worker.sources import get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
-    fetch_existing_works,
     fetch_non_offline_works,
     fetch_plaintext_chapter_works,
     fetch_requested_urls,
@@ -78,8 +80,6 @@ from ficstash_worker.supabase_io import (
 REQUIRED_ENV = (
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
-    "AO3_USERNAME",
-    "AO3_PASSWORD",
 )
 
 # AO3 is a volunteer nonprofit — stay polite. Space requests apart and back off
@@ -111,9 +111,9 @@ def _with_backoff(fn, *, what: str, broad: bool = False):
     """Run fn(), retrying with growing waits.
 
     Always retries RateLimitError. With broad=True, also retries any other
-    exception — used for listing pages (bookmarks/history/subscriptions), where
-    AO3 occasionally returns a malformed page under load that ao3-api surfaces
-    as an AttributeError rather than a clean 429.
+    exception — used for tag/language search listing pages, where AO3
+    occasionally returns a malformed page under load that ao3-api surfaces as an
+    AttributeError rather than a clean 429.
     """
     for attempt, wait in enumerate((0, *BACKOFF_SECONDS)):
         if wait:
@@ -220,13 +220,7 @@ def main() -> None:
         return language_allowed(meta.language, allowed_langs)
 
     print(f"Language allowlist: {', '.join(sorted(allowed_langs))}")
-
-    print("Logging in to AO3…")
-    ao3.authenticate(os.environ["AO3_USERNAME"], os.environ["AO3_PASSWORD"])
-
-    print("Loading already-stored works…")
-    existing = fetch_existing_works(db)
-    print(f"{len(existing)} work(s) already in the library.")
+    print("Running logged-out — AO3 public pages only, no account import.")
 
     processed: set[str] = set()  # work ids whose metadata we fetched this run
     have_offline: set[str] = set()  # work ids whose chapter text we stored this run
@@ -259,7 +253,7 @@ def main() -> None:
                 mark_request(db, rid, status="fetching")
                 space()
                 meta, chap_list = linker.prepare(url)
-                work_uuid = upsert_work(db, meta)
+                work_uuid = upsert_work(db, meta, origin="link")
                 chapters = []
                 for i, ch in enumerate(chap_list):
                     space()
@@ -310,7 +304,7 @@ def main() -> None:
             meta = _with_backoff(
                 lambda: ao3.fetch_work_metadata(wid), what=f"requested metadata {wid}"
             )
-            work_uuid = upsert_work(db, meta)
+            work_uuid = upsert_work(db, meta, origin="tag")
             chapters = []
             for n in range(1, meta.chapters + 1):
                 space()
@@ -338,128 +332,7 @@ def main() -> None:
             print(f"    requested {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
 
-    # ---- Pass 3: bookmarks → full offline copies ---------------------------
-    print("\n== Bookmarks ==")
-    bookmarks = _with_backoff(
-        ao3.import_reading_list, what="bookmark list", broad=True
-    )
-    total = len(bookmarks)
-    print(f"Found {total} bookmarked work(s).")
-
-    new_count = updated_count = unchanged = failed = filtered = hidden_skipped = 0
-    for i, stub in enumerate(bookmarks, start=1):
-        wid = stub.source_work_id
-        # The user removed this work in the app (hidden=true). Honor that: don't
-        # re-add or re-download it just because it's still bookmarked on AO3.
-        prev = existing.get(wid)
-        if prev and prev.get("hidden"):
-            hidden_skipped += 1
-            continue
-        # Cheap pre-filter on the listing-blurb language — skips a request when
-        # the work is plainly in a language we don't import.
-        if not keep_language(stub):
-            filtered += 1
-            continue
-        print(f"[{i}/{total}] {stub.title or wid} (id {wid})")
-        try:
-            space()
-            meta = _with_backoff(
-                lambda: ao3.fetch_work_metadata(wid), what=f"metadata {wid}"
-            )
-            if not keep_language(meta):
-                filtered += 1
-                print(f"    filtered — language {meta.language!r} not in allowlist.")
-                continue
-            # Don't flag offline yet — only after chapter text is actually
-            # stored, so a work is never shown as "downloaded" while empty.
-            work_uuid = upsert_work(db, meta, bookmarked=True)
-            processed.add(wid)
-
-            if wid in have_offline:
-                # A requested save already downloaded this work in full earlier
-                # this run. Keep the bookmarked flag we just set; skip re-fetch.
-                unchanged += 1
-                print("    already downloaded this run — flagged bookmarked.")
-                continue
-
-            is_new = prev is None
-            changed = (
-                is_new
-                # Not yet a full offline copy — older builds stored the chapter
-                # *count* from metadata without the chapter *bodies*, so the
-                # counts below would falsely match. Re-download until offline.
-                or not prev.get("offline")
-                or prev.get("chapters") != meta.chapters
-                or prev.get("words") != meta.words
-            )
-            if not changed:
-                unchanged += 1
-                print("    unchanged — kept existing chapters.")
-            else:
-                chapters = []
-                for n in range(1, meta.chapters + 1):
-                    space()
-                    chapters.append(
-                        _with_backoff(
-                            lambda n=n: ao3.fetch_chapter(wid, n),
-                            what=f"chapter {n} of {wid}",
-                        )
-                    )
-                written = upsert_chapters(db, work_uuid, chapters)
-                if written:
-                    mark_flag(db, [wid], "offline")
-                    have_offline.add(wid)
-                new_count += is_new
-                updated_count += not is_new
-                tag = "NEW" if is_new else "UPDATED"
-                print(f"    {tag} — saved metadata + {written} chapter(s).")
-        except Exception as exc:  # noqa: BLE001 — keep going on per-work failures
-            failed += 1
-            print(f"    skipped (error: {type(exc).__name__}: {exc})")
-    print(
-        f"Bookmarks: {new_count} new, {updated_count} updated, "
-        f"{unchanged} unchanged, {filtered} filtered, {hidden_skipped} hidden, "
-        f"{failed} failed."
-    )
-
-    # ---- Pass 4: subscriptions → metadata + new-chapter tracking -----------
-    print("\n== Subscriptions ==")
-    subs = _with_backoff(
-        ao3.import_subscriptions, what="subscriptions", broad=True
-    )
-    print(f"Found {len(subs)} subscription(s).")
-    sub_fetched = sub_flagged = sub_failed = sub_filtered = 0
-    already_subbed: list[str] = []
-    for stub in subs:
-        wid = stub.source_work_id
-        if wid in processed:
-            already_subbed.append(wid)  # bookmarked too — just set the flag
-            continue
-        if not keep_language(stub):
-            sub_filtered += 1
-            continue
-        try:
-            space()
-            meta = _with_backoff(
-                lambda: ao3.fetch_work_metadata(wid), what=f"sub metadata {wid}"
-            )
-            if not keep_language(meta):
-                sub_filtered += 1
-                continue
-            upsert_work(db, meta, subscribed=True)
-            processed.add(wid)
-            sub_fetched += 1
-        except Exception as exc:  # noqa: BLE001
-            sub_failed += 1
-            print(f"    sub {wid} skipped ({type(exc).__name__}: {exc})")
-    if already_subbed:
-        sub_flagged = mark_flag(db, already_subbed, "subscribed")
-    print(
-        f"Subscriptions: {sub_fetched} fetched, {sub_flagged} flagged, "
-        f"{sub_filtered} filtered, {sub_failed} failed."
-    )
-
-    # ---- Pass 5: repair works with blank metadata --------------------------
+    # ---- Pass 3: repair works with blank metadata --------------------------
     # Older builds tolerated an ao3-api reload() abort without falling back to
     # the soup, so some works landed with an empty title/author/fandom (readable
     # but blank on the library page). Re-fetch their metadata — now soup-backed —
@@ -489,7 +362,7 @@ def main() -> None:
             print(f"    repair {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Repair: {repaired} repaired, {repair_failed} failed.")
 
-    # ---- Pass 6: tracked tag groups → discover new matches -----------------
+    # ---- Pass 4: tracked tag groups → discover new matches -----------------
     print("\n== Tracked tag groups ==")
     groups = fetch_tracked_groups(db)
     print(f"{len(groups)} tracked group(s).")
@@ -568,11 +441,11 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
 
-    # ---- Pass 7: offline backfill → full copies for everything else --------
+    # ---- Pass 5: offline backfill → full copies for everything else --------
     # The app is offline-first, so every work should be a full offline copy.
-    # Subscriptions/history land as metadata only; here we download their
-    # chapter bodies a capped batch at a time so the library fills in gradually
-    # without hammering AO3.
+    # Anything that landed as metadata-only (e.g. a kept bookmark not yet
+    # downloaded) gets its chapter bodies pulled a capped batch at a time so the
+    # library fills in gradually without hammering AO3.
     print("\n== Offline backfill ==")
     # Self-heal: any work flagged offline but with no stored chapter text gets
     # un-flagged so it's re-fetched below (recovers works mis-flagged by older
@@ -620,7 +493,7 @@ def main() -> None:
             print(f"    backfill {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Offline backfill: {bf_done} downloaded, {bf_failed} failed.")
 
-    # ---- Pass 8: reflow legacy plain-text chapters -------------------------
+    # ---- Pass 6: reflow legacy plain-text chapters -------------------------
     # Early builds stored ao3-api's Chapter.text (markup stripped), which the
     # reader rendered as one unbroken blob with no paragraph spacing. Now that
     # the AO3 source stores real chapter HTML, re-download those legacy works so

@@ -162,13 +162,16 @@ def upsert_work(
     meta: WorkMeta,
     *,
     history_read_at: str | None = None,
+    origin: str | None = None,
     **flags: bool,
 ) -> str:
     """Insert/update one work and return its uuid primary key.
 
     Omits progress/last_chapter/unread/frozen/frozen_date so the reader's state
-    survives re-syncs. `flags` (offline/bookmarked/subscribed/in_history) are
-    only written when provided, so one sync pass never clobbers another's flag.
+    survives re-syncs. `flags` (offline/bookmarked/subscribed/in_history/follow)
+    are only written when provided, so one sync pass never clobbers another's
+    flag. `origin` (how the work entered the library: 'link'/'tag'/…) is written
+    only when supplied, so a backfill never overwrites the original source lane.
     `history_read_at` (the AO3 last-visited date) is written only when supplied.
     """
     payload = {
@@ -192,9 +195,11 @@ def upsert_work(
     # app can link back out; AO3 rows leave source_url null.
     if meta.source != "ao3" and meta.url:
         payload["source_url"] = meta.url
-    for key in ("offline", "bookmarked", "subscribed", "in_history"):
+    for key in ("offline", "bookmarked", "subscribed", "in_history", "follow"):
         if key in flags:
             payload[key] = bool(flags[key])
+    if origin:
+        payload["origin"] = origin
     if history_read_at is not None:
         payload["history_read_at"] = history_read_at
     resp = (
@@ -220,9 +225,10 @@ def fetch_tracked_groups(client: Client) -> list[dict]:
 def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> int:
     """Store discovered works for a tracked group.
 
-    Omits `seen`/`first_seen_at`/`dismissed` so a work already marked seen stays
-    seen — and a user-dismissed work stays hidden — across re-runs; brand-new
-    matches default to unseen ("fresh") and not dismissed.
+    Omits `seen`/`first_seen_at`/`dismissed`/`later` so a work already marked
+    seen stays seen, a dismissed work stays hidden, and one set aside for Later
+    stays there across re-runs; brand-new matches default to unseen ("fresh"),
+    not dismissed, and not in the Later stash.
     """
     rows = [
         {

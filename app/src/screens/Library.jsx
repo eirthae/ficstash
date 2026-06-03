@@ -83,12 +83,13 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
     );
   }
 
-  // Split the library by origin. "AO3" is everything synced from AO3; "Other"
-  // is works added by pasting a link (Royal Road, etc.). The toggle by the title
-  // filters the whole page, and the status tabs apply within the chosen source.
-  const linkWorks = ready.filter(w => w.source && w.source !== 'ao3');
-  const mainWorks = ready.filter(w => !w.source || w.source === 'ao3');
-  const sourceWorks = source === 'other' ? linkWorks : mainWorks;
+  // Split the library by how each work entered it. "Bookmarks" is the kept AO3
+  // bookmark import (origin 'bookmark'); "Added" is everything the user curated
+  // since — pasted links, Saved tag matches, uploads. The toggle by the title
+  // filters the whole page, and the status tabs apply within the chosen lane.
+  const addedWorks = ready.filter(w => (w.origin || 'bookmark') !== 'bookmark');
+  const bookmarkWorks = ready.filter(w => (w.origin || 'bookmark') === 'bookmark');
+  const sourceWorks = source === 'other' ? addedWorks : bookmarkWorks;
 
   // Status filter (All / Ongoing / Complete) over the chosen source. Counts come
   // from that source's full set so the labels stay stable as the user switches.
@@ -118,8 +119,8 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
       {toast}
       <div className="scroll">
         <div className="seg src-seg" style={{ margin: '0 20px 14px' }}>
-          <button className={source === 'ao3' ? 'on' : ''} onClick={() => { setSource('ao3'); setStatus('all'); }}>AO3 · {mainWorks.length}</button>
-          <button className={source === 'other' ? 'on' : ''} onClick={() => { setSource('other'); setStatus('all'); }}>Other · {linkWorks.length}</button>
+          <button className={source === 'ao3' ? 'on' : ''} onClick={() => { setSource('ao3'); setStatus('all'); }}>Bookmarks · {bookmarkWorks.length}</button>
+          <button className={source === 'other' ? 'on' : ''} onClick={() => { setSource('other'); setStatus('all'); }}>Added · {addedWorks.length}</button>
         </div>
         {sourceWorks.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 16px' }}>
@@ -150,9 +151,9 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
         {sourceWorks.length === 0 && pending.length === 0 ? (
           <div style={{ padding: '0 20px' }}>
             <EmptyState icon={isOther ? 'solar:link-broken-linear' : 'solar:inbox-line-linear'}
-              title={isOther ? 'No imported works yet' : 'Nothing here yet'}
-              desc={isOther ? 'Tap + to paste a story link from Royal Road, Scribble Hub, FanFiction.net and more.'
-                : 'Your AO3 bookmarks and subscriptions will appear here after a sync.'}
+              title={isOther ? 'Nothing added yet' : 'No bookmarks here'}
+              desc={isOther ? 'Tap + to paste a story link, or Save a work you discover by tag. Royal Road, Scribble Hub, FanFiction.net and more.'
+                : 'Works you kept from your AO3 bookmark import live here.'}
               action={isOther ? <button className="btn btn-lg btn-primary" onClick={() => setShowAdd(true)}>
                 <Icon icon="solar:add-circle-bold" size={20} /> Add a work by link</button> : undefined} />
           </div>

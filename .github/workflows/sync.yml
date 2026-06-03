@@ -1,8 +1,9 @@
-name: Sync from AO3
+name: Sync
 
-# Logs in to AO3, imports bookmarks, and writes works + chapters into Supabase.
-# Runs on a schedule and on demand. All credentials come from repo secrets and
-# are passed to the worker by name — never printed.
+# Runs the FicStash worker: downloads requested links/saves, repairs metadata,
+# discovers tracked-tag matches from AO3's PUBLIC pages, and backfills offline
+# copies — all logged-out, no account import. Runs on a schedule and on demand.
+# All credentials come from repo secrets and are passed by name — never printed.
 on:
   workflow_dispatch:
   schedule:
@@ -40,9 +41,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          AO3_USERNAME: ${{ secrets.AO3_USERNAME }}
-          AO3_PASSWORD: ${{ secrets.AO3_PASSWORD }}
-          # Optional repo variable: how many history pages to walk per run.
-          # Leave unset for the default (3 ≈ 60 works); set to "all" for everything.
-          HISTORY_MAX_PAGES: ${{ vars.HISTORY_MAX_PAGES }}
+          # No AO3 login: the worker only reads AO3's public pages now. The
+          # AO3_USERNAME/AO3_PASSWORD secrets are no longer used and can be deleted.
         run: python main.py

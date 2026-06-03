@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
 import { SearchField, EmptyState, TAG_COLOR, useToast, Sheet, Segmented } from '../components/ui.jsx';
-import { TagTile, SuggestionCard } from '../components/cards.jsx';
+import { TagTile, SuggestionCard, Swipeable } from '../components/cards.jsx';
 import {
   fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup,
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
+  markLater, unmarkLater, fetchLaterMatches,
 } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
@@ -37,6 +38,7 @@ export function DiscoverScreen({ nav }) {
   const langGroups = all.filter((t) => t.kind === 'language');
   const fresh = tags.reduce((a, t) => a + (t.fresh || 0), 0);
   const open = (tag) => nav.push('tagresults', { tag, onLeave: load });
+  const openLater = () => nav.push('later', { onLeave: load });
 
   const onCreated = (g) => {
     setBuilderOpen(false);
@@ -69,6 +71,16 @@ export function DiscoverScreen({ nav }) {
         >
           <Icon icon="solar:magnifer-linear" size={20} color="var(--text-tertiary)" />
           <span style={{ color: 'var(--text-tertiary)', flex: 1 }}>Track a tag, ship, or tag group…</span>
+        </button>
+
+        <button className="set-group pressable" onClick={openLater}
+          style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, width: '100%', textAlign: 'left', marginBottom: 18 }}>
+          <div className="set-ic"><Icon icon="solar:bookmark-linear" size={18} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="set-h">Later</div>
+            <div className="set-d">Works you set aside to decide on.</div>
+          </div>
+          <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
         </button>
 
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -274,7 +286,13 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
   const dismiss = (w) => {
     setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
     dismissMatch(w.matchId || w.id).catch(() => {});
-    showToast('Dismissed', 'solar:eye-closed-linear');
+    showToast('Deleted', 'solar:trash-bin-trash-linear');
+  };
+
+  const later = (w) => {
+    setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
+    markLater(w.matchId || w.id).catch(() => {});
+    showToast('Saved for later', 'solar:bookmark-linear');
   };
 
   const save = (w) => {
@@ -314,14 +332,81 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
             {list.map((w) => (
-              <SuggestionCard
-                key={w.id}
-                work={w}
-                onSave={save}
-                saveState={saveStateOf(w)}
-                onDismiss={() => dismiss(w)}
-                onOpen={() => nav.push('detail', { work: w, suggestion: true })}
-              />
+              <Swipeable key={w.id} onSwipeRight={() => dismiss(w)} onSwipeLeft={() => later(w)}>
+                <SuggestionCard
+                  work={w}
+                  onSave={save}
+                  saveState={saveStateOf(w)}
+                  onDismiss={() => dismiss(w)}
+                  onOpen={() => nav.push('detail', { work: w, suggestion: true })}
+                />
+              </Swipeable>
+            ))}
+          </div>
+        )}
+        {toast}
+      </div>
+    </div>
+  );
+}
+
+// ---- Later stash: works swiped left ("maybe") for safe-keeping --------------
+export function LaterScreen({ nav, onLeave }) {
+  const [items, setItems] = useState(null); // null = loading
+  const [toast, showToast] = useToast();
+
+  const load = useCallback(() => {
+    fetchLaterMatches()
+      .then((r) => setItems(r ?? []))
+      .catch(() => setItems([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const leave = () => { onLeave && onLeave(); nav.pop(); };
+
+  const remove = (w) => {
+    setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
+    dismissMatch(w.matchId || w.id).catch(() => {});
+    showToast('Deleted', 'solar:trash-bin-trash-linear');
+  };
+  const putBack = (w) => {
+    setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
+    unmarkLater(w.matchId || w.id).catch(() => {});
+    showToast('Back in Discover', 'solar:undo-left-round-linear');
+  };
+  const save = (w) => {
+    setItems((arr) => (arr || []).map((x) => (x.id === w.id ? { ...x, wanted: true } : x)));
+    requestSave(w.matchId || w.id).then(() => kickSync()).catch(() => {});
+    showToast('Saved — starting download', 'solar:download-minimalistic-linear');
+  };
+  const saveStateOf = (w) => (w.saved ? 'saved' : w.wanted ? 'queued' : 'idle');
+
+  const list = items || [];
+  return (
+    <div className="screen view-enter">
+      <Appbar back={leave} title="Later" sub={`${list.length} kept · metadata only`} />
+      <div className="scroll" style={{ padding: '4px 20px 24px' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 14 }}>
+          Works you set aside to decide on later. Swipe right to delete, left to send back to Discover.
+        </div>
+        {items === null ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Loading…</div>
+        ) : list.length === 0 ? (
+          <EmptyState icon="solar:bookmark-linear" title="Nothing saved for later"
+            desc="Swipe a discovered work left to keep its blurb here without downloading it." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+            {list.map((w) => (
+              <Swipeable key={w.id} onSwipeRight={() => remove(w)} onSwipeLeft={() => putBack(w)}
+                left={{ icon: 'solar:undo-left-round-linear', label: 'Discover', color: 'var(--accent)' }}>
+                <SuggestionCard
+                  work={w}
+                  onSave={save}
+                  saveState={saveStateOf(w)}
+                  onDismiss={() => remove(w)}
+                  onOpen={() => nav.push('detail', { work: w, suggestion: true })}
+                />
+              </Swipeable>
             ))}
           </div>
         )}

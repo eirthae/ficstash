@@ -4,7 +4,7 @@ import { Preferences } from '@capacitor/preferences';
 import { BottomNav } from './components/chrome.jsx';
 import { LibraryScreen } from './screens/Library.jsx';
 import { WhatsNewScreen } from './screens/WhatsNew.jsx';
-import { DiscoverScreen, TagResultsScreen } from './screens/Discover.jsx';
+import { DiscoverScreen, TagResultsScreen, LaterScreen } from './screens/Discover.jsx';
 import { SettingsScreen, ConnectScreen } from './screens/Settings.jsx';
 import { StoryDetailScreen } from './screens/Detail.jsx';
 import { ReaderScreen } from './screens/Reader.jsx';
@@ -119,6 +119,7 @@ export default function App() {
     if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} nav={n} />;
     if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={setReaderSettings} nav={n} />;
     if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
+    if (top.screen === 'later') return <LaterScreen onLeave={p.onLeave} nav={n} />;
     if (top.screen === 'connect') return <ConnectScreen nav={n} />;
     return null;
   };

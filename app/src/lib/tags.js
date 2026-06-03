@@ -61,6 +61,7 @@ function mapMatch(row) {
     wanted: !!row.wanted,
     saved: !!row.saved,
     dismissed: !!row.dismissed,
+    later: !!row.later,
   };
 }
 
@@ -157,6 +158,43 @@ export async function fetchMatches(groupId) {
     .eq('group_id', groupId)
     .eq('dismissed', false)
     .eq('saved', false)
+    .eq('later', false)
+    .order('first_seen_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(mapMatch);
+}
+
+// Swipe LEFT = "Later": keep the match's blurb/tags but don't download it. It
+// drops out of the group feed and What's New and shows up in the Later stash,
+// where the user can still Save it, dismiss it, or put it back.
+export async function markLater(matchId) {
+  if (!hasSupabase) return;
+  const { error } = await supabase
+    .from('tag_matches')
+    .update({ later: true, seen: true })
+    .eq('id', matchId);
+  if (error) throw error;
+}
+
+// Take a match back out of the Later stash (returns it to its group feed).
+export async function unmarkLater(matchId) {
+  if (!hasSupabase) return;
+  const { error } = await supabase
+    .from('tag_matches')
+    .update({ later: false })
+    .eq('id', matchId);
+  if (error) throw error;
+}
+
+// Everything in the Later stash: kept (later), not yet saved, not dismissed.
+export async function fetchLaterMatches() {
+  if (!hasSupabase) return null;
+  const { data, error } = await supabase
+    .from('tag_matches')
+    .select('*')
+    .eq('later', true)
+    .eq('saved', false)
+    .eq('dismissed', false)
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(mapMatch);
@@ -233,6 +271,7 @@ export async function fetchNewMatches() {
     .select('*')
     .eq('seen', false)
     .eq('dismissed', false)
+    .eq('later', false)
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
 

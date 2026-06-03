@@ -7,10 +7,12 @@ import { fetchChapters, removeWork } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
+import { workUrl, sourceLabel } from '../sources/index.js';
 
 export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav }) {
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
   const total = work.chaptersTotal || work.chapters || 1;
+  const srcLabel = sourceLabel(work.source);
 
   // Real downloaded chapters for this work. When connected to Supabase we show
   // only real data — an empty list means nothing's been downloaded yet. The
@@ -70,9 +72,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
 
   const openReader = (ch) => nav.push('reader', { work, workId: work.id, chapterTitle: ch ? ch.title : null, chapterN: ch ? ch.n : (work.lastChapter || 1) });
 
-  const openOnAO3 = () => {
-    if (!work.sourceWorkId) { showToast('No AO3 link for this work', 'solar:link-broken-linear'); return; }
-    window.open(`https://archiveofourown.org/works/${work.sourceWorkId}`, '_blank', 'noopener');
+  const openAtSource = () => {
+    const url = workUrl(work.source, work.sourceWorkId, work.sourceUrl);
+    if (!url) { showToast('No source link for this work', 'solar:link-broken-linear'); return; }
+    window.open(url, '_blank', 'noopener');
   };
 
   const remove = async () => {
@@ -99,7 +102,7 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
           <Icon icon="solar:arrow-left-linear" size={22} /></button>
         <div style={{ flex: 1 }}></div>
         <button className="iconbtn" style={{ background: 'rgba(0,0,0,.28)', backdropFilter: 'blur(4px)', color: '#fff' }}
-          onClick={() => (suggestion ? openOnAO3() : setShowMenu(true))}>
+          onClick={() => (suggestion ? openAtSource() : setShowMenu(true))}>
           <Icon icon="solar:menu-dots-bold" size={22} /></button>
       </div>
 
@@ -141,13 +144,13 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
               >
                 <Icon icon={saveState === 'saved' ? 'solar:check-read-linear' : saveState === 'queued' ? 'solar:clock-circle-linear' : 'solar:download-minimalistic-bold'} size={22} /></button>
             ) : (
-              <button className="btn btn-lg btn-surface" onClick={openOnAO3} style={{ flex: 'none', width: 56, padding: 0 }} title="Open on AO3">
+              <button className="btn btn-lg btn-surface" onClick={openAtSource} style={{ flex: 'none', width: 56, padding: 0 }} title={`Open on ${srcLabel}`}>
                 <Icon icon="solar:square-top-down-linear" size={22} /></button>
             )}
           </div>
 
           {suggestion && ongoing && (
-            <button className="pressable" onClick={openOnAO3}
+            <button className="pressable" onClick={openAtSource}
               style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--info-soft)', marginBottom: 18, width: '100%', textAlign: 'left', border: 'none' }}>
               <Icon icon="solar:bell-bold" size={20} color="var(--info)" style={{ flexShrink: 0, marginTop: 1 }} />
               <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
@@ -175,10 +178,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
           </div>
 
           <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 22 }}
-            onClick={openOnAO3}>
+            onClick={openAtSource}>
             <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
             <div style={{ flex: 1 }}>
-              <div className="set-h">Open on AO3</div>
+              <div className="set-h">Open on {srcLabel}</div>
               <div className="set-d">Follow or bookmark on the site — FicStash never touches your account.</div>
             </div>
             <Icon icon="solar:arrow-right-up-linear" size={18} color="var(--text-tertiary)" />
@@ -209,10 +212,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
 
       <Sheet open={showMenu} onClose={() => setShowMenu(false)} title={work.title}>
         <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 10 }}
-          onClick={() => { setShowMenu(false); openOnAO3(); }}>
+          onClick={() => { setShowMenu(false); openAtSource(); }}>
           <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
           <div style={{ flex: 1 }}>
-            <div className="set-h">Open on AO3</div>
+            <div className="set-h">Open on {srcLabel}</div>
             <div className="set-d">View this work on the site.</div>
           </div>
         </button>

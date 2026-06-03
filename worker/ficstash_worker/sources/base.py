@@ -1,15 +1,42 @@
-"""Abstract source interface.
+"""Abstract source interface — capability-based.
 
-Every supported site (AO3, Royal Road, Scribble Hub, ...) implements this
-interface so the rest of the worker stays source-agnostic. The `id` of each
-source matches the `source` field stored on every `works` row in Supabase and
-the ids in the app's `src/sources/index.js` registry.
+Every supported site (AO3, Royal Road, Scribble Hub, NovelUpdates, ...)
+implements this interface so the rest of the worker stays source-agnostic. The
+`id` of each source matches the `source` field stored on every `works` row in
+Supabase and the ids in the app's `src/sources/index.js` registry.
+
+FicStash is a curated reader, not an account mirror, so sources are no longer
+required to log in or import a reading list. Instead each source DECLARES which
+capabilities it supports, and the worker/app only call what's declared:
+
+  * TAG_SEARCH       — find works by tag/genre (the discovery engine).
+  * GENRE_LIST       — offer a fixed list of the site's genres/categories.
+  * TAG_AUTOCOMPLETE — suggest tag names as the user types.
+  * DOWNLOAD         — fetch full chapter bodies for an offline copy.
+  * FOLLOW           — re-check an ongoing work for new chapters.
+  * WORK_URL         — build a canonical "open at source" link.
+
+A discovery-only aggregator like NovelUpdates can declare TAG_SEARCH + WORK_URL
+and nothing else; the registry won't ask it to download. The capability tokens
+are the SAME strings the app uses, so both sides agree on what a source can do.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass, field
+
+# ---- capability tokens (kept identical to the app's src/sources/index.js) ----
+TAG_SEARCH = "tagSearch"
+GENRE_LIST = "genreList"
+TAG_AUTOCOMPLETE = "tagAutocomplete"
+DOWNLOAD = "download"
+FOLLOW = "follow"
+WORK_URL = "workUrl"
+
+ALL_CAPABILITIES = frozenset(
+    {TAG_SEARCH, GENRE_LIST, TAG_AUTOCOMPLETE, DOWNLOAD, FOLLOW, WORK_URL}
+)
 
 
 @dataclass
@@ -47,33 +74,40 @@ class Chapter:
 
 
 class Source(ABC):
-    """One fanfic site. Subclasses must set `id` and implement every method."""
+    """One fanfic site.
+
+    Subclasses must set `id` and `capabilities`, then implement the methods
+    matching the capabilities they declare. Methods for capabilities a source
+    does NOT declare are left as the NotImplementedError defaults below — the
+    registry checks `supports()` before calling, so they should never fire.
+    """
 
     id: str = ""
+    capabilities: frozenset[str] = frozenset()
 
-    @abstractmethod
-    def authenticate(self, username: str, password: str) -> str:
-        """Log in and return a session token/cookie to reuse.
+    def supports(self, capability: str) -> bool:
+        return capability in self.capabilities
 
-        Store the returned session, never the password. Raises on failure.
-        """
+    # ---- WORK_URL ----------------------------------------------------------
+    def work_url(self, source_work_id: str) -> str:
+        """Canonical "open at source" link for a work."""
+        raise NotImplementedError(f"{self.id} has no work_url")
 
-    @abstractmethod
-    def import_reading_list(self, session: str) -> list[WorkMeta]:
-        """Return the user's reading list (AO3 bookmarks, RR follows, ...)."""
-
-    @abstractmethod
+    # ---- DOWNLOAD ----------------------------------------------------------
     def fetch_work_metadata(self, source_work_id: str) -> WorkMeta:
         """Fetch metadata for one work (no chapter bodies)."""
+        raise NotImplementedError(f"{self.id} cannot fetch metadata")
 
-    @abstractmethod
     def fetch_chapter(self, source_work_id: str, chapter_n: int) -> Chapter:
         """Fetch a single chapter's body."""
+        raise NotImplementedError(f"{self.id} cannot download")
 
-    @abstractmethod
+    # ---- FOLLOW ------------------------------------------------------------
     def check_for_updates(self, known: WorkMeta) -> WorkMeta | None:
         """Return fresh metadata if the work changed, else None."""
+        raise NotImplementedError(f"{self.id} cannot check for updates")
 
-    @abstractmethod
+    # ---- TAG_SEARCH --------------------------------------------------------
     def search_by_tag(self, tag: str, limit: int = 25) -> list[WorkMeta]:
         """Return works matching a tracked tag (metadata only)."""
+        raise NotImplementedError(f"{self.id} has no tag search")
