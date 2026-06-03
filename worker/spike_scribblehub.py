@@ -60,6 +60,34 @@ def page_title(body: str) -> str:
     return (m.group(1).strip() if m else "")[:80]
 
 
+# The Series Finder's genre checkboxes carry the numeric ids the search expects.
+# Pull them so we can hardcode an accurate {name: id} table in the real source.
+_GENRE_INPUT_RE = re.compile(
+    r'<input[^>]*name="genre\[\]"[^>]*value="(\d+)"[^>]*>', re.I
+)
+
+
+def dump_genres(body: str) -> None:
+    print("---- genre filter options (name -> id) ----")
+    found: list[tuple[str, str]] = []
+    # The finder lists each genre as a checkbox followed by its label text. Be
+    # liberal: capture any value="N" near the word "genre", then any data-id.
+    for m in re.finditer(
+        r'data-id="(\d+)"[^>]*>\s*([^<]{2,40}?)\s*<', body
+    ):
+        found.append((m.group(2).strip(), m.group(1)))
+    # De-dup, keep first occurrence order.
+    seen: set[str] = set()
+    uniq = [(n, i) for n, i in found if not (i in seen or seen.add(i))]
+    for name, gid in uniq[:80]:
+        print(f"    {name!r}: {gid}")
+    if not uniq:
+        print("    (no data-id pairs found — dump a slice of the genre section)")
+        idx = body.lower().find("genre")
+        print(body[idx : idx + 1500] if idx >= 0 else body[:1500])
+    print("---- end genre options ----")
+
+
 def classify(status: int, body: str) -> str:
     low = body.lower()
     title = page_title(body).lower()
@@ -101,6 +129,7 @@ def main() -> int:
         # The Series Finder is the page that decides viability.
         if label == "series-finder" and verdict.startswith("OK"):
             any_ok = True
+            dump_genres(resp.text)
 
     print("=" * 48)
     if any_ok:
