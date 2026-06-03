@@ -97,9 +97,9 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
         {toast}
         <div className="scroll" style={{ display: 'flex' }}>
           <EmptyState icon="solar:book-minimalistic-linear" title="Nothing here yet"
-            desc="Connect your AO3 account and your bookmarks will download into your private shelf."
-            action={<button className="btn btn-lg btn-primary" onClick={() => nav.push('connect')}>
-              <Icon icon="solar:link-circle-bold" size={20} /> Connect to AO3</button>} />
+            desc="Track tags, paste a link, or upload a file — stories download into your private offline shelf."
+            action={<button className="btn btn-lg btn-primary" onClick={() => nav.reset('discover')}>
+              <Icon icon="solar:compass-bold" size={20} /> Discover stories</button>} />
         </div>
         {addSheet}
         {uploadInput}
