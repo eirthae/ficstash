@@ -13,6 +13,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
   const total = work.chaptersTotal || work.chapters || 1;
   const srcLabel = sourceLabel(work.source);
+  // Uploaded works (and anything without a resolvable link) have no site to open
+  // back to — hide the "Open at source" affordances for them.
+  const sourceUrl = workUrl(work.source, work.sourceWorkId, work.sourceUrl);
+  const canOpenAtSource = !!sourceUrl;
 
   // Real downloaded chapters for this work. When connected to Supabase we show
   // only real data — an empty list means nothing's been downloaded yet. The
@@ -73,9 +77,8 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
   const openReader = (ch) => nav.push('reader', { work, workId: work.id, chapterTitle: ch ? ch.title : null, chapterN: ch ? ch.n : (work.lastChapter || 1) });
 
   const openAtSource = () => {
-    const url = workUrl(work.source, work.sourceWorkId, work.sourceUrl);
-    if (!url) { showToast('No source link for this work', 'solar:link-broken-linear'); return; }
-    window.open(url, '_blank', 'noopener');
+    if (!sourceUrl) { showToast('No source link for this work', 'solar:link-broken-linear'); return; }
+    window.open(sourceUrl, '_blank', 'noopener');
   };
 
   const remove = async () => {
@@ -143,10 +146,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
                 title={saveState === 'saved' ? 'In your library' : saveState === 'queued' ? 'Downloading — sync started' : 'Save to library'}
               >
                 <Icon icon={saveState === 'saved' ? 'solar:check-read-linear' : saveState === 'queued' ? 'solar:clock-circle-linear' : 'solar:download-minimalistic-bold'} size={22} /></button>
-            ) : (
+            ) : canOpenAtSource ? (
               <button className="btn btn-lg btn-surface" onClick={openAtSource} style={{ flex: 'none', width: 56, padding: 0 }} title={`Open on ${srcLabel}`}>
                 <Icon icon="solar:square-top-down-linear" size={22} /></button>
-            )}
+            ) : null}
           </div>
 
           {suggestion && ongoing && (
@@ -177,15 +180,17 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
             {(work.tags || []).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
           </div>
 
-          <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 22 }}
-            onClick={openAtSource}>
-            <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
-            <div style={{ flex: 1 }}>
-              <div className="set-h">Open on {srcLabel}</div>
-              <div className="set-d">Follow or bookmark on the site — FicStash never touches your account.</div>
-            </div>
-            <Icon icon="solar:arrow-right-up-linear" size={18} color="var(--text-tertiary)" />
-          </button>
+          {canOpenAtSource && (
+            <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 22 }}
+              onClick={openAtSource}>
+              <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
+              <div style={{ flex: 1 }}>
+                <div className="set-h">Open on {srcLabel}</div>
+                <div className="set-d">Follow or bookmark on the site — FicStash never touches your account.</div>
+              </div>
+              <Icon icon="solar:arrow-right-up-linear" size={18} color="var(--text-tertiary)" />
+            </button>
+          )}
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
             <div className="section-label">Chapters</div>
@@ -211,20 +216,22 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
       </div>
 
       <Sheet open={showMenu} onClose={() => setShowMenu(false)} title={work.title}>
-        <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 10 }}
-          onClick={() => { setShowMenu(false); openAtSource(); }}>
-          <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
-          <div style={{ flex: 1 }}>
-            <div className="set-h">Open on {srcLabel}</div>
-            <div className="set-d">View this work on the site.</div>
-          </div>
-        </button>
+        {canOpenAtSource && (
+          <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 10 }}
+            onClick={() => { setShowMenu(false); openAtSource(); }}>
+            <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
+            <div style={{ flex: 1 }}>
+              <div className="set-h">Open on {srcLabel}</div>
+              <div className="set-d">View this work on the site.</div>
+            </div>
+          </button>
+        )}
         <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left' }}
           onClick={remove} disabled={removing}>
           <div className="set-ic" style={{ color: 'var(--danger)' }}><Icon icon="solar:trash-bin-trash-linear" size={18} /></div>
           <div style={{ flex: 1 }}>
             <div className="set-h" style={{ color: 'var(--danger)' }}>{removing ? 'Removing…' : 'Remove from library'}</div>
-            <div className="set-d">Hides it in the app. Your AO3 bookmark stays untouched.</div>
+            <div className="set-d">{work.origin === 'upload' ? 'Hides it in the app. The downloaded copy stays in your shelf.' : 'Hides it in the app. Your AO3 bookmark stays untouched.'}</div>
           </div>
         </button>
       </Sheet>

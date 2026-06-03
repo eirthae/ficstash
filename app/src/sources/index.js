@@ -37,6 +37,12 @@ const SOURCES = {
     ]),
     workUrl: (id) => `https://archiveofourown.org/works/${id}`,
   },
+  // A user-uploaded file (EPUB/HTML/TXT). Fully offline, no site to link back to.
+  upload: {
+    id: 'upload',
+    label: 'Upload',
+    capabilities: new Set(),
+  },
 };
 
 export function getSource(sourceId) {

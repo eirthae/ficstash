@@ -62,6 +62,9 @@ export default function App() {
   // When Supabase isn't configured, fetchWorks() returns null and we fall
   // back to bundled sample data so the app still has something to show.
   const [works, setWorks] = useState(null);
+  const reloadWorks = () => fetchWorks()
+    .then(r => setWorks(r ?? WORKS))
+    .catch(() => setWorks(WORKS));
   useEffect(() => {
     let alive = true;
     fetchWorks()
@@ -109,7 +112,7 @@ export default function App() {
 
   const renderTab = () => {
     const n = nav.current;
-    if (tab === 'library') return <LibraryScreen works={works} layout="fandom" onRemove={removeFromLibrary} nav={n} />;
+    if (tab === 'library') return <LibraryScreen works={works} layout="fandom" onRemove={removeFromLibrary} onReload={reloadWorks} nav={n} />;
     if (tab === 'whatsnew') return <WhatsNewScreen chapters={NEW_CHAPTERS} matches={NEW_MATCHES} nav={n} />;
     if (tab === 'discover') return <DiscoverScreen nav={n} />;
     if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} nav={n} />;

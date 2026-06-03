@@ -1,23 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import { EmptyState, useToast, Sheet } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { LibraryCard, GridCard } from '../components/cards.jsx';
 import { triggerSync } from '../lib/sync.js';
 import { requestUrl, fetchPendingLinks, removeRequest } from '../lib/links.js';
+import { uploadFile, isSupportedUpload } from '../lib/upload.js';
 
 // The fandom name without the author suffix ("Heated Rivalry – Rachel Reid" → "Heated Rivalry").
 function fandomName(work) {
   return (work.fandom || 'Other').split('–')[0].split(' - ')[0].trim() || 'Other';
 }
 
-export function LibraryScreen({ works, layout = 'grid', connected = true, onRemove, nav }) {
+export function LibraryScreen({ works, layout = 'grid', connected = true, onRemove, onReload, nav }) {
   const open = (w) => nav.push('detail', { work: w, onRemoved: onRemove });
   const [toast, showToast] = useToast();
   const [syncing, setSyncing] = useState(false);
   const [status, setStatus] = useState('all');
   const [source, setSource] = useState('ao3'); // 'ao3' | 'other' (works added by link)
   const [showAdd, setShowAdd] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef(null);
   const [pendingLinks, setPendingLinks] = useState([]);
   const [collapsed, setCollapsed] = useState({}); // fandom name -> collapsed?
   const toggleSection = (name) => setCollapsed(c => ({ ...c, [name]: !c[name] }));
@@ -45,6 +48,26 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
   const addSheet = (
     <AddLinkSheet open={showAdd} onClose={() => setShowAdd(false)} showToast={showToast}
       onAdded={() => { setShowAdd(false); reloadLinks(); }} />
+  );
+
+  // Upload an EPUB/HTML/TXT: parsed in the browser, stored as a fully-offline
+  // work. No worker round-trip — the file never leaves the device unparsed.
+  const pickFile = () => { if (!uploading && fileInput.current) fileInput.current.click(); };
+  const onFileChosen = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    if (!isSupportedUpload(file)) { showToast('Upload an EPUB, HTML, or TXT file.', 'solar:danger-triangle-bold'); return; }
+    setUploading(true);
+    showToast(`Importing “${file.name}”…`);
+    const res = await uploadFile(file);
+    setUploading(false);
+    if (res.ok) { showToast('Added to your library.'); onReload && onReload(); }
+    else showToast(res.error || 'Could not import that file.', 'solar:danger-triangle-bold');
+  };
+  const uploadInput = (
+    <input ref={fileInput} type="file" accept=".epub,.html,.htm,.txt" onChange={onFileChosen}
+      style={{ display: 'none' }} />
   );
 
   if (works === null) {
@@ -79,6 +102,7 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
               <Icon icon="solar:link-circle-bold" size={20} /> Connect to AO3</button>} />
         </div>
         {addSheet}
+        {uploadInput}
       </div>
     );
   }
@@ -130,6 +154,13 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
               <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
             </div>
             {isOther && (
+              <button className="iconbtn ghost" onClick={pickFile} aria-label="Upload a file"
+                title="Upload an EPUB, HTML, or TXT file" disabled={uploading}
+                style={{ flex: 'none', width: 40, height: 42, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
+                <Icon icon={uploading ? 'solar:refresh-circle-linear' : 'solar:upload-minimalistic-linear'} size={20} />
+              </button>
+            )}
+            {isOther && (
               <button className="iconbtn ghost" onClick={() => setShowAdd(true)} aria-label="Add a work by link"
                 title="Add a work by link"
                 style={{ flex: 'none', width: 40, height: 42, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
@@ -152,10 +183,16 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
           <div style={{ padding: '0 20px' }}>
             <EmptyState icon={isOther ? 'solar:link-broken-linear' : 'solar:inbox-line-linear'}
               title={isOther ? 'Nothing added yet' : 'No bookmarks here'}
-              desc={isOther ? 'Tap + to paste a story link, or Save a work you discover by tag. Royal Road, Scribble Hub, FanFiction.net and more.'
+              desc={isOther ? 'Paste a story link, upload a file, or Save a work you discover by tag. Royal Road, Scribble Hub, EPUB and more.'
                 : 'Works you kept from your AO3 bookmark import live here.'}
-              action={isOther ? <button className="btn btn-lg btn-primary" onClick={() => setShowAdd(true)}>
-                <Icon icon="solar:add-circle-bold" size={20} /> Add a work by link</button> : undefined} />
+              action={isOther ? (
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <button className="btn btn-lg btn-primary" onClick={() => setShowAdd(true)}>
+                    <Icon icon="solar:add-circle-bold" size={20} /> Add by link</button>
+                  <button className="btn btn-lg btn-surface" onClick={pickFile} disabled={uploading}>
+                    <Icon icon="solar:upload-minimalistic-bold" size={20} /> Upload a file</button>
+                </div>
+              ) : undefined} />
           </div>
         ) : shown.length === 0 ? (
           <div style={{ padding: '0 20px' }}>
@@ -181,6 +218,7 @@ export function LibraryScreen({ works, layout = 'grid', connected = true, onRemo
           )}
       </div>
       {addSheet}
+      {uploadInput}
     </div>
   );
 }

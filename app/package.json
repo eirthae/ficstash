@@ -17,6 +17,7 @@
     "@iconify-json/solar": "^1.2.2",
     "@iconify/react": "^5.2.0",
     "@supabase/supabase-js": "^2.45.4",
+    "jszip": "^3.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
