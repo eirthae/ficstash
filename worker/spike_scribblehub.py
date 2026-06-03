@@ -42,6 +42,8 @@ URLS = [
     # never need the finder's numeric genre ids.
     ("genre-page", "https://www.scribblehub.com/genre/fantasy/"),
     ("genre-page-2", "https://www.scribblehub.com/genre/fantasy/?pg=2"),
+    # The genre RSS feed — newest-first, lightweight, the cleanest discovery surface.
+    ("genre-feed", "https://www.scribblehub.com/genre/fantasy/feed/"),
 ]
 
 # A real Cloudflare interstitial is a *small* page whose <title> says so and
@@ -107,6 +109,23 @@ def dump_series_links(body: str) -> None:
     print("---- end genre-page series links ----")
 
 
+def dump_feed(body: str) -> None:
+    """Inspect the genre RSS feed: item count + first item's fields."""
+    print("---- genre RSS feed ----")
+    items = re.findall(r"<item\b.*?</item>", body, re.I | re.S)
+    print(f"    <item> count: {len(items)}")
+    if items:
+        first = items[0]
+        for field in ("title", "link", "guid", "pubDate", "dc:creator", "category"):
+            m = re.search(rf"<{field}[^>]*>(.*?)</{field}>", first, re.I | re.S)
+            val = (m.group(1).strip() if m else "—")[:90]
+            print(f"    {field}: {val}")
+        # How many <category> tags (these are the work's genres/tags)?
+        cats = re.findall(r"<category[^>]*>(.*?)</category>", first, re.I | re.S)
+        print(f"    category count in first item: {len(cats)} -> {[c.strip()[:24] for c in cats[:8]]}")
+    print("---- end genre RSS feed ----")
+
+
 def classify(status: int, body: str) -> str:
     low = body.lower()
     title = page_title(body).lower()
@@ -150,6 +169,8 @@ def main() -> int:
             any_ok = True
         if label == "genre-page" and resp is not None:
             dump_series_links(resp.text)
+        if label == "genre-feed" and resp is not None:
+            dump_feed(resp.text)
 
     print("=" * 48)
     if any_ok:
