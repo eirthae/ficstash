@@ -14,6 +14,7 @@ we've made the build/skip decision. Run locally or via the spike workflow.
 
 from __future__ import annotations
 
+import re
 import sys
 
 import requests
@@ -28,40 +29,52 @@ HEADERS = {
 }
 TIMEOUT = 25
 
-# A small spread of public pages: the homepage, the Series Finder (the discovery
-# surface a real source would scrape), and one concrete series page.
+# A small spread of public pages: the homepage and the Series Finder (the
+# discovery surface a real source would scrape). The Series Finder is the one
+# that matters — that's what a Scribble Hub source would page through.
 URLS = [
     ("homepage", "https://www.scribblehub.com/"),
     (
         "series-finder",
         "https://www.scribblehub.com/series-finder/?sf=1&sort=ratings&order=desc&pg=1",
     ),
-    ("series-page", "https://www.scribblehub.com/series/1/the-bibliophile/"),
 ]
 
-# Substrings that betray a Cloudflare / bot-wall interstitial rather than content.
-CHALLENGE_MARKERS = (
-    "just a moment",
-    "challenge-platform",
-    "cf-mitigated",
-    "cf_chl",
-    "attention required",
-    "enable javascript and cookies",
-    "/cdn-cgi/challenge",
+# A real Cloudflare interstitial is a *small* page whose <title> says so and
+# whose body has no site content. The "/cdn-cgi/challenge-platform/" beacon
+# script, by contrast, is injected on perfectly normal pages, so its mere
+# presence means nothing — only the interstitial title + a tiny body do.
+INTERSTITIAL_TITLES = ("just a moment", "attention required", "access denied")
+# Markers that the Series Finder actually rendered its listing.
+CONTENT_MARKERS = (
+    "search_main_box",   # each result row's container
+    "fic_title",         # a series title link
+    "search_title",      # the Series Finder heading block
+    "series-finder",     # finder form / pagination links
 )
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+
+def page_title(body: str) -> str:
+    m = _TITLE_RE.search(body)
+    return (m.group(1).strip() if m else "")[:80]
 
 
 def classify(status: int, body: str) -> str:
     low = body.lower()
-    hit = next((m for m in CHALLENGE_MARKERS if m in low), None)
-    if hit:
-        return f"CHALLENGE (marker: {hit!r})"
-    if status == 403:
-        return "BLOCKED (403)"
+    title = page_title(body).lower()
+    if any(t in title for t in INTERSTITIAL_TITLES):
+        return f"CHALLENGE (interstitial title: {title!r})"
+    if status == 403 and len(body) < 20000:
+        return "BLOCKED (403, no content)"
     if status in (429, 503):
         return f"RATE/UNAVAILABLE ({status})"
-    if 200 <= status < 300 and len(body) > 2000:
-        return "OK"
+    found = [m for m in CONTENT_MARKERS if m in low]
+    if 200 <= status < 300 and found:
+        return f"OK (content markers: {found})"
+    if 200 <= status < 300 and len(body) > 40000:
+        # Large 2xx body without our markers — real page, markup just shifted.
+        return f"OK-ish (large body {len(body)}B, markers absent)"
     if 200 <= status < 300:
         return f"OK-ish but thin ({len(body)} bytes)"
     return f"UNEXPECTED ({status})"
@@ -81,9 +94,12 @@ def main() -> int:
             resp = None
         size = len(resp.text) if resp is not None else 0
         code = resp.status_code if resp is not None else "—"
+        title = page_title(resp.text) if resp is not None else ""
         print(f"[{label}] {url}")
-        print(f"    status={code} bytes={size} -> {verdict}\n")
-        if verdict == "OK":
+        print(f"    status={code} bytes={size} title={title!r}")
+        print(f"    -> {verdict}\n")
+        # The Series Finder is the page that decides viability.
+        if label == "series-finder" and verdict.startswith("OK"):
             any_ok = True
 
     print("=" * 48)
