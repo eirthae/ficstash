@@ -136,6 +136,34 @@ class ScribbleHubSource(Source):
     def __init__(self) -> None:
         self._session = requests.Session()
         self._session.headers.update(_HEADERS)
+        # slug -> numeric tag id, resolved lazily (see _tag_id) and cached for the
+        # life of the run so a sync resolves each tracked tag at most once.
+        self._tag_ids: dict[str, int | None] = {}
+
+    def _tag_id(self, slug: str) -> int | None:
+        """Resolve a tag slug to Scribble Hub's numeric tag id.
+
+        The Series Finder filters tags by numeric id (tgi/tge), but those ids
+        aren't listed anywhere bulk. A tag's own archive page carries it in the
+        WordPress body class (`term-<id>`), so we fetch it once per slug and
+        cache. Returns None if the tag/page can't be resolved.
+        """
+        slug = (slug or "").strip().lower()
+        if not slug:
+            return None
+        if slug in self._tag_ids:
+            return self._tag_ids[slug]
+        tid: int | None = None
+        try:
+            resp = self._session.get(f"{BASE}/tag/{slug}/", timeout=_TIMEOUT)
+            if resp.ok:
+                m = re.search(r"\bterm-(\d+)\b", resp.text)
+                if m:
+                    tid = int(m.group(1))
+        except requests.RequestException:
+            tid = None
+        self._tag_ids[slug] = tid
+        return tid
 
     def work_url(self, source_work_id: str) -> str:
         # The bare /series/<id>/ form redirects to the full slug URL; both the
@@ -149,70 +177,76 @@ class ScribbleHubSource(Source):
         """Find recently-updated Scribble Hub works in a single genre."""
         return self.search_by_tags([tag], limit=limit)
 
+    def _classify(self, terms) -> tuple[list[int], list[int]]:
+        """Split terms into (genre ids, tag ids). A term that resolves to a known
+        genre is a genre (gi/ge); anything else is treated as a tag (tgi/tge) and
+        its slug resolved to a numeric id lazily."""
+        genre_ids: list[int] = []
+        tag_ids: list[int] = []
+        for t in terms or []:
+            if not t:
+                continue
+            gid = _genre_id(t)
+            if gid:
+                genre_ids.append(gid)
+                continue
+            tid = self._tag_id(_slugify(t))
+            if tid:
+                tag_ids.append(tid)
+        return genre_ids, tag_ids
+
     def search_by_tags(
         self,
         include: list[str],
         exclude: list[str] | tuple[str, ...] = (),
         limit: int = 25,
     ) -> list[WorkMeta]:
-        """Find recent Scribble Hub works in ALL `include` genres and NONE of
-        `exclude` (metadata only).
+        """Find recent Scribble Hub works matching ALL `include` genres/tags and
+        NONE of `exclude` (metadata only).
 
-        Uses the Series Finder, the only Scribble Hub surface that ANDs multiple
-        genres (mgi=and) and subtracts excludes (ge=), sorted by last chapter
-        update so a sync surfaces fresh works first. The per-item RSS feed can't
-        AND, so a single known genre also goes through the finder; an unknown
-        single tag (not in the genre-id map) falls back to that genre's RSS feed.
-        Genres may be labels ("Sci-fi") or slugs ("sci-fi"); both resolve.
+        Uses the Series Finder — the only Scribble Hub surface that ANDs multiple
+        genres (gi + mgi=and) AND tags (tgi + tgi_mm=and) and subtracts excluded
+        genres (ge) and tags (tge), sorted by last chapter update. Each term is
+        classified: known genres → genre ids; everything else → a tag whose slug
+        is resolved to a numeric id. A single bare genre with nothing else falls
+        back to that genre's RSS feed (lighter, same newest-first ordering).
         """
         inc_terms = [t for t in include if t]
-        inc_ids = [gid for gid in (_genre_id(t) for t in inc_terms) if gid]
-        exc_ids = [gid for gid in (_genre_id(t) for t in exclude or []) if gid]
+        if not inc_terms:
+            return []
 
-        # Every include genre resolved → native AND via the Series Finder.
-        if inc_ids and len(inc_ids) == len(inc_terms):
-            params = {
-                "sf": "1",
-                "gi": ",".join(str(i) for i in inc_ids),
-                "mgi": "and",
-                "sort": "lastchpdate",
-                "order": "desc",
-            }
-            if exc_ids:
-                params["ge"] = ",".join(str(i) for i in exc_ids)
-            resp = self._session.get(
-                f"{BASE}/series-finder/", params=params, timeout=_TIMEOUT
-            )
-            resp.raise_for_status()
-            return _parse_finder(resp.text, limit=limit)
-
-        # Single unknown tag → that genre's RSS feed (newest-first).
-        if len(inc_terms) == 1:
+        # Fast path: exactly one genre, no tags, no excludes → genre RSS feed.
+        if (
+            len(inc_terms) == 1
+            and not exclude
+            and _genre_id(inc_terms[0])
+        ):
             slug = _slugify(inc_terms[0])
-            if not slug:
-                return []
             resp = self._session.get(f"{BASE}/genre/{slug}/feed/", timeout=_TIMEOUT)
             resp.raise_for_status()
             return _parse_feed(resp.text, limit=limit)
 
-        # Multi-tag group with some unmapped genres → AND only the ones we can
-        # resolve via the finder (dropping the unknowns rather than returning 0).
-        if inc_ids:
-            params = {
-                "sf": "1",
-                "gi": ",".join(str(i) for i in inc_ids),
-                "mgi": "and",
-                "sort": "lastchpdate",
-                "order": "desc",
-            }
-            if exc_ids:
-                params["ge"] = ",".join(str(i) for i in exc_ids)
-            resp = self._session.get(
-                f"{BASE}/series-finder/", params=params, timeout=_TIMEOUT
-            )
-            resp.raise_for_status()
-            return _parse_finder(resp.text, limit=limit)
-        return []
+        gi, tgi = self._classify(inc_terms)
+        ge, tge = self._classify(exclude)
+        if not gi and not tgi:
+            return []
+
+        params = {"sf": "1", "sort": "lastchpdate", "order": "desc"}
+        if gi:
+            params["gi"] = ",".join(str(i) for i in gi)
+            params["mgi"] = "and"
+        if tgi:
+            params["tgi"] = ",".join(str(i) for i in tgi)
+            params["tgi_mm"] = "and"
+        if ge:
+            params["ge"] = ",".join(str(i) for i in ge)
+        if tge:
+            params["tge"] = ",".join(str(i) for i in tge)
+        resp = self._session.get(
+            f"{BASE}/series-finder/", params=params, timeout=_TIMEOUT
+        )
+        resp.raise_for_status()
+        return _parse_finder(resp.text, limit=limit)
 
 
 # ---- Series Finder HTML parsing (multi-genre AND results) -------------------

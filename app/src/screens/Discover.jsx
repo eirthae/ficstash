@@ -10,12 +10,18 @@ import {
 } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
-import { ROYALROAD_GENRES, SCRIBBLEHUB_GENRES, sourceLabel } from '../sources/index.js';
+import {
+  ROYALROAD_GENRES, ROYALROAD_TAGS, SCRIBBLEHUB_GENRES, SCRIBBLEHUB_TAGS, sourceLabel,
+} from '../sources/index.js';
 
-// Genre lists per source, for the builder's fixed-taxonomy picker.
-const GENRES_BY_SOURCE = {
-  royalroad: ROYALROAD_GENRES,
-  scribblehub: SCRIBBLEHUB_GENRES,
+// Combined genre + tag taxonomy per source, for the builder's picker. Genres
+// come first (kind:'genre'), then the larger tag list (kind:'tag'); each pick is
+// stored as {name, id:slug, kind} so the worker filters by the right native
+// mechanism (RR tagsAdd/Remove; SH Series Finder genre ids vs tag ids).
+const withKind = (list, kind) => list.map((g) => ({ ...g, kind }));
+const TAXONOMY_BY_SOURCE = {
+  royalroad: [...withKind(ROYALROAD_GENRES, 'genre'), ...withKind(ROYALROAD_TAGS, 'tag')],
+  scribblehub: [...withKind(SCRIBBLEHUB_GENRES, 'genre'), ...withKind(SCRIBBLEHUB_TAGS, 'tag')],
 };
 
 // Whether a discovered work can be saved into the library. AO3 downloads
@@ -224,7 +230,7 @@ function TagPicker({ picked, onAdd, onRemove, placeholder, accent }) {
   );
 }
 
-// Pick from a source's fixed genre taxonomy (no live search — the list is
+// Pick from a source's fixed genre + tag taxonomy (no live search — the list is
 // shipped in the source registry). Stores each pick as {name, id:slug, kind}.
 function GenrePicker({ genres, label, picked, onAdd, onRemove }) {
   const [term, setTerm] = useState('');
@@ -233,8 +239,8 @@ function GenrePicker({ genres, label, picked, onAdd, onRemove }) {
   const matches = genres
     .filter((g) => !pickedSlugs.has(g.slug))
     .filter((g) => !q || g.name.toLowerCase().includes(q))
-    .slice(0, 12);
-  const add = (g) => { onAdd({ name: g.name, id: g.slug, kind: 'genre' }); setTerm(''); };
+    .slice(0, 14);
+  const add = (g) => { onAdd({ name: g.name, id: g.slug, kind: g.kind || 'genre' }); setTerm(''); };
 
   return (
     <div>
@@ -265,6 +271,7 @@ function GenrePicker({ genres, label, picked, onAdd, onRemove }) {
             >
               <Icon icon="solar:add-circle-linear" size={18} color="var(--accent)" />
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</span>
+              <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>{g.kind === 'tag' ? 'tag' : 'genre'}</span>
             </button>
           ))}
         </div>
@@ -381,7 +388,7 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
                 ? `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`
                 : isBooks
                   ? 'Watch new releases in ALL of these subjects'
-                  : 'Track works in ALL of these genres'}
+                  : 'Track works with ALL of these genres & tags'}
           </div>
           {isAo3 ? (
             <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
@@ -389,7 +396,7 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
             <SubjectPicker picked={picked} onAdd={addPicked} onRemove={removePicked} />
           ) : (
             <GenrePicker
-              genres={GENRES_BY_SOURCE[source] || []}
+              genres={TAXONOMY_BY_SOURCE[source] || []}
               label={sourceLabel(source)}
               picked={picked}
               onAdd={addPicked}
@@ -431,16 +438,16 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
 
         {!isAo3 && !isBooks && (
           <div>
-            <div className="section-label" style={{ marginBottom: 8 }}>Exclude genres <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
+            <div className="section-label" style={{ marginBottom: 8 }}>Exclude genres &amp; tags <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
             <GenrePicker
-              genres={GENRES_BY_SOURCE[source] || []}
+              genres={TAXONOMY_BY_SOURCE[source] || []}
               label={sourceLabel(source)}
               picked={excluded}
               onAdd={addExcluded}
               onRemove={removeExcluded}
             />
             <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
-              Works in any excluded genre are left out of your matches.
+              Works with any excluded genre or tag are left out of your matches.
             </div>
           </div>
         )}

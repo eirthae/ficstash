@@ -73,94 +73,7 @@ const SOURCES = {
   },
 };
 
-// Royal Road's fiction tags — kept in sync with the worker's royalroad.GENRES.
-// `slug` is the value the site's search expects; `name` is the label. Stored as
-// a tracked tag's {name, id:slug} so the worker searches by the exact slug.
-export const ROYALROAD_GENRES = [
-  { name: 'Action', slug: 'action' },
-  { name: 'Adventure', slug: 'adventure' },
-  { name: 'Comedy', slug: 'comedy' },
-  { name: 'Contemporary', slug: 'contemporary' },
-  { name: 'Drama', slug: 'drama' },
-  { name: 'Fantasy', slug: 'fantasy' },
-  { name: 'Historical', slug: 'historical' },
-  { name: 'Horror', slug: 'horror' },
-  { name: 'Mystery', slug: 'mystery' },
-  { name: 'Psychological', slug: 'psychological' },
-  { name: 'Romance', slug: 'romance' },
-  { name: 'Satire', slug: 'satire' },
-  { name: 'Sci-fi', slug: 'sci_fi' },
-  { name: 'Tragedy', slug: 'tragedy' },
-  { name: 'Anti-Hero Lead', slug: 'anti-hero_lead' },
-  { name: 'Artificial Intelligence', slug: 'artificial_intelligence' },
-  { name: 'Cyberpunk', slug: 'cyberpunk' },
-  { name: 'Dungeon', slug: 'dungeon' },
-  { name: 'Dystopia', slug: 'dystopia' },
-  { name: 'Female Lead', slug: 'female_lead' },
-  { name: 'GameLit', slug: 'gamelit' },
-  { name: 'Grimdark', slug: 'grimdark' },
-  { name: 'Harem', slug: 'harem' },
-  { name: 'High Fantasy', slug: 'high_fantasy' },
-  { name: 'LitRPG', slug: 'litrpg' },
-  { name: 'Low Fantasy', slug: 'low_fantasy' },
-  { name: 'Magic', slug: 'magic' },
-  { name: 'Male Lead', slug: 'male_lead' },
-  { name: 'Martial Arts', slug: 'martial_arts' },
-  { name: 'Mythos', slug: 'mythos' },
-  { name: 'Non-Human Lead', slug: 'non-human_lead' },
-  { name: 'Portal Fantasy / Isekai', slug: 'summoned_hero' },
-  { name: 'Post Apocalyptic', slug: 'post_apocalyptic' },
-  { name: 'Progression', slug: 'progression' },
-  { name: 'Reincarnation', slug: 'reincarnation' },
-  { name: 'School Life', slug: 'school_life' },
-  { name: 'Slice of Life', slug: 'slice_of_life' },
-  { name: 'Space Opera', slug: 'space_opera' },
-  { name: 'Sports', slug: 'sports' },
-  { name: 'Steampunk', slug: 'steampunk' },
-  { name: 'Strategy', slug: 'strategy' },
-  { name: 'Strong Lead', slug: 'strong_lead' },
-  { name: 'Super Heroes', slug: 'super_heroes' },
-  { name: 'Supernatural', slug: 'supernatural' },
-  { name: 'Time Loop', slug: 'loop' },
-  { name: 'Time Travel', slug: 'time_travel' },
-  { name: 'Urban Fantasy', slug: 'urban_fantasy' },
-  { name: 'Villainous Lead', slug: 'villainous_lead' },
-  { name: 'Virtual Reality', slug: 'virtual_reality' },
-  { name: 'War and Military', slug: 'war_and_military' },
-  { name: 'Wuxia', slug: 'wuxia' },
-  { name: 'Xianxia', slug: 'xianxia' },
-];
 
-// Scribble Hub's genres — kept in sync with the worker's scribblehub.GENRES.
-// `slug` is the value /genre/<slug>/feed/ expects; `name` is the label. Stored
-// as a tracked tag's {name, id:slug} so the worker searches by the exact slug.
-export const SCRIBBLEHUB_GENRES = [
-  { name: 'Action', slug: 'action' },
-  { name: 'Adventure', slug: 'adventure' },
-  { name: 'Comedy', slug: 'comedy' },
-  { name: 'Drama', slug: 'drama' },
-  { name: 'Fantasy', slug: 'fantasy' },
-  { name: 'Gender Bender', slug: 'gender-bender' },
-  { name: 'Harem', slug: 'harem' },
-  { name: 'Historical', slug: 'historical' },
-  { name: 'Horror', slug: 'horror' },
-  { name: 'Isekai', slug: 'isekai' },
-  { name: 'Josei', slug: 'josei' },
-  { name: 'LitRPG', slug: 'litrpg' },
-  { name: 'Martial Arts', slug: 'martial-arts' },
-  { name: 'Mature', slug: 'mature' },
-  { name: 'Mecha', slug: 'mecha' },
-  { name: 'Mystery', slug: 'mystery' },
-  { name: 'Psychological', slug: 'psychological' },
-  { name: 'Romance', slug: 'romance' },
-  { name: 'School Life', slug: 'school-life' },
-  { name: 'Sci-fi', slug: 'sci-fi' },
-  { name: 'Seinen', slug: 'seinen' },
-  { name: 'Slice of Life', slug: 'slice-of-life' },
-  { name: 'Sports', slug: 'sports' },
-  { name: 'Supernatural', slug: 'supernatural' },
-  { name: 'Tragedy', slug: 'tragedy' },
-];
 
 export function getSource(sourceId) {
   return SOURCES[sourceId] || null;
@@ -188,3 +101,10 @@ export function workUrl(sourceId, sourceWorkId, fallbackUrl = '') {
 }
 
 export { SOURCES };
+
+// Full genre/tag taxonomies for Royal Road & Scribble Hub live in taxonomies.js
+// (harvested from each site). Re-exported here so existing imports keep working.
+export {
+  ROYALROAD_GENRES, ROYALROAD_TAGS, SCRIBBLEHUB_GENRES, SCRIBBLEHUB_TAGS,
+} from './taxonomies.js';
+
