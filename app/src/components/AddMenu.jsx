@@ -38,13 +38,13 @@ export function AddMenu({ open, onClose, onChanged }) {
         <>
           <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(0,0,0,.32)', animation: 'fadeIn .15s ease' }} />
           <div className="add-popout">
+            <button className="add-opt pressable" onClick={pickFile} disabled={uploading}>
+              <span className="add-opt-ic" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon icon="solar:upload-minimalistic-bold" size={20} /></span>
+              <span className="add-opt-tx"><b>Upload a file</b><span>EPUB, HTML or TXT from your phone</span></span>
+            </button>
             <button className="add-opt pressable" onClick={() => { onClose?.(); setShowLink(true); }}>
               <span className="add-opt-ic" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon icon="solar:link-round-bold" size={20} /></span>
-              <span className="add-opt-tx"><b>Add by link</b><span>Royal Road, Scribble Hub, AO3…</span></span>
-            </button>
-            <button className="add-opt pressable" onClick={pickFile} disabled={uploading}>
-              <span className="add-opt-ic" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}><Icon icon="solar:upload-minimalistic-bold" size={20} /></span>
-              <span className="add-opt-tx"><b>Upload a file</b><span>EPUB, HTML or TXT — fully offline</span></span>
+              <span className="add-opt-tx"><b>Add by link</b><span>Paste an AO3 work URL</span></span>
             </button>
           </div>
         </>
