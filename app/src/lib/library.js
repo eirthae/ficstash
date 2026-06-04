@@ -74,6 +74,21 @@ export async function removeWork(workId) {
   if (error) throw error;
 }
 
+// Distinct series/collection names already in the library, for autocompleting
+// the series field so books slot into an existing collection (no retyping/typos).
+export async function fetchSeriesNames() {
+  if (!hasSupabase) return [];
+  const { data, error } = await supabase
+    .from('works')
+    .select('series_name')
+    .not('series_name', 'is', null)
+    .eq('hidden', false);
+  if (error) return [];
+  const set = new Set();
+  for (const r of data || []) { const s = (r.series_name || '').trim(); if (s) set.add(s); }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
 // Edit Books-shelf fields the app owns: custom title (rename), series name +
 // reading-order index (manual grouping), and an external "open at source" link.
 // Only these columns are writable here; pass undefined to leave one unchanged.

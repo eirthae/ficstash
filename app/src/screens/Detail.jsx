@@ -3,7 +3,7 @@ import Icon from '../components/Icon.jsx';
 import { StatusBadge, FrozenBadge, TagChip, fmtWords, useToast, Sheet } from '../components/ui.jsx';
 import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
-import { fetchChapters, removeWork, updateWorkFields } from '../lib/library.js';
+import { fetchChapters, removeWork, updateWorkFields, fetchSeriesNames } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 import { TagGroupBuilder } from './Discover.jsx';
@@ -318,10 +318,18 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
 // Edit a work's display title, series grouping (Books), and external link.
 function EditDetailsSheet({ open, onClose, isBook, initial, placeholderTitle, saving, onSave }) {
   const [form, setForm] = useState(initial);
-  useEffect(() => { if (open) setForm(initial); }, [open]); // reseed on open
+  const [allSeries, setAllSeries] = useState([]); // existing collection names
+  useEffect(() => {
+    if (open) { setForm(initial); fetchSeriesNames().then(setAllSeries).catch(() => {}); }
+  }, [open]); // reseed + load existing series on open
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const field = { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 };
   const label = { fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' };
+  // Existing collections matching what's typed (so you reuse one, not retype it).
+  const sq = (form.seriesName || '').trim().toLowerCase();
+  const seriesMatches = sq
+    ? allSeries.filter(s => s.toLowerCase().includes(sq) && s.toLowerCase() !== sq).slice(0, 6)
+    : [];
 
   return (
     <Sheet open={open} onClose={onClose} title="Edit details">
@@ -336,12 +344,28 @@ function EditDetailsSheet({ open, onClose, isBook, initial, placeholderTitle, sa
 
       {isBook && (
         <div style={{ display: 'flex', gap: 10 }}>
-          <div style={{ ...field, flex: 1 }}>
+          <div style={{ ...field, flex: 1, position: 'relative' }}>
             <label style={label}>Series</label>
             <div className="searchfield" style={{ background: 'var(--surface-2)' }}>
               <input placeholder="e.g. Mistborn" value={form.seriesName}
-                onChange={e => set('seriesName', e.target.value)} />
+                onChange={e => set('seriesName', e.target.value)} autoComplete="off" />
             </div>
+            {seriesMatches.length > 0 && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 5, marginTop: 4,
+                background: 'var(--surface-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                boxShadow: 'var(--shadow-pop)', overflow: 'hidden' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '7px 12px 4px' }}>Use an existing collection</div>
+                {seriesMatches.map(s => (
+                  <button key={s} className="pressable" onClick={() => set('seriesName', s)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                      padding: '9px 12px', background: 'transparent', borderTop: '1px solid var(--border)',
+                      fontSize: 13.5, color: 'var(--text-primary)' }}>
+                    <Icon icon="solar:layers-minimalistic-linear" size={15} color="var(--text-tertiary)" />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ ...field, width: 92 }}>
             <label style={label}>Order #</label>
