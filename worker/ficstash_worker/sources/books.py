@@ -1,20 +1,19 @@
-"""Books source — published-book release watcher via Open Library (Phase F).
+"""Books source — published-book release watcher via Open Library (Phase F/J).
 
 Unlike the fiction sources, this one is *notify-only*. FicStash can't download a
-commercial ebook, so a "Books" tracker watches an author and surfaces their new
-releases in the swipe feed; when the user buys the EPUB they add it through the
-upload path (Phase B). So this source declares only TAG_SEARCH (the discovery
-engine, keyed on an author name rather than a genre) + WORK_URL (a canonical
-Open Library link). It deliberately does NOT declare DOWNLOAD/FOLLOW, so the
-registry never asks it to fetch chapter bodies and the app hides the Save button.
+commercial ebook, so a "Books" tracker watches a SUBJECT (genre/theme — e.g.
+"fantasy", "magic", "dragons") and surfaces matching new releases in the swipe
+feed; when the user buys the EPUB they add it through the upload path (Phase B).
+So this source declares only TAG_SEARCH (the discovery engine, keyed on Open
+Library subjects) + WORK_URL (a canonical Open Library link). It deliberately
+does NOT declare DOWNLOAD/FOLLOW, so the registry never asks it to fetch chapter
+bodies and the app hides the Save button.
 
-Why Open Library and not Google Books:
-
-  * Google Books' volumes API works without a key but is aggressively rate-limited
-    per-IP (it returned HTTP 429 from a normal residential IP during testing).
-  * Open Library's search.json is free, keyless and lenient — it returned 212
-    newest-first results for "Brandon Sanderson" with no throttling — and exposes
-    exactly what we need: work key, title, author names, language, publish year.
+Subjects, not authors (Phase J): the user wanted to follow a shelf/genre the way
+Goodreads shelves work, not a single author. Goodreads/StoryGraph/LibraryThing
+are all Cloudflare-blocked from CI (like NovelUpdates), so the feed is Open
+Library, whose search.json ANDs multiple `subject:` clauses and subtracts
+`-subject:` clauses — giving a tracked group real AND + exclude semantics.
 
 Politeness mirrors the rest of the worker: the caller spaces requests itself
 (the worker's `space()`), and Open Library asks API users to send a descriptive
@@ -41,7 +40,7 @@ _HEADERS = {
 _TIMEOUT = 25
 
 # Only the fields we actually use — keeps the response small and fast.
-_FIELDS = "key,title,author_name,first_publish_year,language,edition_count"
+_FIELDS = "key,title,author_name,first_publish_year,language,subject"
 
 # Open Library returns ISO 639-2/B three-letter codes ("eng", "jpn", ...). Map
 # the common ones to the native-script names the rest of the app displays; fall
@@ -76,10 +75,19 @@ def _lang_name(codes) -> str:
     return _LANG_NAMES.get(code, code.title())
 
 
+def _subject_clause(term: str, negate: bool = False) -> str:
+    """A single `subject:"…"` (or `-subject:"…"`) clause for search.json's q."""
+    t = (term or "").strip().replace('"', "")
+    if not t:
+        return ""
+    return f'{"-" if negate else ""}subject:"{t}"'
+
+
 class BooksSource(Source):
     id = "books"
-    # Discovery (by author) + a canonical link. Notify-only: NO download/follow,
-    # so the app hides the Save button and the user uploads the bought EPUB.
+    # Discovery (by subject/genre) + a canonical link. Notify-only: NO
+    # download/follow, so the app hides the Save button and the user uploads the
+    # bought EPUB.
     capabilities = frozenset({TAG_SEARCH, WORK_URL})
 
     def __init__(self) -> None:
@@ -92,26 +100,39 @@ class BooksSource(Source):
         return f"{BASE}/works/{source_work_id}"
 
     def search_by_tag(self, tag: str, limit: int = 25) -> list[WorkMeta]:
-        """Find an author's most recent books (metadata only).
+        """Find recent books in a single subject (metadata only)."""
+        return self.search_by_tags([tag], limit=limit)
 
-        `tag` is an author name (the Books tracker stores authors, not genres).
-        Sorted newest-first so a sync surfaces fresh releases at the top.
+    def search_by_tags(
+        self,
+        include: list[str],
+        exclude: list[str] | tuple[str, ...] = (),
+        limit: int = 25,
+    ) -> list[WorkMeta]:
+        """Find recent books matching ALL `include` subjects and NONE of
+        `exclude` (metadata only).
+
+        Open Library's search.json ANDs multiple `subject:` clauses and subtracts
+        `-subject:` clauses in one query, sorted newest-first — so a tracked
+        Books group gets the same AND + exclude semantics as the fiction sources.
         """
-        author = (tag or "").strip()
-        if not author:
+        inc = [c for c in (_subject_clause(t) for t in include) if c]
+        if not inc:
             return []
+        exc = [c for c in (_subject_clause(t, negate=True) for t in (exclude or [])) if c]
+        q = " ".join(inc + exc)
         url = (
             f"{BASE}/search.json"
-            f"?author={quote_plus(author)}"
+            f"?q={quote_plus(q)}"
             f"&sort=new&limit={int(limit)}&fields={_FIELDS}"
         )
         resp = self._session.get(url, timeout=_TIMEOUT)
         resp.raise_for_status()
         data = json.loads(resp.text)
-        return _parse_docs(data.get("docs", []), author=author, limit=limit)
+        return _parse_docs(data.get("docs", []), limit=limit)
 
 
-def _parse_docs(docs: list, author: str, limit: int) -> list[WorkMeta]:
+def _parse_docs(docs: list, limit: int) -> list[WorkMeta]:
     out: list[WorkMeta] = []
     seen: set[str] = set()
 
@@ -124,9 +145,12 @@ def _parse_docs(docs: list, author: str, limit: int) -> list[WorkMeta]:
 
         title = (doc.get("title") or "Untitled").strip()
         names = doc.get("author_name") or []
-        author_disp = ", ".join(names) if names else author
+        author_disp = ", ".join(names) if names else "Unknown author"
         year = doc.get("first_publish_year")
         summary = f"Published book · {year}" if year else "Published book"
+        # Surface a few subjects as tags so the card shows what it matched on.
+        subjects = doc.get("subject") or []
+        tags = [{"t": s, "k": "freeform"} for s in subjects[:4]] or [{"t": "Book", "k": "freeform"}]
 
         seen.add(wid)
         out.append(
@@ -136,7 +160,7 @@ def _parse_docs(docs: list, author: str, limit: int) -> list[WorkMeta]:
                 title=title,
                 author=author_disp,
                 summary=summary,
-                tags=[{"t": "Book", "k": "freeform"}],
+                tags=tags,
                 language=_lang_name(doc.get("language")),
                 # A published book is a finished work, not an ongoing serial.
                 status="complete",

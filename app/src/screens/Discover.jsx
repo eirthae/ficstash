@@ -273,43 +273,37 @@ function GenrePicker({ genres, label, picked, onAdd, onRemove }) {
   );
 }
 
-// Free-text author entry for the Books watcher. There's no fixed taxonomy and
-// no live autocomplete — the user types an author name and it becomes a chip.
-// Stored as {name, id:'', kind:'author'} so the worker queries Open Library by it.
-function AuthorPicker({ picked, onAdd, onRemove }) {
+// Free-text subject/genre entry for the Books watcher. Open Library has an
+// open-ended subject vocabulary (no fixed list, no autocomplete), so the user
+// types a subject and it becomes a chip. Stored as {name, id:'', kind:'subject'}
+// so the worker queries Open Library's search.json by subject.
+function SubjectPicker({ picked, onAdd, onRemove, placeholder = 'Type a subject — fantasy, magic, dragons…', accent }) {
   const [term, setTerm] = useState('');
   const commit = () => {
     const name = term.trim();
     if (!name) return;
-    onAdd({ name, id: '', kind: 'author' });
+    onAdd({ name, id: '', kind: 'subject' });
     setTerm('');
   };
+  const c = accent || TAG_COLOR.freeform;
 
   return (
     <div>
       {picked.length > 0 && (
         <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-          {picked.map((t) => {
-            const c = TAG_COLOR.character || 'var(--accent)';
-            return (
-              <span key={t.name} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
-                <span className="swatch" style={{ background: c }}></span>{t.name}
-                <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t.name)} aria-label="Remove author">
-                  <Icon icon="solar:close-circle-bold" size={15} color={c} />
-                </button>
-              </span>
-            );
-          })}
+          {picked.map((t) => (
+            <span key={t.name} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
+              <span className="swatch" style={{ background: c }}></span>{t.name}
+              <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t.name)} aria-label="Remove subject">
+                <Icon icon="solar:close-circle-bold" size={15} color={c} />
+              </button>
+            </span>
+          ))}
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1 }}>
-          <SearchField
-            placeholder="Type an author's name…"
-            value={term}
-            onChange={setTerm}
-            onSubmit={commit}
-          />
+          <SearchField placeholder={placeholder} value={term} onChange={setTerm} onSubmit={commit} />
         </div>
         <button className="btn btn-flat" onClick={commit} disabled={!term.trim()} style={{ opacity: term.trim() ? 1 : 0.5 }}>
           <Icon icon="solar:add-circle-linear" size={18} /> Add
@@ -339,7 +333,7 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
 
   const isAo3 = source === 'ao3';
   const isBooks = source === 'books';
-  const noun = isAo3 ? 'tag' : isBooks ? 'author' : 'genre';
+  const noun = isAo3 ? 'tag' : isBooks ? 'subject' : 'genre';
   const has = (list, t) => list.some((x) => x.name.toLowerCase() === t.name.toLowerCase());
   const addPicked = (t) => { setPicked((p) => (has(p, t) ? p : [...p, t])); setErr(''); };
   const removePicked = (name) => setPicked((p) => p.filter((x) => x.name !== name));
@@ -350,15 +344,14 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
     if (!picked.length) { setErr(`Add at least one ${noun} first.`); return; }
     setBusy(true); setErr('');
     try {
-      // AO3 honours the chosen match mode. Royal Road / Scribble Hub now AND
-      // their genres natively (multi tagsAdd / Series Finder) and subtract
-      // excludes, so a multi-genre group is "all". Books is notify-only (no
-      // exclude). Books keeps "any" since the watcher unions author/genre feeds.
+      // AO3 honours the chosen match mode. Royal Road / Scribble Hub / Books all
+      // AND their tags natively now (multi tagsAdd / Series Finder / Open Library
+      // subject query) and subtract excludes, so a multi-tag group is "all".
       const g = await createGroup({
         source,
         tags: picked,
-        excludedTags: isBooks ? [] : excluded,
-        matchMode: isAo3 ? matchMode : isBooks ? 'any' : 'all',
+        excludedTags: excluded,
+        matchMode: isAo3 ? matchMode : 'all',
       });
       onCreated(g);
     } catch (e) {
@@ -383,17 +376,17 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
         <div>
           <div className="section-label" style={{ marginBottom: 8 }}>
             {picked.length <= 1
-              ? isBooks ? 'Watch this author' : `Track this ${noun}`
+              ? `Track this ${noun}`
               : isAo3
                 ? `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`
                 : isBooks
-                  ? 'Watch new releases from these authors'
+                  ? 'Watch new releases in ALL of these subjects'
                   : 'Track works in ALL of these genres'}
           </div>
           {isAo3 ? (
             <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
           ) : isBooks ? (
-            <AuthorPicker picked={picked} onAdd={addPicked} onRemove={removePicked} />
+            <SubjectPicker picked={picked} onAdd={addPicked} onRemove={removePicked} />
           ) : (
             <GenrePicker
               genres={GENRES_BY_SOURCE[source] || []}
@@ -448,6 +441,17 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
             />
             <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
               Works in any excluded genre are left out of your matches.
+            </div>
+          </div>
+        )}
+
+        {isBooks && (
+          <div>
+            <div className="section-label" style={{ marginBottom: 8 }}>Exclude subjects <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
+            <SubjectPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded}
+              placeholder="Subjects to exclude…" accent="var(--danger, #f5455c)" />
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
+              Books in any excluded subject are left out of your matches.
             </div>
           </div>
         )}
