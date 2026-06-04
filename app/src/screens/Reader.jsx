@@ -4,6 +4,7 @@ import { Sheet, fmtWords } from '../components/ui.jsx';
 import { WORKS, CHAPTERS, READER_PARAS } from '../data/sample.js';
 import { fetchChapters } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
+import { markRead } from '../lib/reading.js';
 
 export const READER_FONTS = [
   { value: 'serif', label: 'Serif', css: 'var(--font-serif)' },
@@ -22,6 +23,8 @@ export const READER_THEMES = [
 
 export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitle, settings, setSettings, nav }) {
   const work = propWork || WORKS.find(w => w.id === workId) || WORKS[0];
+  // Stamp this work as just-read (drives the library's "Last read" sort).
+  useEffect(() => { markRead(work.id); }, [work.id]);
   const [chapters, setChapters] = useState(null); // null until live load resolves
   useEffect(() => {
     let alive = true;

@@ -6,6 +6,7 @@ import { LibraryCard } from '../components/cards.jsx';
 import { triggerSync } from '../lib/sync.js';
 import { fetchPendingLinks, removeRequest } from '../lib/links.js';
 import { removeWork } from '../lib/library.js';
+import { getLastRead } from '../lib/reading.js';
 
 // The fandom name without the author suffix ("Heated Rivalry – Rachel Reid" → "Heated Rivalry").
 function fandomName(work) {
@@ -27,13 +28,24 @@ const SHELVES = [
   { id: 'books', label: 'Books' },
 ];
 
-// Sort a list without mutating it. Timestamps are ISO strings (sortable as text);
-// 'default' preserves the incoming order (source_updated desc from the query).
-function sortWorks(list, sort) {
+// Sort options, shown as icons. 'default' keeps the incoming order (source
+// activity desc); 'updated' = clock; 'added' (newest) = leaf; 'read' = book
+// (most recently opened in the reader); 'title' = A–Z (Books only).
+const SORT_OPTS = {
+  default: { icon: 'solar:sort-vertical-linear', label: 'Default order' },
+  updated: { icon: 'solar:clock-circle-linear', label: 'Last updated' },
+  added: { icon: 'solar:leaf-linear', label: 'Last added' },
+  read: { icon: 'solar:book-linear', label: 'Last read' },
+  title: { icon: 'solar:sort-from-top-to-bottom-linear', label: 'A–Z' },
+};
+
+// Sort a list without mutating it. Timestamps are ISO strings (sortable as text).
+function sortWorks(list, sort, lastRead = {}) {
   const arr = [...list];
   if (sort === 'added') arr.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   else if (sort === 'updated') arr.sort((a, b) => (b.sourceUpdated || '').localeCompare(a.sourceUpdated || ''));
   else if (sort === 'title') arr.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  else if (sort === 'read') arr.sort((a, b) => (lastRead[b.id] || '').localeCompare(lastRead[a.id] || ''));
   return arr;
 }
 
@@ -108,7 +120,8 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
     : status === 'complete' ? shelfWorks.filter(w => w.status === 'complete')
     : status === 'ongoing' ? shelfWorks.filter(w => w.status !== 'complete')
     : shelfWorks;
-  const shown = sortWorks(statusFiltered, sort);
+  const lastRead = getLastRead(); // re-read each render so it stays fresh after reading
+  const shown = sortWorks(statusFiltered, sort, lastRead);
 
   // Pending (still-downloading) link requests belong to the Stories shelf.
   const pending = shelf === 'stories' ? pendingLinks : [];
@@ -126,10 +139,10 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   };
 
   const SORTS = isBooks
-    ? [{ v: 'added', l: 'Last added' }, { v: 'title', l: 'A–Z' }]
-    : [{ v: 'default', l: 'Default' }, { v: 'added', l: 'Last added' }, { v: 'updated', l: 'Last updated' }];
+    ? ['added', 'title', 'read']
+    : ['default', 'updated', 'added', 'read'];
   // Keep sort valid when switching shelves (books has no 'default'/'updated').
-  const activeSort = SORTS.some(s => s.v === sort) ? sort : SORTS[0].v;
+  const activeSort = SORTS.includes(sort) ? sort : SORTS[0];
 
   const switchShelf = (id) => {
     setShelf(id);
@@ -165,11 +178,14 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
                 <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
               </div>
             )}
-            <div className="sortpick" style={isBooks ? { flex: 1 } : undefined}>
-              <Icon icon="solar:sort-vertical-linear" size={16} color="var(--text-tertiary)" />
-              <select value={activeSort} onChange={e => setSort(e.target.value)} aria-label="Sort">
-                {SORTS.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}
-              </select>
+            <div className="sortbar">
+              {SORTS.map(v => (
+                <button key={v} className={`sortbtn ${activeSort === v ? 'on' : ''}`}
+                  onClick={() => setSort(v)} aria-label={SORT_OPTS[v].label} title={SORT_OPTS[v].label}
+                  aria-pressed={activeSort === v}>
+                  <Icon icon={SORT_OPTS[v].icon} size={19} />
+                </button>
+              ))}
             </div>
             {showCollapseToggle && (
               <button className="iconbtn ghost" onClick={toggleAll} aria-label={anyExpanded ? 'Collapse all' : 'Expand all'}

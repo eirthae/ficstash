@@ -54,7 +54,6 @@ export function BottomNav({ active, onTab, onAdd, addActive }) {
       {left.map(renderTab)}
       <button className={`navfab ${addActive ? 'open' : ''}`} onClick={onAdd} aria-label="Add to library" aria-expanded={!!addActive}>
         <span className="fab-circle"><span className="fab-plus-w" /></span>
-        <span className="navlabel">Add New</span>
       </button>
       {right.map(renderTab)}
     </div>
