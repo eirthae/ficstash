@@ -172,10 +172,13 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
         {(shelfWorks.length > 0 || pending.length > 0) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 16px' }}>
             {!isBooks && (
-              <div className="seg" style={{ flex: 1 }}>
-                <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {shelfWorks.length}</button>
-                <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
-                <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+              <div className="filterpick" style={{ flex: 1 }}>
+                <select value={status} onChange={e => setStatus(e.target.value)} aria-label="Filter by status">
+                  <option value="all">All · {shelfWorks.length}</option>
+                  <option value="ongoing">Ongoing · {ongoingCount}</option>
+                  <option value="complete">Complete · {completeCount}</option>
+                </select>
+                <Icon icon="solar:alt-arrow-down-linear" size={16} color="var(--text-tertiary)" />
               </div>
             )}
             <div className="sortbar">
