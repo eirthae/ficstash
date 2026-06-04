@@ -189,10 +189,13 @@ input,textarea { font-family:inherit; }
 .filterpick select { flex:1; min-width:0; border:none; background:transparent; color:var(--text-primary); font-size:13.5px; font-weight:600; outline:none; appearance:none; -webkit-appearance:none; }
 .filterpick select option { color:#000; }
 
-/* Icon sort bar (library) */
-.sortbar { flex:none; display:flex; align-items:center; gap:4px; height:42px; padding:0 4px; background:var(--surface-2); border-radius:var(--radius-md); }
-.sortbtn { width:34px; height:34px; display:flex; align-items:center; justify-content:center; border-radius:9px; color:var(--text-tertiary); transition:background .15s, color .15s; }
-.sortbtn.on { background:var(--accent-soft); color:var(--accent); }
+/* Sort dropdown (library) — compact icon trigger that opens a menu of options. */
+.sortdd { position:relative; flex:none; }
+.sortdd-btn { display:flex; align-items:center; gap:4px; height:42px; padding:0 11px; background:var(--surface-2); border-radius:var(--radius-md); color:var(--accent); }
+.dd-backdrop { position:fixed; inset:0; z-index:40; }
+.sortdd-menu { position:absolute; top:calc(100% + 6px); right:0; z-index:50; min-width:176px; padding:6px; display:flex; flex-direction:column; gap:2px; background:var(--surface-elevated); border:1px solid var(--border); border-radius:var(--radius-md); box-shadow:var(--shadow-pop); }
+.sortdd-item { display:flex; align-items:center; gap:11px; width:100%; padding:10px 11px; border-radius:9px; text-align:left; font-size:13.5px; font-weight:600; color:var(--text-secondary); }
+.sortdd-item.on { background:var(--accent-soft); color:var(--accent); }
 
 /* ============================================================================
    GENERIC SURFACES

@@ -49,6 +49,37 @@ function sortWorks(list, sort, lastRead = {}) {
   return arr;
 }
 
+// Sort control — a compact icon button that opens a dropdown of options
+// (icon + label), instead of laying every option out in a row.
+function SortDropdown({ value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const cur = SORT_OPTS[value] || SORT_OPTS[options[0]];
+  return (
+    <div className="sortdd">
+      <button className="sortdd-btn" onClick={() => setOpen(o => !o)} aria-haspopup="listbox"
+        aria-expanded={open} aria-label={`Sort: ${cur.label}`} title={`Sort: ${cur.label}`}>
+        <Icon icon={cur.icon} size={19} />
+        <Icon icon="solar:alt-arrow-down-linear" size={14} color="var(--text-tertiary)" />
+      </button>
+      {open && (
+        <>
+          <div className="dd-backdrop" onClick={() => setOpen(false)} />
+          <div className="sortdd-menu" role="listbox">
+            {options.map(v => (
+              <button key={v} role="option" aria-selected={v === value}
+                className={`sortdd-item ${v === value ? 'on' : ''}`}
+                onClick={() => { onChange(v); setOpen(false); }}>
+                <Icon icon={SORT_OPTS[v].icon} size={18} />
+                <span>{SORT_OPTS[v].label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function LibraryScreen({ works, layout = 'fandom', connected = true, onRemove, onReload, refreshKey, nav }) {
   const open = (w) => nav.push('detail', { work: w, onRemoved: onRemove, onReload });
   const [toast, showToast] = useToast();
@@ -181,15 +212,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
                 <Icon icon="solar:alt-arrow-down-linear" size={16} color="var(--text-tertiary)" />
               </div>
             )}
-            <div className="sortbar">
-              {SORTS.map(v => (
-                <button key={v} className={`sortbtn ${activeSort === v ? 'on' : ''}`}
-                  onClick={() => setSort(v)} aria-label={SORT_OPTS[v].label} title={SORT_OPTS[v].label}
-                  aria-pressed={activeSort === v}>
-                  <Icon icon={SORT_OPTS[v].icon} size={19} />
-                </button>
-              ))}
-            </div>
+            <SortDropdown value={activeSort} options={SORTS} onChange={setSort} />
             {showCollapseToggle && (
               <button className="iconbtn ghost" onClick={toggleAll} aria-label={anyExpanded ? 'Collapse all' : 'Expand all'}
                 title={anyExpanded ? 'Collapse all' : 'Expand all'}

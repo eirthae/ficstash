@@ -136,7 +136,7 @@ export function DiscoverScreen({ nav }) {
             icon="solar:hashtag-circle-linear"
             title="Nothing tracked here yet"
             desc="Track a tag or a tag group and FicStash will surface matching works as they're posted."
-            action={<button className="btn btn-primary" onClick={() => setBuilderOpen(true)}><Icon icon="solar:add-circle-linear" size={18} /> Track a tag</button>}
+            action={<button className="btn btn-lg btn-primary" onClick={() => setBuilderOpen(true)}>Track a tag</button>}
           />
         ) : (
           <div className="tilegrid">
@@ -465,8 +465,8 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
 
         {err && <div style={{ color: 'var(--danger, #f5455c)', fontSize: 13 }}>{err}</div>}
 
-        <button className="btn btn-primary" disabled={busy || !picked.length} onClick={save} style={{ width: '100%', opacity: busy || !picked.length ? 0.6 : 1 }}>
-          {busy ? 'Saving…' : <><Icon icon="solar:check-circle-bold" size={18} /> Track this {picked.length > 1 ? 'group' : noun}</>}
+        <button className="btn btn-lg btn-primary btn-block" disabled={busy || !picked.length} onClick={save} style={{ opacity: busy || !picked.length ? 0.6 : 1 }}>
+          {busy ? 'Saving…' : `Track this ${picked.length > 1 ? 'group' : noun}`}
         </button>
       </div>
     </Sheet>
