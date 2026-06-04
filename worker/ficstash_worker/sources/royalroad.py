@@ -133,20 +133,33 @@ class RoyalRoadSource(Source):
         return list(GENRES)
 
     def search_by_tag(self, tag: str, limit: int = 25) -> list[WorkMeta]:
-        """Find recent Royal Road works carrying a tag (metadata only).
+        """Find recent Royal Road works carrying a single tag (metadata only)."""
+        return self.search_by_tags([tag], limit=limit)
 
-        `tag` may be a display label ("Sci-fi") or a slug ("sci_fi"); both are
-        normalised. Results are ordered most-recently-updated first so a sync
-        surfaces fresh works at the top.
+    def search_by_tags(
+        self,
+        include: list[str],
+        exclude: list[str] | tuple[str, ...] = (),
+        limit: int = 25,
+    ) -> list[WorkMeta]:
+        """Find recent Royal Road works carrying ALL `include` tags and NONE of
+        `exclude` (metadata only).
+
+        Royal Road's fiction search ANDs repeated `tagsAdd` params and subtracts
+        `tagsRemove` params natively — exactly the semantics a tracked group
+        wants ("Male Lead" + "Magic" = works tagged both). Tags may be display
+        labels ("Sci-fi") or slugs ("sci_fi"); both normalise. Results are
+        ordered most-recently-updated first.
         """
-        slug = _slugify(tag)
-        if not slug:
+        add = [s for s in (_slugify(t) for t in include) if s]
+        remove = [s for s in (_slugify(t) for t in exclude) if s]
+        if not add:
             return []
-        params = {
-            "tagsAdd": slug,
-            "orderBy": "last_update",
-            "dir": "desc",
-        }
+        # requests serialises a list of (key, value) pairs into repeated query
+        # params, which is how Royal Road expects multiple tags.
+        params: list[tuple[str, str]] = [("tagsAdd", s) for s in add]
+        params += [("tagsRemove", s) for s in remove]
+        params += [("orderBy", "last_update"), ("dir", "desc")]
         resp = self._session.get(
             f"{BASE}/fictions/search", params=params, timeout=_TIMEOUT
         )

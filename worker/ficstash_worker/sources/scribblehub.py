@@ -80,6 +80,36 @@ GENRES: list[dict] = [
 ]
 _SLUG_BY_NAME = {g["name"].lower(): g["slug"] for g in GENRES}
 
+# Scribble Hub's internal numeric genre ids (the `gmeid` on each Series Finder
+# checkbox). The Series Finder is the only surface that ANDs multiple genres and
+# subtracts excludes, and it keys on these ids — not slugs. Derived once from
+# /series-finder/; keyed by lowercase genre name.
+_GENRE_ID_BY_NAME: dict[str, int] = {
+    "action": 9, "adult": 902, "adventure": 8, "boys love": 891, "comedy": 7,
+    "drama": 903, "ecchi": 904, "fanfiction": 38, "fantasy": 19,
+    "gender bender": 905, "girls love": 892, "harem": 1015, "historical": 21,
+    "horror": 22, "isekai": 37, "josei": 906, "litrpg": 1180,
+    "martial arts": 907, "mature": 20, "mecha": 908, "mystery": 909,
+    "psychological": 910, "romance": 6, "school life": 911, "sci-fi": 912,
+    "seinen": 913, "slice of life": 914, "smut": 915, "sports": 916,
+    "supernatural": 5, "tragedy": 901,
+}
+# Also resolve by slug, so a stored tag id like "sci-fi" or "gender-bender" maps.
+_GENRE_ID_BY_SLUG = {
+    re.sub(r"[^a-z0-9]+", "-", name).strip("-"): gid
+    for name, gid in _GENRE_ID_BY_NAME.items()
+}
+
+
+def _genre_id(tag: str) -> int | None:
+    """Resolve a genre label or slug to its Scribble Hub numeric id."""
+    t = (tag or "").strip().lower()
+    if not t:
+        return None
+    return _GENRE_ID_BY_NAME.get(t) or _GENRE_ID_BY_SLUG.get(
+        re.sub(r"[^a-z0-9]+", "-", t).strip("-")
+    )
+
 
 def _slugify(tag: str) -> str:
     """Map a tag label to a Scribble Hub genre slug.
@@ -116,20 +146,121 @@ class ScribbleHubSource(Source):
         return list(GENRES)
 
     def search_by_tag(self, tag: str, limit: int = 25) -> list[WorkMeta]:
-        """Find recently-updated Scribble Hub works in a genre (metadata only).
+        """Find recently-updated Scribble Hub works in a single genre."""
+        return self.search_by_tags([tag], limit=limit)
 
-        `tag` may be a display label ("Sci-fi") or a slug ("sci-fi"); both are
-        normalised. The genre RSS feed is newest-first, so a sync surfaces fresh
-        works at the top.
+    def search_by_tags(
+        self,
+        include: list[str],
+        exclude: list[str] | tuple[str, ...] = (),
+        limit: int = 25,
+    ) -> list[WorkMeta]:
+        """Find recent Scribble Hub works in ALL `include` genres and NONE of
+        `exclude` (metadata only).
+
+        Uses the Series Finder, the only Scribble Hub surface that ANDs multiple
+        genres (mgi=and) and subtracts excludes (ge=), sorted by last chapter
+        update so a sync surfaces fresh works first. The per-item RSS feed can't
+        AND, so a single known genre also goes through the finder; an unknown
+        single tag (not in the genre-id map) falls back to that genre's RSS feed.
+        Genres may be labels ("Sci-fi") or slugs ("sci-fi"); both resolve.
         """
-        slug = _slugify(tag)
-        if not slug:
-            return []
-        resp = self._session.get(
-            f"{BASE}/genre/{slug}/feed/", timeout=_TIMEOUT
+        inc_terms = [t for t in include if t]
+        inc_ids = [gid for gid in (_genre_id(t) for t in inc_terms) if gid]
+        exc_ids = [gid for gid in (_genre_id(t) for t in exclude or []) if gid]
+
+        # Every include genre resolved → native AND via the Series Finder.
+        if inc_ids and len(inc_ids) == len(inc_terms):
+            params = {
+                "sf": "1",
+                "gi": ",".join(str(i) for i in inc_ids),
+                "mgi": "and",
+                "sort": "lastchpdate",
+                "order": "desc",
+            }
+            if exc_ids:
+                params["ge"] = ",".join(str(i) for i in exc_ids)
+            resp = self._session.get(
+                f"{BASE}/series-finder/", params=params, timeout=_TIMEOUT
+            )
+            resp.raise_for_status()
+            return _parse_finder(resp.text, limit=limit)
+
+        # Single unknown tag → that genre's RSS feed (newest-first).
+        if len(inc_terms) == 1:
+            slug = _slugify(inc_terms[0])
+            if not slug:
+                return []
+            resp = self._session.get(f"{BASE}/genre/{slug}/feed/", timeout=_TIMEOUT)
+            resp.raise_for_status()
+            return _parse_feed(resp.text, limit=limit)
+
+        # Multi-tag group with some unmapped genres → AND only the ones we can
+        # resolve via the finder (dropping the unknowns rather than returning 0).
+        if inc_ids:
+            params = {
+                "sf": "1",
+                "gi": ",".join(str(i) for i in inc_ids),
+                "mgi": "and",
+                "sort": "lastchpdate",
+                "order": "desc",
+            }
+            if exc_ids:
+                params["ge"] = ",".join(str(i) for i in exc_ids)
+            resp = self._session.get(
+                f"{BASE}/series-finder/", params=params, timeout=_TIMEOUT
+            )
+            resp.raise_for_status()
+            return _parse_finder(resp.text, limit=limit)
+        return []
+
+
+# ---- Series Finder HTML parsing (multi-genre AND results) -------------------
+_FINDER_ITEM_RE = re.compile(r'<div class="search_body">.*?(?=<div class="search_body">|$)', re.S)
+_FINDER_LINK_RE = re.compile(
+    r'<div class="search_title">.*?<a href="https://www\.scribblehub\.com/series/(\d+)/[^"]*">(.*?)</a>',
+    re.S,
+)
+
+
+def _parse_finder(html_text: str, limit: int) -> list[WorkMeta]:
+    """Parse Series Finder result cards into WorkMeta (id + title + genres).
+
+    The listing carries no author/summary (FanFicFare fills those on save), but
+    each card lists its genre links, which we surface as tags.
+    """
+    out: list[WorkMeta] = []
+    seen: set[str] = set()
+    for block in _FINDER_ITEM_RE.findall(html_text):
+        m = _FINDER_LINK_RE.search(block)
+        if not m:
+            continue
+        wid, title = m.group(1), _html.unescape(_strip_html(m.group(2))) or "Untitled"
+        if wid in seen:
+            continue
+        seen.add(wid)
+        tags: list[dict] = []
+        gblock = re.search(r'<div class="search_genre">(.*?)</div>', block, re.S)
+        if gblock:
+            for name in re.findall(r"<a[^>]*>([^<]+)</a>", gblock.group(1)):
+                nm = _html.unescape(name).strip()
+                if nm:
+                    tags.append({"t": nm, "k": "freeform"})
+        out.append(
+            WorkMeta(
+                source="scribblehub",
+                source_work_id=wid,
+                title=title,
+                author="",  # filled on save via FanFicFare
+                summary="",
+                tags=tags,
+                language="English",
+                url=f"{BASE}/series/{wid}/",
+            )
         )
-        resp.raise_for_status()
-        return _parse_feed(resp.text, limit=limit)
+        if len(out) >= limit:
+            break
+    return out
 
 
 # ---- RSS parsing (the feed is small, well-formed XML) -----------------------

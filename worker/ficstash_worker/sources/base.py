@@ -109,5 +109,27 @@ class Source(ABC):
 
     # ---- TAG_SEARCH --------------------------------------------------------
     def search_by_tag(self, tag: str, limit: int = 25) -> list[WorkMeta]:
-        """Return works matching a tracked tag (metadata only)."""
+        """Return works matching a single tracked tag (metadata only)."""
         raise NotImplementedError(f"{self.id} has no tag search")
+
+    def search_by_tags(
+        self,
+        include: list[str],
+        exclude: list[str] | tuple[str, ...] = (),
+        limit: int = 25,
+    ) -> list[WorkMeta]:
+        """Return works matching ALL `include` tags and NONE of `exclude`.
+
+        This is the real discovery entry point for a tracked group: a group with
+        several tags means "a work must carry every one" (intersection / AND),
+        mirroring how each site's own multi-tag search behaves — NOT the union of
+        each tag's newest works (which rarely overlap and looked like "0 results").
+
+        The default here only honours the first include tag; sources with a
+        native multi-tag search (Royal Road) or a per-item category list
+        (Scribble Hub) override this to AND properly and apply excludes.
+        """
+        inc = [t for t in include if t]
+        if not inc:
+            return []
+        return self.search_by_tag(inc[0], limit=limit)

@@ -495,11 +495,12 @@ def main() -> None:
                 print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
             continue
 
-        # ---- non-AO3 sources (Royal Road, …) -------------------------------
-        # Capability-gated discovery: search each tag and merge. Sites without a
-        # "since" filter just return newest-first; matches are deduped on upsert
-        # and stay `seen`, so re-surfacing the same work is harmless. Multi-tag
-        # groups are treated as ANY (the union) for these sources.
+        # ---- non-AO3 sources (Royal Road, Scribble Hub, …) -----------------
+        # Capability-gated discovery. A multi-tag group means "a work must carry
+        # EVERY tag" (intersection / AND), matching how each site's own search
+        # works — done in ONE native query via search_by_tags, not a union of
+        # each tag's newest works (which rarely overlap and returned 0). Excluded
+        # tags are subtracted in the same query.
         try:
             source = get_source(source_id)
         except KeyError:
@@ -509,25 +510,26 @@ def main() -> None:
             print(f"    '{label}': source '{source_id}' has no tag search, skipped.")
             continue
         # Prefer each tag's stored id (the site's tag slug) over its display name.
-        tag_terms = [
-            (t.get("id") or t.get("name")) if isinstance(t, dict) else str(t)
-            for t in tags_raw
-        ]
-        tag_terms = [t for t in tag_terms if t]
+        def _terms(items):
+            out = [
+                (t.get("id") or t.get("name")) if isinstance(t, dict) else str(t)
+                for t in (items or [])
+            ]
+            return [t for t in out if t]
+
+        include_terms = _terms(tags_raw)
+        exclude_terms = _terms(g.get("excluded_tags"))
         try:
-            merged: dict[str, object] = {}
-            for term in tag_terms:
-                space()
-                for m in _with_backoff(
-                    lambda term=term: source.search_by_tag(term, limit=30),
-                    what=f"{source_id} tag search '{term}'",
-                    broad=True,
-                ):
-                    merged.setdefault(m.source_work_id, m)
-            metas = list(merged.values())
+            space()
+            metas = _with_backoff(
+                lambda: source.search_by_tags(include_terms, exclude_terms, limit=30),
+                what=f"{source_id} tag search '{label}'",
+                broad=True,
+            )
             written = upsert_tag_matches(db, g["id"], metas)
             mark_group_checked(db, g["id"])
-            print(f"    '{label}' ({source_id}): {written} match(es).")
+            note = f" (excluding {len(exclude_terms)})" if exclude_terms else ""
+            print(f"    '{label}' ({source_id}): {written} match(es).{note}")
         except Exception as exc:  # noqa: BLE001
             print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
 

@@ -36,6 +36,7 @@ const LANGUAGES = [{ code: 'hy', name: 'հայերեն', label: 'Armenian', pale
 export function DiscoverScreen({ nav }) {
   const [groups, setGroups] = useState(null); // null = loading
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [tagShelf, setTagShelf] = useState('ao3'); // ao3 | sites | books
   const [toast, showToast] = useToast();
 
   const load = useCallback(() => {
@@ -50,6 +51,19 @@ export function DiscoverScreen({ nav }) {
   const tags = all.filter((t) => t.kind !== 'language');
   const langGroups = all.filter((t) => t.kind === 'language');
   const fresh = tags.reduce((a, t) => a + (t.fresh || 0), 0);
+  // Shelve the tracked groups by source, mirroring the library's shelves.
+  const shelfMatch = {
+    ao3: (s) => (s || 'ao3') === 'ao3',
+    sites: (s) => s === 'royalroad' || s === 'scribblehub',
+    books: (s) => s === 'books',
+  };
+  const TAG_SHELVES = [
+    { id: 'ao3', label: 'AO3' },
+    { id: 'sites', label: 'RR · SH' },
+    { id: 'books', label: 'Books' },
+  ];
+  const shelfCount = (id) => tags.filter((t) => shelfMatch[id](t.source)).length;
+  const shelfTags = tags.filter((t) => shelfMatch[tagShelf](t.source));
   const open = (tag) => nav.push('tagresults', { tag, onLeave: load });
   const openLater = () => nav.push('later', { onLeave: load });
 
@@ -101,18 +115,26 @@ export function DiscoverScreen({ nav }) {
           {fresh > 0 && <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{fresh} new matches</span>}
         </div>
 
+        <div className="seg src-seg" style={{ marginBottom: 14 }}>
+          {TAG_SHELVES.map((s) => (
+            <button key={s.id} className={tagShelf === s.id ? 'on' : ''} onClick={() => setTagShelf(s.id)}>
+              {s.label} · {shelfCount(s.id)}
+            </button>
+          ))}
+        </div>
+
         {groups === null ? (
           <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '8px 2px' }}>Loading…</div>
-        ) : tags.length === 0 ? (
+        ) : shelfTags.length === 0 ? (
           <EmptyState
             icon="solar:hashtag-circle-linear"
-            title="Nothing tracked yet"
+            title="Nothing tracked here yet"
             desc="Track a tag or a tag group and FicStash will surface matching works as they're posted."
             action={<button className="btn btn-primary" onClick={() => setBuilderOpen(true)}><Icon icon="solar:add-circle-linear" size={18} /> Track a tag</button>}
           />
         ) : (
           <div className="tilegrid">
-            {tags.map((t) => <TagTile key={t.id} tag={t} onOpen={open} />)}
+            {shelfTags.map((t) => <TagTile key={t.id} tag={t} onOpen={open} />)}
             <button className="tile add pressable" onClick={() => setBuilderOpen(true)}>
               <Icon icon="solar:add-circle-linear" size={30} />
               <div className="t-name" style={{ marginTop: 6 }}>Track a new tag</div>
@@ -328,13 +350,15 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
     if (!picked.length) { setErr(`Add at least one ${noun} first.`); return; }
     setBusy(true); setErr('');
     try {
-      // Royal Road searches one genre at a time and unions the results, so a
-      // multi-genre group is always "any". AO3 honours the chosen match mode.
+      // AO3 honours the chosen match mode. Royal Road / Scribble Hub now AND
+      // their genres natively (multi tagsAdd / Series Finder) and subtract
+      // excludes, so a multi-genre group is "all". Books is notify-only (no
+      // exclude). Books keeps "any" since the watcher unions author/genre feeds.
       const g = await createGroup({
         source,
         tags: picked,
-        excludedTags: isAo3 ? excluded : [],
-        matchMode: isAo3 ? matchMode : 'any',
+        excludedTags: isBooks ? [] : excluded,
+        matchMode: isAo3 ? matchMode : isBooks ? 'any' : 'all',
       });
       onCreated(g);
     } catch (e) {
@@ -364,7 +388,7 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
                 ? `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`
                 : isBooks
                   ? 'Watch new releases from these authors'
-                  : 'Track works in ANY of these genres'}
+                  : 'Track works in ALL of these genres'}
           </div>
           {isAo3 ? (
             <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
@@ -408,6 +432,22 @@ function TagGroupBuilder({ open, onClose, onCreated }) {
             <TagPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded} placeholder="Search AO3 tags to exclude…" accent="var(--danger, #f5455c)" />
             <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
               Works carrying any excluded tag are left out of your matches.
+            </div>
+          </div>
+        )}
+
+        {!isAo3 && !isBooks && (
+          <div>
+            <div className="section-label" style={{ marginBottom: 8 }}>Exclude genres <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
+            <GenrePicker
+              genres={GENRES_BY_SOURCE[source] || []}
+              label={sourceLabel(source)}
+              picked={excluded}
+              onAdd={addExcluded}
+              onRemove={removeExcluded}
+            />
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
+              Works in any excluded genre are left out of your matches.
             </div>
           </div>
         )}
