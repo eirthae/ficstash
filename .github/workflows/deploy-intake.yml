@@ -37,15 +37,22 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"public":true}' ; echo
 
-          echo "== upload index.html (upsert) =="
+          echo "== delete any existing object (so the new upload sets a fresh mimetype) =="
+          curl -sS -X DELETE "$base/storage/v1/object/intake/index.html" \
+            -H "Authorization: Bearer $SR" -H "apikey: $SR" ; echo
+
+          echo "== upload index.html as text/html =="
           code=$(curl -sS -o /tmp/up.json -w '%{http_code}' -X POST \
             "$base/storage/v1/object/intake/index.html" \
             -H "Authorization: Bearer $SR" -H "apikey: $SR" \
-            -H "Content-Type: text/html; charset=utf-8" \
-            -H "cache-control: 300" -H "x-upsert: true" \
+            -H "Content-Type: text/html" \
+            -H "cache-control: 60" -H "x-upsert: true" \
             --data-binary @intake/index.html)
           echo "HTTP $code"; cat /tmp/up.json; echo
           [ "$code" = "200" ] || { echo "Upload failed"; exit 1; }
+
+          echo "== verify served content-type =="
+          curl -sSI "$base/storage/v1/object/public/intake/index.html" | grep -i "content-type" || true
 
           echo ""
           echo "Done. Open this on any device:"
