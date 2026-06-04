@@ -65,7 +65,7 @@ export function DiscoverScreen({ nav }) {
   };
   const TAG_SHELVES = [
     { id: 'ao3', label: 'AO3' },
-    { id: 'sites', label: 'RR · SH' },
+    { id: 'sites', label: 'Stories' },
     { id: 'books', label: 'Books' },
   ];
   const shelfCount = (id) => tags.filter((t) => shelfMatch[id](t.source)).length;
