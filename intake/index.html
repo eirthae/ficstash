@@ -169,6 +169,11 @@ async function parseTxt(file) {
 
 // Parse + insert one file as a fully-offline uploaded work (matches the app).
 async function uploadFile(file) {
+  // OneDrive / Google Drive "online-only" files hand over an empty placeholder
+  // (no bytes on disk) — give a clear error instead of a vague parse failure.
+  if (!file || file.size === 0) {
+    throw new Error('Empty file — likely a cloud-only file. Make it available offline, then retry.');
+  }
   const ext = extOf(file.name);
   const parsed = ext === 'epub' ? await parseEpub(file) : await parseTxt(file);
   const totalWords = parsed.chapters.reduce((s, c) => s + (c.words || 0), 0);
