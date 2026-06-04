@@ -20,7 +20,7 @@ jobs:
 
       - name: Set up Node
         uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
 
       - name: Install supabase-js
         run: npm init -y >/dev/null 2>&1 && npm i @supabase/supabase-js@2 >/dev/null 2>&1
