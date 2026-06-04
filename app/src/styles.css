@@ -189,14 +189,18 @@ input,textarea { font-family:inherit; }
 .filterpick select { flex:1; min-width:0; border:none; background:transparent; color:var(--text-primary); font-size:13.5px; font-weight:600; outline:none; appearance:none; -webkit-appearance:none; }
 .filterpick select option { color:#000; }
 
-/* Status filter tabs — keep the counts on one line, never wrap to two. */
-.statusseg button { white-space:nowrap; font-size:12px; gap:3px; padding:0 4px; min-width:0; }
+/* Status filter tabs — one line, never wrap. Only the active tab shows its
+   count, and tabs size to their content (not forced equal) so even a 3-digit
+   count on the longest label ("Complete · 999") fits without overflowing. */
+.seg.statusseg { justify-content:space-between; }
+.seg.statusseg button { flex:0 1 auto; white-space:nowrap; font-size:12.5px; gap:3px; padding:0 10px; min-width:0; }
 /* Books "All · N" space-filler, styled like the other row controls. */
 .countpill { display:flex; align-items:center; height:42px; padding:0 14px; background:var(--surface-2); border-radius:var(--radius-md); color:var(--text-primary); font-size:13.5px; font-weight:600; }
 
-/* Sort dropdown (library) — compact icon trigger that opens a menu of options. */
+/* Sort dropdown (library) — compact icon trigger, SAME width as the collapse
+   (up-arrow) button so the two controls match and free space for the tabs. */
 .sortdd { position:relative; flex:none; }
-.sortdd-btn { display:flex; align-items:center; justify-content:center; width:46px; height:42px; background:var(--surface-2); border-radius:var(--radius-md); color:var(--accent); }
+.sortdd-btn { display:flex; align-items:center; justify-content:center; width:40px; height:42px; background:var(--surface-2); border-radius:var(--radius-md); color:var(--accent); }
 .dd-backdrop { position:fixed; inset:0; z-index:40; }
 .sortdd-menu { position:absolute; top:calc(100% + 6px); right:0; z-index:50; min-width:176px; padding:6px; display:flex; flex-direction:column; gap:2px; background:var(--surface-elevated); border:1px solid var(--border); border-radius:var(--radius-md); box-shadow:var(--shadow-pop); }
 .sortdd-menu.left { left:0; right:auto; }

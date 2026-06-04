@@ -210,7 +210,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
         </div>
 
         {(shelfWorks.length > 0 || pending.length > 0) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '0 20px 16px' }}>
             {isBooks ? (
               <>
                 <SortDropdown value={activeSort} options={SORTS} onChange={setSort} align="left" />
@@ -220,9 +220,9 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
             ) : (
               <>
                 <div className="seg statusseg" style={{ flex: 1 }}>
-                  <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {shelfWorks.length}</button>
-                  <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
-                  <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+                  <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All{status === 'all' ? ` · ${shelfWorks.length}` : ''}</button>
+                  <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing{status === 'ongoing' ? ` · ${ongoingCount}` : ''}</button>
+                  <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete{status === 'complete' ? ` · ${completeCount}` : ''}</button>
                 </div>
                 <SortDropdown value={activeSort} options={SORTS} onChange={setSort} align="right" />
                 {collapseBtn}
