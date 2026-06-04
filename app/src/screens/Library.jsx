@@ -51,20 +51,19 @@ function sortWorks(list, sort, lastRead = {}) {
 
 // Sort control — a compact icon button that opens a dropdown of options
 // (icon + label), instead of laying every option out in a row.
-function SortDropdown({ value, options, onChange }) {
+function SortDropdown({ value, options, onChange, align = 'right' }) {
   const [open, setOpen] = useState(false);
   const cur = SORT_OPTS[value] || SORT_OPTS[options[0]];
   return (
     <div className="sortdd">
       <button className="sortdd-btn" onClick={() => setOpen(o => !o)} aria-haspopup="listbox"
         aria-expanded={open} aria-label={`Sort: ${cur.label}`} title={`Sort: ${cur.label}`}>
-        <Icon icon={cur.icon} size={19} />
-        <Icon icon="solar:alt-arrow-down-linear" size={14} color="var(--text-tertiary)" />
+        <Icon icon={cur.icon} size={20} />
       </button>
       {open && (
         <>
           <div className="dd-backdrop" onClick={() => setOpen(false)} />
-          <div className="sortdd-menu" role="listbox">
+          <div className={`sortdd-menu ${align === 'left' ? 'left' : ''}`} role="listbox">
             {options.map(v => (
               <button key={v} role="option" aria-selected={v === value}
                 className={`sortdd-item ${v === value ? 'on' : ''}`}
@@ -157,17 +156,27 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   // Pending (still-downloading) link requests belong to the Stories shelf.
   const pending = shelf === 'stories' ? pendingLinks : [];
 
-  // Books group into named series (manual/auto) when set; otherwise flat.
-  const useSeries = isBooks && shown.some(w => w.seriesName);
+  // Books auto-group by series (manual/EPUB) or, failing that, by author — so
+  // uploads that share a series or author cluster without any manual work.
+  const bookGroups = isBooks ? groupBooks(shown) : [];
+  const useSeries = isBooks && bookGroups.some(g => !g.standalone);
   // Fandom sections only for Fics in Default sort; otherwise a flat sorted list.
   const useFandom = shelf === 'fics' && sort === 'default';
   const fandomNames = useFandom ? [...new Set(shown.map(fandomName))] : [];
-  const anyExpanded = fandomNames.some(n => !collapsed[n]);
-  const showCollapseToggle = useFandom && fandomNames.length > 1 && shown.length > 0;
+  const sectionNames = useFandom ? fandomNames : useSeries ? bookGroups.map(g => g.name) : [];
+  const anyExpanded = sectionNames.some(n => !collapsed[n]);
+  const showCollapseToggle = sectionNames.length > 1 && shown.length > 0;
   const toggleAll = () => {
-    if (anyExpanded) { const all = {}; fandomNames.forEach(n => { all[n] = true; }); setCollapsed(all); }
+    if (anyExpanded) { const all = {}; sectionNames.forEach(n => { all[n] = true; }); setCollapsed(all); }
     else setCollapsed({});
   };
+  const collapseBtn = showCollapseToggle ? (
+    <button className="iconbtn ghost" onClick={toggleAll} aria-label={anyExpanded ? 'Collapse all' : 'Expand all'}
+      title={anyExpanded ? 'Collapse all' : 'Expand all'}
+      style={{ flex: 'none', width: 40, height: 42, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
+      <Icon icon={anyExpanded ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} size={20} />
+    </button>
+  ) : null;
 
   const SORTS = isBooks
     ? ['added', 'title', 'read']
@@ -202,23 +211,22 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
 
         {(shelfWorks.length > 0 || pending.length > 0) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 16px' }}>
-            {!isBooks && (
-              <div className="filterpick" style={{ flex: 1 }}>
-                <select value={status} onChange={e => setStatus(e.target.value)} aria-label="Filter by status">
-                  <option value="all">All · {shelfWorks.length}</option>
-                  <option value="ongoing">Ongoing · {ongoingCount}</option>
-                  <option value="complete">Complete · {completeCount}</option>
-                </select>
-                <Icon icon="solar:alt-arrow-down-linear" size={16} color="var(--text-tertiary)" />
-              </div>
-            )}
-            <SortDropdown value={activeSort} options={SORTS} onChange={setSort} />
-            {showCollapseToggle && (
-              <button className="iconbtn ghost" onClick={toggleAll} aria-label={anyExpanded ? 'Collapse all' : 'Expand all'}
-                title={anyExpanded ? 'Collapse all' : 'Expand all'}
-                style={{ flex: 'none', width: 40, height: 42, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)' }}>
-                <Icon icon={anyExpanded ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} size={20} />
-              </button>
+            {isBooks ? (
+              <>
+                <SortDropdown value={activeSort} options={SORTS} onChange={setSort} align="left" />
+                <div className="countpill" style={{ flex: 1 }}>All · {shelfWorks.length}</div>
+                {collapseBtn}
+              </>
+            ) : (
+              <>
+                <div className="seg statusseg" style={{ flex: 1 }}>
+                  <button className={status === 'all' ? 'on' : ''} onClick={() => setStatus('all')}>All · {shelfWorks.length}</button>
+                  <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing · {ongoingCount}</button>
+                  <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete · {completeCount}</button>
+                </div>
+                <SortDropdown value={activeSort} options={SORTS} onChange={setSort} align="right" />
+                {collapseBtn}
+              </>
             )}
           </div>
         )}
@@ -237,7 +245,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
               desc="Try a different status filter." />
           </div>
         ) : useSeries ? (
-          <SeriesSections works={shown} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
+          <SeriesSections groups={bookGroups} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
         ) : useFandom ? (
           <FandomSections works={shown} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
         ) : (
@@ -290,24 +298,38 @@ function LinkRequestRow({ req, onRemove }) {
   );
 }
 
-// Books grouped into their series (ordered by series_index), with everything
-// ungrouped collected under "Standalone" at the end.
-function SeriesSections({ works, open, onDelete, collapsed, toggle }) {
-  const groups = [];
-  const byName = new Map();
+// Auto-group books: by manual/EPUB series name if set, else by author. A series
+// (even one book) keeps its name; an author cluster needs ≥2 books to form a
+// section — lone books fall into "Standalone". Series order by index; author
+// groups and standalone by title.
+function groupBooks(works) {
+  const byKey = new Map();
+  const ordered = [];
   const standalone = { name: 'Standalone', items: [], standalone: true };
   for (const w of works) {
-    if (!w.seriesName) { standalone.items.push(w); continue; }
-    let g = byName.get(w.seriesName);
-    if (!g) { g = { name: w.seriesName, items: [] }; byName.set(w.seriesName, g); groups.push(g); }
+    const key = (w.seriesName || w.author || '').trim();
+    if (!key) { standalone.items.push(w); continue; }
+    let g = byKey.get(key.toLowerCase());
+    if (!g) { g = { name: w.seriesName || w.author, items: [], series: !!w.seriesName }; byKey.set(key.toLowerCase(), g); ordered.push(g); }
     g.items.push(w);
   }
-  for (const g of groups) {
-    g.items.sort((a, b) => (a.seriesIndex ?? 1e9) - (b.seriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''));
+  const real = [];
+  for (const g of ordered) {
+    if (!g.series && g.items.length < 2) standalone.items.push(...g.items);
+    else real.push(g);
   }
-  groups.sort((a, b) => a.name.localeCompare(b.name));
-  if (standalone.items.length) groups.push(standalone);
+  for (const g of real) {
+    g.items.sort((a, b) => g.series
+      ? ((a.seriesIndex ?? 1e9) - (b.seriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''))
+      : (a.title || '').localeCompare(b.title || ''));
+  }
+  real.sort((a, b) => a.name.localeCompare(b.name));
+  if (standalone.items.length) real.push(standalone);
+  return real;
+}
 
+// Books grouped into their series/author sections (see groupBooks).
+function SeriesSections({ groups, open, onDelete, collapsed, toggle }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '0 20px 24px' }}>
       {groups.map(g => {

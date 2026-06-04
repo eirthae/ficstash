@@ -92,6 +92,21 @@ async function parseEpub(file) {
   const descEl = byTag(opf, 'description')[0];
   const summary = descEl ? descEl.textContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
 
+  // Series metadata so books auto-group: Calibre's <meta name="calibre:series">
+  // / "calibre:series_index", or EPUB3's belongs-to-collection / group-position.
+  const metas = byTag(opf, 'meta');
+  const metaName = (n) => {
+    const el = metas.find(m => (m.getAttribute('name') || '').toLowerCase() === n);
+    return el ? (el.getAttribute('content') || '').trim() : '';
+  };
+  const metaProp = (p) => {
+    const el = metas.find(m => (m.getAttribute('property') || '').toLowerCase() === p);
+    return el ? (el.textContent || '').trim() : '';
+  };
+  const series = metaName('calibre:series') || metaProp('belongs-to-collection');
+  const idxRaw = metaName('calibre:series_index') || metaProp('group-position');
+  const seriesIndex = idxRaw && !Number.isNaN(parseFloat(idxRaw)) ? parseFloat(idxRaw) : null;
+
   const manifest = {}; // id -> { href, type }
   byTag(opf, 'item').forEach(it => {
     const id = it.getAttribute('id');
@@ -117,7 +132,7 @@ async function parseEpub(file) {
     chapters.push({ n, title: headingText(doc) || `Chapter ${n}`, content, words: countWords(content) });
   }
   if (!chapters.length) throw new Error('No readable chapters found in this EPUB.');
-  return { title, author, summary, chapters };
+  return { title, author, summary, series, seriesIndex, chapters };
 }
 
 // ---- HTML -------------------------------------------------------------------
@@ -185,6 +200,9 @@ export async function uploadFile(file) {
     source_updated: now,
     palette: Math.floor(Math.random() * 6),
     offline: true,
+    // Auto series grouping from EPUB metadata (still editable in the app).
+    series_name: parsed.series || null,
+    series_index: parsed.seriesIndex ?? null,
   };
 
   const { data: work, error: workErr } = await supabase.from('works').insert(workRow).select().single();

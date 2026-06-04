@@ -5,7 +5,6 @@ import { Segmented } from '../components/ui.jsx';
 import { fetchOfflineStats } from '../lib/library.js';
 
 export function SettingsScreen({ appMode, setAppMode, nav }) {
-  const [defaultTheme] = useState(localStorage.getItem('fs-reader-theme') || 'dark');
   const [storage, setStorage] = useState(undefined); // undefined=loading, null=unavailable
   useEffect(() => { fetchOfflineStats().then(setStorage).catch(() => setStorage(null)); }, []);
   const storageLine = storage === undefined ? 'Counting…'
@@ -39,16 +38,6 @@ export function SettingsScreen({ appMode, setAppMode, nav }) {
               { value: 'system', label: 'System', icon: 'solar:smartphone-linear' },
             ]} />
           </div>
-        </SetSection>
-
-        <SetSection label="Reading">
-          <button className="set-row pressable" style={{ width: '100%', textAlign: 'left' }}
-            onClick={() => nav.push('reader', { workId: 'w1', chapterN: 1 })}>
-            <div className="set-ic"><Icon icon="solar:book-2-bold" size={18} /></div>
-            <div className="set-tx"><div className="set-h">Default reading theme</div><div className="set-d">Used when you open a work — change live in the reader</div></div>
-            <span style={{ fontSize: 13, color: 'var(--text-secondary)', textTransform: 'capitalize', fontWeight: 600 }}>{defaultTheme}</span>
-            <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
-          </button>
         </SetSection>
 
         <SetSection label="Storage">
