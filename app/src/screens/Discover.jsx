@@ -323,17 +323,23 @@ function SubjectPicker({ picked, onAdd, onRemove, placeholder = 'Type a subject 
 // ---- Builder sheet: pick a source, pick tags/genres → save a group ----------
 const BUILDER_SOURCES = ['ao3', 'royalroad', 'scribblehub', 'books'];
 
-function TagGroupBuilder({ open, onClose, onCreated }) {
-  const [source, setSource] = useState('ao3');
+export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3', initialTags = [] }) {
+  const [source, setSource] = useState(initialSource);
   const [picked, setPicked] = useState([]);
   const [excluded, setExcluded] = useState([]);
   const [matchMode, setMatchMode] = useState('all');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  // Seed source + included tag(s) each time it opens — lets a story's detail
+  // page open this pre-filled with the tapped tag and the right source.
   useEffect(() => {
-    if (open) { setSource('ao3'); setPicked([]); setExcluded([]); setMatchMode('all'); setErr(''); }
-  }, [open]);
+    if (open) {
+      setSource(initialSource || 'ao3');
+      setPicked(initialTags || []);
+      setExcluded([]); setMatchMode('all'); setErr('');
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Switching source clears picks — AO3 tags and RR genres aren't interchangeable.
   const changeSource = (s) => { setSource(s); setPicked([]); setExcluded([]); setMatchMode('all'); setErr(''); };

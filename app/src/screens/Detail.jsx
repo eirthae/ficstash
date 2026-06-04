@@ -5,7 +5,8 @@ import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
 import { fetchChapters, removeWork, updateWorkFields } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
-import { requestSave, createGroup, addTagToGroup, fetchTrackedGroups } from '../lib/tags.js';
+import { requestSave } from '../lib/tags.js';
+import { TagGroupBuilder } from './Discover.jsx';
 import { kickSync } from '../lib/sync.js';
 import { workUrl, sourceLabel } from '../sources/index.js';
 
@@ -14,6 +15,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
   const total = work.chaptersTotal || work.chapters || 1;
   const srcLabel = sourceLabel(work.source);
   const isBook = (work.origin || '') === 'upload';
+  // Which builder source a tapped tag should open: uploaded books track Open
+  // Library subjects; AO3/RR/SH pass through; anything else falls back to AO3.
+  const TRACK_SOURCES = ['ao3', 'royalroad', 'scribblehub', 'books'];
+  const builderSource = isBook ? 'books' : (TRACK_SOURCES.includes(work.source) ? work.source : 'ao3');
   // Editable Books fields (rename / series / external link). Seeded from the
   // work and updated in place so the detail view reflects edits immediately.
   const [meta, setMeta] = useState({
@@ -84,32 +89,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
       setSavingEdit(false);
     }
   };
-  // Tappable tags → "track this tag" / "add to a group". `tagSheet` holds the
-  // tapped tag ({name, kind}); groups are this source's existing tracked groups.
-  const [tagSheet, setTagSheet] = useState(null);
-  const [groups, setGroups] = useState([]);
-  useEffect(() => {
-    let alive = true;
-    fetchTrackedGroups()
-      .then(gs => { if (alive) setGroups((gs || []).filter(g => (g.source || 'ao3') === work.source && g.kind !== 'language')); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [work.source]);
-
-  const trackTag = async (tag) => {
-    try {
-      if (hasSupabase) await createGroup({ tags: [{ name: tag.name, kind: tag.kind }], source: work.source });
-      showToast(`Tracking “${tag.name}”`, 'solar:check-circle-bold');
-    } catch { showToast("Couldn't track tag — try again", 'solar:danger-triangle-linear'); }
-    setTagSheet(null);
-  };
-  const addToGroup = async (tag, group) => {
-    try {
-      if (hasSupabase) await addTagToGroup(group.id, { name: tag.name, kind: tag.kind });
-      showToast(`Added to “${group.name}”`, 'solar:check-circle-bold');
-    } catch { showToast("Couldn't add to group — try again", 'solar:danger-triangle-linear'); }
-    setTagSheet(null);
-  };
+  // Tapping a tag opens the full tracker builder, pre-filled with that tag and
+  // this story's source (AO3 tag → AO3 builder, Scribble Hub → SH, …), so the
+  // user can add include/exclude tags and hit Follow. `tagBuilder` = tapped tag.
+  const [tagBuilder, setTagBuilder] = useState(null);
 
   const fetchCh = (ch) => {
     if (chState[ch.n] === 'done' || chState[ch.n] === 'busy') return;
@@ -245,12 +228,12 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
 
           <div className="chiprow" style={{ marginBottom: 10 }}>
             <TagChip t={work.fandom.split('–')[0].trim()} k="fandom"
-              onClick={() => setTagSheet({ name: work.fandom.split('–')[0].trim(), kind: 'fandom' })} />
+              onClick={() => setTagBuilder({ name: work.fandom.split('–')[0].trim(), id: '', kind: 'fandom' })} />
             {(work.tags || []).map((t, i) => (
-              <TagChip key={i} t={t.t} k={t.k} onClick={() => setTagSheet({ name: t.t, kind: t.k })} />
+              <TagChip key={i} t={t.t} k={t.k} onClick={() => setTagBuilder({ name: t.t, id: '', kind: t.k })} />
             ))}
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 22 }}>Tap a tag to track it or add it to a group.</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 22 }}>Tap a tag to follow it — refine with include/exclude, then track.</div>
 
           {canOpenAtSource && (
             <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 22 }}
@@ -318,35 +301,13 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
         </button>
       </Sheet>
 
-      <Sheet open={!!tagSheet} onClose={() => setTagSheet(null)} title={tagSheet ? tagSheet.name : ''}>
-        <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)', marginBottom: 12 }}>Track new {srcLabel} works carrying this tag.</div>
-        <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 10 }}
-          onClick={() => trackTag(tagSheet)}>
-          <div className="set-ic" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon icon="solar:add-circle-bold" size={18} /></div>
-          <div style={{ flex: 1 }}>
-            <div className="set-h">Track this tag</div>
-            <div className="set-d">Starts a new tracked tag — matches show up in What’s New.</div>
-          </div>
-        </button>
-        {groups.length > 0 && (
-          <>
-            <div className="section-label" style={{ margin: '6px 2px 8px' }}>Add to a group</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {groups.map(g => (
-                <button key={g.id} className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 12, width: '100%', textAlign: 'left' }}
-                  onClick={() => addToGroup(tagSheet, g)}>
-                  <div className="set-ic"><Icon icon="solar:layers-minimalistic-linear" size={18} /></div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="set-h" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</div>
-                    <div className="set-d">{g.names.length} tag{g.names.length === 1 ? '' : 's'} · {g.matchMode === 'all' ? 'match all' : 'match any'}</div>
-                  </div>
-                  <Icon icon="solar:add-circle-linear" size={18} color="var(--text-tertiary)" />
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </Sheet>
+      <TagGroupBuilder
+        open={!!tagBuilder}
+        initialSource={builderSource}
+        initialTags={tagBuilder ? [tagBuilder] : []}
+        onClose={() => setTagBuilder(null)}
+        onCreated={(g) => { setTagBuilder(null); showToast(`Now tracking “${g.name}”`, 'solar:check-circle-bold'); }}
+      />
 
       <EditDetailsSheet open={showEdit} onClose={() => setShowEdit(false)} isBook={isBook}
         initial={meta} placeholderTitle={work.title} saving={savingEdit} onSave={saveEdit} />
