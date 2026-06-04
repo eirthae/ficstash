@@ -1,9 +1,12 @@
-"""Add-a-work-by-link source — powered by FanFicFare.
+"""Add-a-work-by-link source — FanFicFare, with a generic article fallback.
 
 The user pastes a story URL in the app (Royal Road, Scribble Hub, FFN,
 SpaceBattles, …); the worker downloads a full offline copy here. FanFicFare
-already supports hundreds of sites and maps each to chapter HTML, so we lean on
-it instead of writing a scraper per site.
+already supports hundreds of fiction sites and maps each to chapter HTML, so we
+lean on it first. When FanFicFare doesn't recognise the host (e.g. a personal
+blog or a news site hosting a single story — armcon.am and the like), we fall
+back to a generic readability-style extractor (trafilatura) that pulls the main
+article text as a single chapter. So *any* readable URL becomes an offline copy.
 
 Politeness: like the AO3 path, the caller fetches one chapter at a time and
 spaces requests itself (the worker's `space()`), so we never hammer a site.
@@ -14,6 +17,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from urllib.parse import urlparse
 
 import fanficfare
 import fanficfare.adapters as adapters
@@ -26,6 +31,13 @@ _DEFAULTS_INI = os.path.join(os.path.dirname(fanficfare.__file__), "defaults.ini
 
 # FanFicFare is chatty at DEBUG; keep the worker's logs readable.
 logging.getLogger("fanficfare").setLevel(logging.WARNING)
+
+_UA = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
+}
 
 # FanFicFare reports the host (e.g. "www.royalroad.com"); we want a short source
 # id that matches the app's source registry where one exists.
@@ -69,6 +81,8 @@ class LinkFetcher:
         # Reuse one adapter per url between prepare() and fetch_chapter() so the
         # metadata request isn't repeated for every chapter.
         self._adapters: dict[str, object] = {}
+        # url -> extracted article HTML, for the generic (non-FanFicFare) path.
+        self._generic: dict[str, str] = {}
 
     def _build_adapter(self, url: str):
         try:
@@ -88,9 +102,13 @@ class LinkFetcher:
         """Fetch metadata (one request) and return (WorkMeta, chapter list).
 
         The chapter list is FanFicFare's [{title,url}, …]; pass each entry's
-        index to fetch_chapter(). Raises UnsupportedSite for unknown URLs.
+        index to fetch_chapter(). For a host FanFicFare doesn't know, falls back
+        to a generic single-article extraction instead of failing.
         """
-        adapter = self._build_adapter(url)
+        try:
+            adapter = self._build_adapter(url)
+        except UnsupportedSite:
+            return self._prepare_generic(url)
         adapter.getStoryMetadataOnly(get_cover=False)
         story = adapter.story
 
@@ -167,11 +185,97 @@ class LinkFetcher:
 
     def fetch_chapter(self, url: str, index: int, chapter: dict) -> Chapter:
         """Fetch one chapter's HTML body (one request). `index` is 0-based."""
-        adapter = self._adapters.get(url)
-        if adapter is None:
-            self.prepare(url)  # rebuild metadata + cache the adapter
-            adapter = self._adapters[url]
+        title = (chapter.get("title") if isinstance(chapter, dict) else "") or ""
+        # Generic single-article works keep their body from prepare().
+        if url in self._generic:
+            return Chapter(n=index + 1, title=title, words=0, html=self._generic[url])
+        if url not in self._adapters and url not in self._generic:
+            self.prepare(url)  # rebuild metadata + cache the adapter/body
+            if url in self._generic:
+                return Chapter(n=index + 1, title=title, words=0, html=self._generic[url])
+        adapter = self._adapters[url]
         chap_url = chapter.get("url") if isinstance(chapter, dict) else None
         html = adapter.getChapterTextNum(chap_url, index) if chap_url else ""
-        title = (chapter.get("title") if isinstance(chapter, dict) else "") or ""
         return Chapter(n=index + 1, title=title, words=0, html=html or "")
+
+    # ---- generic article fallback (non-FanFicFare hosts) -------------------
+    def _prepare_generic(self, url: str) -> tuple[WorkMeta, list[dict]]:
+        """Extract the main article from an arbitrary page as a one-chapter work.
+
+        Uses trafilatura (readability-style) which copes with non-Latin scripts
+        like Armenian. Raises UnsupportedSite if no article text can be pulled.
+        """
+        try:
+            import trafilatura
+        except Exception as exc:  # noqa: BLE001
+            raise UnsupportedSite("generic extractor unavailable") from exc
+
+        downloaded = None
+        try:
+            downloaded = trafilatura.fetch_url(url)
+        except Exception:  # noqa: BLE001
+            downloaded = None
+        if not downloaded:
+            try:
+                import requests
+
+                resp = requests.get(url, headers=_UA, timeout=30)
+                resp.raise_for_status()
+                downloaded = resp.text
+            except Exception as exc:  # noqa: BLE001
+                raise UnsupportedSite(f"could not fetch {url}") from exc
+
+        body = trafilatura.extract(
+            downloaded, output_format="html", include_comments=False,
+            include_images=False, favor_recall=True,
+        )
+        if not body or not body.strip():
+            raise UnsupportedSite(f"no article text found at {url}")
+
+        text = trafilatura.extract(downloaded) or ""
+        md = None
+        try:
+            md = trafilatura.extract_metadata(downloaded)
+        except Exception:  # noqa: BLE001
+            md = None
+        title = (getattr(md, "title", "") or "") or _html_title(downloaded) or url
+        author = getattr(md, "author", "") or ""
+        date = getattr(md, "date", "") or None
+        host = urlparse(url).netloc
+        wm = WorkMeta(
+            source=_source_id(host),
+            source_work_id=url,
+            title=title.strip()[:300] or "Untitled",
+            author=(author or "").strip(),
+            summary=(text.strip()[:280] + ("…" if len(text) > 280 else "")),
+            tags=[{"t": "Web", "k": "freeform"}],
+            language=_detect_language(text),
+            words=len(text.split()),
+            chapters=1,
+            chapters_total=1,
+            status="complete",
+            updated=date,
+            url=url,
+        )
+        self._generic[url] = body
+        return wm, [{"title": title.strip()[:300] or "Untitled", "url": url}]
+
+
+def _html_title(html: str) -> str:
+    m = re.search(r"<title[^>]*>(.*?)</title>", html or "", re.I | re.S)
+    return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
+
+
+def _detect_language(text: str) -> str:
+    """Best-effort native-script language name from the dominant script."""
+    if not text:
+        return ""
+    sample = text[:2000]
+    counts = {
+        "Հայերեն": sum(1 for c in sample if "԰" <= c <= "֏"),  # Armenian
+        "Русский": sum(1 for c in sample if "Ѐ" <= c <= "ӿ"),  # Cyrillic
+        "日本語": sum(1 for c in sample if "぀" <= c <= "ヿ" or "一" <= c <= "鿿"),
+        "한국어": sum(1 for c in sample if "가" <= c <= "힣"),
+    }
+    top = max(counts, key=counts.get)
+    return top if counts[top] >= 12 else "English"

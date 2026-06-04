@@ -13,3 +13,7 @@ supabase>=2.4.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 python-dotenv>=1.0.0
+
+# Generic article extractor — fallback for add-by-link hosts FanFicFare doesn't
+# support (personal blogs, news sites, etc.). Handles non-Latin scripts.
+trafilatura>=1.8.0
