@@ -38,7 +38,7 @@ function sortWorks(list, sort) {
 }
 
 export function LibraryScreen({ works, layout = 'fandom', connected = true, onRemove, onReload, refreshKey, nav }) {
-  const open = (w) => nav.push('detail', { work: w, onRemoved: onRemove });
+  const open = (w) => nav.push('detail', { work: w, onRemoved: onRemove, onReload });
   const [toast, showToast] = useToast();
   const [syncing, setSyncing] = useState(false);
   const [shelf, setShelf] = useState('fics');
@@ -113,6 +113,8 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   // Pending (still-downloading) link requests belong to the Stories shelf.
   const pending = shelf === 'stories' ? pendingLinks : [];
 
+  // Books group into named series (manual/auto) when set; otherwise flat.
+  const useSeries = isBooks && shown.some(w => w.seriesName);
   // Fandom sections only for Fics in Default sort; otherwise a flat sorted list.
   const useFandom = shelf === 'fics' && sort === 'default';
   const fandomNames = useFandom ? [...new Set(shown.map(fandomName))] : [];
@@ -192,6 +194,8 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
             <EmptyState icon="solar:inbox-line-linear" title="Nothing under this filter"
               desc="Try a different status filter." />
           </div>
+        ) : useSeries ? (
+          <SeriesSections works={shown} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
         ) : useFandom ? (
           <FandomSections works={shown} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
         ) : (
@@ -240,6 +244,48 @@ function LinkRequestRow({ req, onRemove }) {
           <Icon icon="solar:trash-bin-trash-linear" size={18} />
         </button>
       )}
+    </div>
+  );
+}
+
+// Books grouped into their series (ordered by series_index), with everything
+// ungrouped collected under "Standalone" at the end.
+function SeriesSections({ works, open, onDelete, collapsed, toggle }) {
+  const groups = [];
+  const byName = new Map();
+  const standalone = { name: 'Standalone', items: [], standalone: true };
+  for (const w of works) {
+    if (!w.seriesName) { standalone.items.push(w); continue; }
+    let g = byName.get(w.seriesName);
+    if (!g) { g = { name: w.seriesName, items: [] }; byName.set(w.seriesName, g); groups.push(g); }
+    g.items.push(w);
+  }
+  for (const g of groups) {
+    g.items.sort((a, b) => (a.seriesIndex ?? 1e9) - (b.seriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''));
+  }
+  groups.sort((a, b) => a.name.localeCompare(b.name));
+  if (standalone.items.length) groups.push(standalone);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '0 20px 24px' }}>
+      {groups.map(g => {
+        const isOpen = !collapsed[g.name];
+        return (
+          <div key={g.name}>
+            <button className="fandom-head pressable" onClick={() => toggle(g.name)} aria-expanded={isOpen}>
+              <Icon icon="solar:alt-arrow-down-linear" size={18}
+                style={{ transition: 'transform .18s', transform: isOpen ? 'none' : 'rotate(-90deg)' }} />
+              <span className="fandom-name">{g.standalone ? g.name : `📚 ${g.name}`}</span>
+              <span className="fandom-count">{g.items.length}</span>
+            </button>
+            {isOpen && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 13, paddingTop: 11 }}>
+                {g.items.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => onDelete(w)} />)}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

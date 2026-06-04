@@ -127,7 +127,7 @@ export default function App() {
   };
   const renderTop = () => {
     const n = nav.current, p = top.props || {};
-    if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} nav={n} />;
+    if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} onReload={p.onReload} nav={n} />;
     if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={setReaderSettings} nav={n} />;
     if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
     if (top.screen === 'later') return <LaterScreen onLeave={p.onLeave} nav={n} />;

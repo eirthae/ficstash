@@ -14,7 +14,7 @@ export function LibraryCard({ work, onOpen, onDelete }) {
         </button>
       )}
       <div className="meta">
-        <div className="story-title" style={{ marginBottom: 2, paddingRight: onDelete ? 30 : 0 }}>{work.title}</div>
+        <div className="story-title" style={{ marginBottom: 2, paddingRight: onDelete ? 30 : 0 }}>{work.customTitle || work.title}</div>
         <div className="story-sub" style={{ marginBottom: 7 }}>by {work.author}</div>
         <div className="chiprow" style={{ marginBottom: 8 }}>
           {work.frozen ? <FrozenBadge /> : <StatusBadge status={work.status} updated={work.updated} />}

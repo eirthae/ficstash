@@ -12,6 +12,10 @@ function mapWork(row) {
     createdAt: row.created_at,        // when it entered the library (for "Last added")
     sourceUpdated: row.source_updated, // real last-updated time (for "Last updated")
     title: row.title,
+    customTitle: row.custom_title || '',  // user rename override (Books)
+    seriesName: row.series_name || '',    // manual/auto series grouping (Books)
+    seriesIndex: row.series_index,        // reading order within the series
+    externalUrl: row.external_url || '',  // user-set open-at-source link
     author: row.author,
     fandom: row.fandom,
     pairing: row.pairing,
@@ -67,6 +71,19 @@ export async function removeWork(workId) {
     .from('works')
     .update({ hidden: true })
     .eq('id', workId);
+  if (error) throw error;
+}
+
+// Edit Books-shelf fields the app owns: custom title (rename), series name +
+// reading-order index (manual grouping), and an external "open at source" link.
+// Only these columns are writable here; pass undefined to leave one unchanged.
+export async function updateWorkFields(workId, fields) {
+  if (!hasSupabase) return;
+  const allowed = ['custom_title', 'series_name', 'series_index', 'external_url'];
+  const patch = {};
+  for (const k of allowed) if (fields[k] !== undefined) patch[k] = fields[k];
+  if (!Object.keys(patch).length) return;
+  const { error } = await supabase.from('works').update(patch).eq('id', workId);
   if (error) throw error;
 }
 

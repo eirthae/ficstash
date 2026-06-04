@@ -3,27 +3,38 @@ import Icon from '../components/Icon.jsx';
 import { StatusBadge, FrozenBadge, TagChip, fmtWords, useToast, Sheet } from '../components/ui.jsx';
 import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
-import { fetchChapters, removeWork } from '../lib/library.js';
+import { fetchChapters, removeWork, updateWorkFields } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave, createGroup, addTagToGroup, fetchTrackedGroups } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 import { workUrl, sourceLabel } from '../sources/index.js';
 
-export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav }) {
+export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onReload, nav }) {
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
   const total = work.chaptersTotal || work.chapters || 1;
   const srcLabel = sourceLabel(work.source);
+  const isBook = (work.origin || '') === 'upload';
+  // Editable Books fields (rename / series / external link). Seeded from the
+  // work and updated in place so the detail view reflects edits immediately.
+  const [meta, setMeta] = useState({
+    customTitle: work.customTitle || '',
+    seriesName: work.seriesName || '',
+    seriesIndex: work.seriesIndex ?? '',
+    externalUrl: work.externalUrl || '',
+  });
+  const displayTitle = meta.customTitle || work.title;
+
   // Uploaded works (and anything without a resolvable link) have no site to open
-  // back to — hide the "Open at source" affordances for them. AO3 works that are
-  // missing a stored work id/url fall back to an AO3 title search so there's
-  // always a way to find the work at the source.
+  // back to — hide the "Open at source" affordances for them. A user-set
+  // external link wins (e.g. a Goodreads/series page); AO3 works missing a
+  // stored work id/url fall back to an AO3 title search.
   const directUrl = workUrl(work.source, work.sourceWorkId, work.sourceUrl);
-  const searchFallback = !directUrl && work.source === 'ao3' && work.title
+  const searchFallback = !directUrl && !meta.externalUrl && work.source === 'ao3' && work.title
     ? `https://archiveofourown.org/works/search?work_search%5Bquery%5D=${encodeURIComponent(work.title)}`
     : '';
-  const sourceUrl = directUrl || searchFallback;
+  const sourceUrl = meta.externalUrl || directUrl || searchFallback;
   const canOpenAtSource = !!sourceUrl;
-  const openLabel = searchFallback ? `Find on ${srcLabel}` : `Open on ${srcLabel}`;
+  const openLabel = meta.externalUrl ? 'Open link' : searchFallback ? `Find on ${srcLabel}` : `Open on ${srcLabel}`;
 
   // Real downloaded chapters for this work. When connected to Supabase we show
   // only real data — an empty list means nothing's been downloaded yet. The
@@ -50,6 +61,29 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
   const [toast, showToast] = useToast();
   const [showMenu, setShowMenu] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const saveEdit = async (next) => {
+    setSavingEdit(true);
+    try {
+      const idx = next.seriesIndex === '' || next.seriesIndex == null ? null : Number(next.seriesIndex);
+      await updateWorkFields(work.id, {
+        custom_title: next.customTitle.trim() || null,
+        series_name: next.seriesName.trim() || null,
+        series_index: Number.isFinite(idx) ? idx : null,
+        external_url: next.externalUrl.trim() || null,
+      });
+      setMeta(next);
+      setShowEdit(false);
+      onReload?.();
+      showToast('Saved', 'solar:check-circle-bold');
+    } catch {
+      showToast("Couldn't save — try again", 'solar:danger-triangle-linear');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
   // Tappable tags → "track this tag" / "add to a group". `tagSheet` holds the
   // tapped tag ({name, kind}); groups are this source's existing tracked groups.
   const [tagSheet, setTagSheet] = useState(null);
@@ -146,7 +180,8 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
         <div style={{ padding: '48px 20px 0' }}>
           <div style={{ minWidth: 0, paddingBottom: 4 }}>
             <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: '#fff', opacity: .9, marginBottom: 6 }}>{work.fandom.split('–')[0].trim()}</div>
-            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, lineHeight: 1.12, color: '#fff', marginBottom: 6 }}>{work.title}</div>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, lineHeight: 1.12, color: '#fff', marginBottom: 6 }}>{displayTitle}</div>
+            {isBook && meta.seriesName && <div style={{ fontSize: 12, color: 'rgba(255,255,255,.8)', marginBottom: 4 }}>📚 {meta.seriesName}{meta.seriesIndex !== '' && meta.seriesIndex != null ? ` · #${meta.seriesIndex}` : ''}</div>}
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,.85)', fontWeight: 500 }}>by {work.author}</div>
           </div>
         </div>
@@ -263,6 +298,16 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
             </div>
           </button>
         )}
+        {!suggestion && (
+          <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 10 }}
+            onClick={() => { setShowMenu(false); setShowEdit(true); }}>
+            <div className="set-ic"><Icon icon="solar:pen-2-linear" size={18} /></div>
+            <div style={{ flex: 1 }}>
+              <div className="set-h">Edit details</div>
+              <div className="set-d">{isBook ? 'Rename, set a series & reading order, add a link.' : 'Rename or add a custom link.'}</div>
+            </div>
+          </button>
+        )}
         <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left' }}
           onClick={remove} disabled={removing}>
           <div className="set-ic" style={{ color: 'var(--danger)' }}><Icon icon="solar:trash-bin-trash-linear" size={18} /></div>
@@ -302,6 +347,65 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, nav })
           </>
         )}
       </Sheet>
+
+      <EditDetailsSheet open={showEdit} onClose={() => setShowEdit(false)} isBook={isBook}
+        initial={meta} placeholderTitle={work.title} saving={savingEdit} onSave={saveEdit} />
     </div>
+  );
+}
+
+// Edit a work's display title, series grouping (Books), and external link.
+function EditDetailsSheet({ open, onClose, isBook, initial, placeholderTitle, saving, onSave }) {
+  const [form, setForm] = useState(initial);
+  useEffect(() => { if (open) setForm(initial); }, [open]); // reseed on open
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const field = { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 };
+  const label = { fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Edit details">
+      <div style={field}>
+        <label style={label}>Title</label>
+        <div className="searchfield" style={{ background: 'var(--surface-2)' }}>
+          <input placeholder={placeholderTitle} value={form.customTitle}
+            onChange={e => set('customTitle', e.target.value)} />
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Leave blank to keep the original title.</div>
+      </div>
+
+      {isBook && (
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ ...field, flex: 1 }}>
+            <label style={label}>Series</label>
+            <div className="searchfield" style={{ background: 'var(--surface-2)' }}>
+              <input placeholder="e.g. Mistborn" value={form.seriesName}
+                onChange={e => set('seriesName', e.target.value)} />
+            </div>
+          </div>
+          <div style={{ ...field, width: 92 }}>
+            <label style={label}>Order #</label>
+            <div className="searchfield" style={{ background: 'var(--surface-2)' }}>
+              <input inputMode="decimal" placeholder="1" value={form.seriesIndex}
+                onChange={e => set('seriesIndex', e.target.value)} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={field}>
+        <label style={label}>External link <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></label>
+        <div className="searchfield" style={{ background: 'var(--surface-2)' }}>
+          <Icon icon="solar:link-linear" size={18} color="var(--text-tertiary)" />
+          <input placeholder="https://www.goodreads.com/…" value={form.externalUrl}
+            onChange={e => set('externalUrl', e.target.value)}
+            autoCapitalize="off" autoCorrect="off" spellCheck={false} inputMode="url" />
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>A Goodreads / series page — opens from “Open at source”.</div>
+      </div>
+
+      <button className="btn btn-lg btn-primary" style={{ width: '100%' }} disabled={saving} onClick={() => onSave(form)}>
+        {saving ? 'Saving…' : <><Icon icon="solar:check-circle-bold" size={18} /> Save</>}
+      </button>
+    </Sheet>
   );
 }
