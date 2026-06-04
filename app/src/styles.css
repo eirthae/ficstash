@@ -166,9 +166,14 @@ input,textarea { font-family:inherit; }
 .navitem.active .navicon { transform:translateY(-1px); }
 .navitem .dot { position:absolute; top:6px; right:50%; margin-right:-16px; width:7px; height:7px; border-radius:50%; background:var(--danger); border:1.5px solid var(--surface-elevated); }
 
-/* Centered half-floating + button (Add menu) */
-.navfab { flex:none; align-self:center; width:56px; height:56px; margin:-20px 10px 0; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; background:linear-gradient(150deg,#7828c8,#006fee); box-shadow:var(--shadow-pop); transition:transform .22s ease; }
-.navfab.open { transform:rotate(45deg); }
+/* Add (+) nav item — same size/shape as the others, but the plus glyph is
+   filled with the brand gradient (via a mask) and rotates when the menu is open. */
+.fab-plus { display:block; width:26px; height:26px; transition:transform .22s ease;
+  background:linear-gradient(150deg,#7828c8,#006fee);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 4a1.6 1.6 0 0 1 1.6 1.6V10.4H18.4a1.6 1.6 0 1 1 0 3.2H13.6V18.4a1.6 1.6 0 1 1-3.2 0V13.6H5.6a1.6 1.6 0 1 1 0-3.2H10.4V5.6A1.6 1.6 0 0 1 12 4Z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 4a1.6 1.6 0 0 1 1.6 1.6V10.4H18.4a1.6 1.6 0 1 1 0 3.2H13.6V18.4a1.6 1.6 0 1 1-3.2 0V13.6H5.6a1.6 1.6 0 1 1 0-3.2H10.4V5.6A1.6 1.6 0 0 1 12 4Z'/%3E%3C/svg%3E") center/contain no-repeat; }
+.navadd.active .fab-plus { transform:rotate(45deg); }
+.navadd .navlabel { background:linear-gradient(150deg,#7828c8,#006fee); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
 .add-popout { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(80px + env(safe-area-inset-bottom)); z-index:60; display:flex; flex-direction:column; gap:10px; width:min(360px, calc(100vw - 36px)); animation:popUp .18s ease; }
 .add-opt { display:flex; align-items:center; gap:13px; padding:13px 15px; background:var(--surface-elevated); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow-pop); text-align:left; width:100%; }
 .add-opt-ic { width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex:none; }

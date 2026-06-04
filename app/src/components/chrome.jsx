@@ -52,8 +52,9 @@ export function BottomNav({ active, onTab, onAdd, addActive }) {
   return (
     <div className="bottomnav">
       {left.map(renderTab)}
-      <button className={`navfab ${addActive ? 'open' : ''}`} onClick={onAdd} aria-label="Add to library" aria-expanded={!!addActive}>
-        <Icon icon="solar:add-circle-bold" size={30} />
+      <button className={`navitem navadd ${addActive ? 'active' : ''}`} onClick={onAdd} aria-label="Add to library" aria-expanded={!!addActive}>
+        <span className="navicon"><span className="fab-plus" /></span>
+        <span className="navlabel">Add</span>
       </button>
       {right.map(renderTab)}
     </div>
