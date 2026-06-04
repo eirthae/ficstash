@@ -39,7 +39,10 @@ jobs:
             const { error: be } = await sb.storage.createBucket('intake', { public: true });
             if (be && !/exist/i.test(be.message)) { console.error('createBucket:', be.message); }
             await sb.storage.updateBucket('intake', { public: true }).catch(() => {});
-            // upload as text/html (the contentType option is what makes it render)
+            // Remove the existing object FIRST: upsert keeps the old object's
+            // mimetype (it was stuck as text/plain). A fresh upload with the
+            // contentType option then sets text/html so the page renders.
+            await sb.storage.from('intake').remove(['index.html']).catch(() => {});
             const body = fs.readFileSync('intake/index.html');
             const { error } = await sb.storage.from('intake').upload('index.html', body, {
               contentType: 'text/html; charset=utf-8', upsert: true, cacheControl: '60',
