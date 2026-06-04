@@ -340,42 +340,73 @@ class AO3Source(Source):
 
     # ---- language discovery ------------------------------------------------
     def search_language(
-        self, language: str, limit: int = 30, since: datetime | None = None
+        self,
+        language: str,
+        limit: int | None = None,
+        since: datetime | None = None,
+        max_pages: int = 40,
     ) -> list[WorkMeta]:
-        """Find recent works in one AO3 language (newest first, metadata only).
+        """Find works in one AO3 language (newest first, metadata only).
 
         `language` is AO3's language_id code (e.g. "hy" Armenian, "ja" Japanese).
-        `since` constrains results to works revised on/after that moment, so a run
-        only surfaces works new since the last sync (None = all-time). Mirrors
-        search_group so language browsing feeds the same match flow.
+        Unlike a tag group (where each sync only wants the newest matches), a
+        language *browse* should surface the WHOLE catalogue in that language, so
+        this walks every result page until one comes back empty — bounded by
+        `max_pages` as a safety cap, and spaced by RATE_LIMIT_SECONDS to stay
+        polite. `since` (None on a first/all-time run) still scopes incremental
+        runs to works added since the last sync; `limit` None means "all".
         """
         language = (language or "").strip()
         if not language:
             return []
         revised = _revised_since(since)
         s = self._require_session()
-        try:
+
+        def _make_search(page: int):
             try:
-                search = AO3.Search(
+                return AO3.Search(
                     language=language,
                     revised_at=revised,
                     sort_column="created_at",
+                    page=page,
                     session=s,
                 )
             except TypeError:
-                search = AO3.Search(language=language, session=s)
-            search.update()
-        except Exception as exc:  # noqa: BLE001
-            if _is_rate_limited(exc):
-                raise RateLimitError(str(exc)) from exc
-            raise
+                # Older ao3-api: no revised_at/sort_column/page kwargs.
+                try:
+                    srch = AO3.Search(language=language, session=s)
+                except TypeError:
+                    srch = AO3.Search(language=language)
+                try:
+                    srch.page = page
+                except Exception:  # noqa: BLE001
+                    pass
+                return srch
 
         out: dict[str, WorkMeta] = {}
-        for w in (getattr(search, "results", None) or [])[:limit]:
-            wid = str(getattr(w, "id", "") or "")
-            if wid and wid not in out:
-                out[wid] = _work_to_meta(self.id, wid, w)
-        return list(out.values())[:limit]
+        for page in range(1, max_pages + 1):
+            try:
+                search = _make_search(page)
+                search.update()
+            except Exception as exc:  # noqa: BLE001
+                if _is_rate_limited(exc):
+                    raise RateLimitError(str(exc)) from exc
+                raise
+            results = getattr(search, "results", None) or []
+            if not results:
+                break  # walked past the last page — done.
+            for w in results:
+                wid = str(getattr(w, "id", "") or "")
+                if wid and wid not in out:
+                    out[wid] = _work_to_meta(self.id, wid, w)
+            if limit and len(out) >= limit:
+                break
+            # Stop once we've clearly reached the tail (a short final page).
+            if len(results) < 15:
+                break
+            time.sleep(RATE_LIMIT_SECONDS)  # be kind between pages
+        works = list(out.values())
+        return works[:limit] if limit else works
 
     def _run_tag_search(
         self, tags_csv: str, limit: int, excluded_tags: str = "", revised_at: str = ""

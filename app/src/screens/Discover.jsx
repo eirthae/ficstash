@@ -148,7 +148,7 @@ export function DiscoverScreen({ nav }) {
           </div>
         )}
 
-        {groups !== null && (
+        {groups !== null && tagShelf === 'ao3' && (
           <>
             <div className="section-label" style={{ marginTop: 26, marginBottom: 12 }}>Browse by language</div>
             <div className="tilegrid">
