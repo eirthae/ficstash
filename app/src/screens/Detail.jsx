@@ -116,7 +116,7 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
       kickSync();
       onSaved?.();
       showToast(ongoing
-        ? 'Saved — downloading; subscribe on AO3 for new chapters'
+        ? 'Saved — downloading; new chapters arrive on each sync'
         : 'Saved — starting download', 'solar:check-circle-bold');
     } catch {
       setSaveState('idle');
@@ -208,7 +208,7 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
               style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--info-soft)', marginBottom: 18, width: '100%', textAlign: 'left', border: 'none' }}>
               <Icon icon="solar:bell-bold" size={20} color="var(--info)" style={{ flexShrink: 0, marginTop: 1 }} />
               <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-                <b style={{ color: 'var(--text-primary)' }}>This work is still updating.</b> Saving downloads everything posted so far — subscribe on AO3 and each sync will pull in new chapters as they go up.
+                <b style={{ color: 'var(--text-primary)' }}>This work is still updating.</b> Saving downloads everything posted so far, and FicStash re-checks it on every sync — new chapters download automatically as they go up.
               </div>
               <Icon icon="solar:arrow-right-up-linear" size={18} color="var(--text-tertiary)" style={{ flexShrink: 0, alignSelf: 'center' }} />
             </button>

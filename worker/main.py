@@ -61,6 +61,7 @@ from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_non_offline_works,
+    fetch_ongoing_offline_works,
     fetch_plaintext_chapter_works,
     fetch_requested_urls,
     fetch_tracked_groups,
@@ -96,6 +97,10 @@ DEFAULT_OFFLINE_BACKFILL_MAX = None
 # intact. Unbounded by default (requests stay RATE_LIMIT_SECONDS apart); set
 # REFLOW_MAX to a number to re-cap a run.
 DEFAULT_REFLOW_MAX = None
+# Per-run cap on how many ongoing (not-complete) offline works to re-check for
+# new chapters. Unbounded by default (requests stay RATE_LIMIT_SECONDS apart and
+# only NEW chapters are fetched); set REFRESH_ONGOING_MAX to a number to re-cap.
+DEFAULT_REFRESH_ONGOING_MAX = None
 
 
 def check_env() -> None:
@@ -185,6 +190,18 @@ def _reflow_max() -> int | None:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_REFLOW_MAX
+
+
+def _refresh_ongoing_max() -> int | None:
+    raw = os.environ.get("REFRESH_ONGOING_MAX", "").strip()
+    if not raw:
+        return DEFAULT_REFRESH_ONGOING_MAX
+    if raw.lower() in ("0", "all", "none"):
+        return None  # re-check every ongoing work this run
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_REFRESH_ONGOING_MAX
 
 
 def _parse_ts(value) -> datetime | None:
@@ -628,6 +645,78 @@ def main() -> None:
             rf_failed += 1
             print(f"    reflow {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Reflow: {rf_done} re-downloaded, {rf_failed} failed.")
+
+    # ---- Pass 7: refresh ongoing works → pull new chapters -----------------
+    # Every saved work that's still ONGOING is re-checked each sync and any new
+    # chapters are appended — no "subscribe on the site" step needed. We only
+    # fetch the chapters we don't already have, spaced RATE_LIMIT_SECONDS apart
+    # and capped per run, so it stays polite. Works flip to complete here too.
+    print("\n== Refresh ongoing works ==")
+    refresh_max = _refresh_ongoing_max()
+    ongoing = fetch_ongoing_offline_works(db, limit=refresh_max)
+    print(f"{len(ongoing)} ongoing work(s) to re-check (max {refresh_max or 'no cap'}).")
+    rc_updated = rc_same = rc_failed = 0
+    refresh_linker = None
+    for row in ongoing:
+        src_id = row.get("source") or "ao3"
+        wid = row.get("source_work_id") or ""
+        stored = int(row.get("chapters") or 0)
+        try:
+            if src_id == "ao3":
+                space()
+                meta = _with_backoff(
+                    lambda: ao3.fetch_work_metadata(wid), what=f"refresh metadata {wid}"
+                )
+                work_uuid = upsert_work(db, meta)  # refresh status/counts, keep origin
+                new_total = meta.chapters or 0
+                if new_total > stored:
+                    new_chs = []
+                    for n in range(stored + 1, new_total + 1):
+                        space()
+                        new_chs.append(
+                            _with_backoff(
+                                lambda n=n: ao3.fetch_chapter(wid, n),
+                                what=f"new chapter {n} of {wid}",
+                            )
+                        )
+                    written = upsert_chapters(db, work_uuid, new_chs)
+                    rc_updated += 1
+                    print(f"    {wid}: +{written} new chapter(s) (now {new_total}).")
+                else:
+                    rc_same += 1
+            else:
+                # Non-AO3 (Royal Road / Scribble Hub / link): re-read via the link
+                # path and append any chapters beyond what we already stored.
+                url = row.get("source_url") or ""
+                if not url:
+                    try:
+                        url = get_source(src_id).work_url(wid)
+                    except Exception:  # noqa: BLE001
+                        url = ""
+                if not url:
+                    rc_failed += 1
+                    print(f"    {src_id}:{wid} — no URL to re-check, skipped.")
+                    continue
+                if refresh_linker is None:
+                    refresh_linker = get_linker()
+                space()
+                meta, chap_list = refresh_linker.prepare(url)
+                work_uuid = upsert_work(db, meta)  # keep origin
+                new_total = len(chap_list)
+                if new_total > stored:
+                    new_chs = []
+                    for i in range(stored, new_total):
+                        space()
+                        new_chs.append(refresh_linker.fetch_chapter(url, i, chap_list[i]))
+                    written = upsert_chapters(db, work_uuid, new_chs)
+                    rc_updated += 1
+                    print(f"    {src_id}:{wid}: +{written} new chapter(s) (now {new_total}).")
+                else:
+                    rc_same += 1
+        except Exception as exc:  # noqa: BLE001
+            rc_failed += 1
+            print(f"    refresh {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
+    print(f"Refresh ongoing: {rc_updated} updated, {rc_same} unchanged, {rc_failed} failed.")
 
     print("\nSync complete.")
 

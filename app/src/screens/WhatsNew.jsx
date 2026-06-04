@@ -105,7 +105,7 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
       await requestSave(u.matchId || u.id);
       kickSync();
       showToast(u.status !== 'complete'
-        ? 'Saved — downloading; subscribe on AO3 for new chapters'
+        ? 'Saved — downloading; new chapters arrive on each sync'
         : 'Saved — starting download', 'solar:check-circle-bold');
     } catch {
       markWanted(u, false);

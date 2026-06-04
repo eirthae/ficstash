@@ -93,6 +93,27 @@ def fetch_non_offline_works(
     return list(query.execute().data or [])
 
 
+def fetch_ongoing_offline_works(
+    client: Client, limit: int | None = None
+) -> list[dict]:
+    """Return downloaded works that are still ONGOING, to re-check for new
+    chapters. Any saved work (any source) that isn't complete is a candidate;
+    the refresh pass re-reads it and pulls only the chapters it doesn't have.
+    Newest-activity first, capped by `limit` so the re-check stays polite.
+    """
+    query = (
+        client.table("works")
+        .select("id,source,source_work_id,source_url,chapters,chapters_total,status")
+        .eq("offline", True)
+        .eq("hidden", False)
+        .neq("status", "complete")
+        .order("source_updated", desc=True)
+    )
+    if limit:
+        query = query.limit(limit)
+    return list(query.execute().data or [])
+
+
 def fetch_untitled_works(
     client: Client, source: str = "ao3", limit: int | None = None
 ) -> list[str]:

@@ -107,8 +107,8 @@ export function OriginBadges({ bookmarked, subscribed }) {
         </span>
       )}
       {subscribed && (
-        <span className="originbadge" style={{ color: 'var(--tag-relationship)' }} title="You subscribe to this on AO3">
-          <Icon icon="solar:bell-bold" size={13} /> Subscribed
+        <span className="originbadge" style={{ color: 'var(--tag-relationship)' }} title="Ongoing — new chapters download on each sync">
+          <Icon icon="solar:bell-bold" size={13} /> Following
         </span>
       )}
     </>
