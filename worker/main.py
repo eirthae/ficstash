@@ -72,6 +72,7 @@ from ficstash_worker.supabase_io import (
     mark_group_checked,
     mark_matches_saved,
     mark_request,
+    record_chapter_updates,
     reset_empty_offline,
     upsert_chapters,
     upsert_tag_matches,
@@ -680,6 +681,7 @@ def main() -> None:
                             )
                         )
                     written = upsert_chapters(db, work_uuid, new_chs)
+                    record_chapter_updates(db, work_uuid, "ao3", wid, new_chs)
                     rc_updated += 1
                     print(f"    {wid}: +{written} new chapter(s) (now {new_total}).")
                 else:
@@ -709,6 +711,7 @@ def main() -> None:
                         space()
                         new_chs.append(refresh_linker.fetch_chapter(url, i, chap_list[i]))
                     written = upsert_chapters(db, work_uuid, new_chs)
+                    record_chapter_updates(db, work_uuid, meta.source, meta.source_work_id, new_chs)
                     rc_updated += 1
                     print(f"    {src_id}:{wid}: +{written} new chapter(s) (now {new_total}).")
                 else:

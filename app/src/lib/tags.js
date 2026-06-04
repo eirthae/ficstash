@@ -322,6 +322,51 @@ export async function fetchNewMatches() {
   });
 }
 
+// The "New chapters" feed: chapters the refresh pass appended to ongoing works
+// you already had offline. These are real, downloaded chapters (so they open
+// immediately), joined with their work for the reader. Newest-first.
+export async function fetchNewChapters() {
+  if (!hasSupabase) return null; // not configured → caller uses sample data
+  const { data, error } = await supabase
+    .from('chapter_updates')
+    .select('*, works(*)')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  return (data || [])
+    .filter((row) => row.works && !row.works.hidden)
+    .map((row) => {
+      const w = row.works || {};
+      const { day, time } = dayBucket(row.created_at);
+      return {
+        id: row.id,
+        workId: row.work_id,
+        chapterN: row.chapter_n,
+        chapter: row.title || `Chapter ${row.chapter_n}`,
+        title: w.title || '',
+        fandom: w.fandom || '',
+        words: row.words || 0,
+        day,
+        time,
+        fresh: !row.seen,
+        fetched: true, // refresh pass already downloaded these
+        work: {
+          id: w.id, source: w.source, sourceWorkId: w.source_work_id, sourceUrl: w.source_url || '',
+          title: w.title, author: w.author, fandom: w.fandom, summary: w.summary,
+          tags: Array.isArray(w.tags) ? w.tags : [], words: w.words, chapters: w.chapters,
+          chaptersTotal: w.chapters_total ?? w.chapters, status: w.status, palette: w.palette,
+          offline: w.offline, lastChapter: w.last_chapter, progress: w.progress, origin: w.origin,
+        },
+      };
+    });
+}
+
+export async function markChapterUpdateSeen(id) {
+  if (!hasSupabase || !id) return;
+  const { error } = await supabase.from('chapter_updates').update({ seen: true }).eq('id', id);
+  if (error) throw error;
+}
+
 // Live AO3 tag suggestions via the tag-autocomplete edge function.
 export async function autocompleteTags(term) {
   const t = (term || '').trim();

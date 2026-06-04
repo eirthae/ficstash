@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
 import { StatusBadge, fmtWords, useToast } from '../components/ui.jsx';
-import { fetchNewMatches, markMatchSeen, dismissMatch, requestSave } from '../lib/tags.js';
+import { fetchNewMatches, fetchNewChapters, markChapterUpdateSeen, markMatchSeen, dismissMatch, requestSave } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
 
 // shared row: a new chapter on a followed work
-function ChapterUpdateRow({ u, nav }) {
+function ChapterUpdateRow({ u, onOpen }) {
   const fandom = (u.fandom || '').split('–')[0].split(' - ')[0].trim();
   return (
-    <div className="update pressable" onClick={() => nav.push('reader', { workId: u.workId, chapterTitle: u.chapter })}>
+    <div className="update pressable" onClick={() => onOpen(u)}>
       {u.fresh && <span className="unew"></span>}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, paddingLeft: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -87,6 +87,22 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
   }, [matches]);
   const matchList = liveMatches || matches;
 
+  // Live new-chapter feed (real, downloaded chapters); fall back to sample.
+  const [liveChapters, setLiveChapters] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetchNewChapters()
+      .then((r) => { if (alive) setLiveChapters(r ?? chapters); })
+      .catch(() => { if (alive) setLiveChapters(chapters); });
+    return () => { alive = false; };
+  }, [chapters]);
+  const chapterList = liveChapters || chapters;
+
+  const openChapter = (u) => {
+    markChapterUpdateSeen(u.id).catch(() => {});
+    nav.push('reader', { work: u.work, workId: u.workId, chapterN: u.chapterN, chapterTitle: u.chapter });
+  };
+
   const markWanted = (u, wanted = true) =>
     setLiveMatches((arr) => (arr || matchList).map((x) => (x.id === u.id ? { ...x, wanted } : x)));
 
@@ -120,13 +136,13 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
     return order.filter(d => groups[d]).map(d => ({ day: d, items: groups[d] }));
   };
 
-  const active = tab === 'chapters' ? chapters : matchList;
+  const active = tab === 'chapters' ? chapterList : matchList;
   return (
     <div className="screen">
-      <Appbar large title="What's New" sub={`${chapters.length + matchList.length} updates`} />
+      <Appbar large title="What's New" sub={`${chapterList.length + matchList.length} updates`} />
       <div className="wn-seg" style={{ marginBottom: 16 }}>
         <button className={tab === 'chapters' ? 'on' : ''} onClick={() => setTab('chapters')}>
-          New chapters <span className="pill">{chapters.length}</span>
+          New chapters <span className="pill">{chapterList.length}</span>
         </button>
         <button className={tab === 'matches' ? 'on' : ''} onClick={() => setTab('matches')}>
           New matches <span className="pill">{matchList.length}</span>
@@ -137,12 +153,19 @@ export function WhatsNewScreen({ chapters, matches, nav }) {
           <Icon icon={tab === 'chapters' ? 'solar:download-minimalistic-linear' : 'solar:magnifer-linear'} size={14} />
           {tab === 'chapters' ? 'On works you follow — downloaded automatically.' : 'Matching tags you track — tap Save to download.'}
         </div>
+        {active.length === 0 && (
+          <div style={{ padding: '28px 8px', textAlign: 'center', fontSize: 13, lineHeight: 1.55, color: 'var(--text-tertiary)' }}>
+            {tab === 'chapters'
+              ? 'No new chapters yet. When a sync pulls fresh chapters for your ongoing works, they show up here — already downloaded.'
+              : 'No new tag matches right now. Track tags in Discover and matches will land here.'}
+          </div>
+        )}
         {days(active).map(g => (
           <div key={g.day} style={{ marginBottom: 18 }}>
             <div className="daygroup" style={{ marginBottom: 10 }}>{g.day}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               {g.items.map(u => tab === 'chapters'
-                ? <ChapterUpdateRow key={u.id} u={u} nav={nav} />
+                ? <ChapterUpdateRow key={u.id} u={u} onOpen={openChapter} />
                 : <MatchUpdateRow key={u.id} u={u} onOpen={openMatch} onDismiss={onDismissMatch} onSave={saveMatch} saveState={saveStateOf(u)} />)}
             </div>
           </div>

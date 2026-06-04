@@ -93,6 +93,37 @@ def fetch_non_offline_works(
     return list(query.execute().data or [])
 
 
+def record_chapter_updates(client: Client, work_uuid: str, source: str,
+                            source_work_id: str, chapters: list) -> int:
+    """Record newly-appended chapters in the What's New "new chapters" feed.
+
+    Called by the refresh pass after it adds chapters to an already-offline
+    work. One row per chapter; idempotent on (work_id, chapter_n) so a repeat
+    sync won't duplicate. `chapters` are Chapter objects (n/title/words).
+    """
+    rows = [
+        {
+            "work_id": work_uuid,
+            "source": source,
+            "source_work_id": source_work_id,
+            "chapter_n": int(getattr(c, "n", 0) or 0),
+            "title": getattr(c, "title", "") or "",
+            "words": int(getattr(c, "words", 0) or 0),
+        }
+        for c in (chapters or [])
+        if getattr(c, "n", 0)
+    ]
+    if not rows:
+        return 0
+    try:
+        client.table("chapter_updates").upsert(
+            rows, on_conflict="work_id,chapter_n"
+        ).execute()
+    except Exception:  # noqa: BLE001 — feed is best-effort; never fail a sync over it
+        return 0
+    return len(rows)
+
+
 def fetch_ongoing_offline_works(
     client: Client, limit: int | None = None
 ) -> list[dict]:
