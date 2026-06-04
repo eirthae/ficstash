@@ -252,11 +252,11 @@ function LinkRow({ item, onChange, onPasteBulk, onRemove, canRemove, autoFocus }
         {item.value.trim() && valid && <Icon icon="solar:check-circle-bold" size={18} color="var(--success)" />}
         <button onClick={() => onRemove(item.id)} disabled={!canRemove} title="Remove" style={{
           width: 34, height: 34, flex: 'none', border: 'none', borderRadius: 9, cursor: canRemove ? 'pointer' : 'not-allowed',
-          background: 'rgba(243,18,96,.16)', color: 'var(--danger-light)', opacity: canRemove ? 1 : 0.4,
+          background: 'rgba(255,255,255,.08)', color: '#fff', opacity: canRemove ? 1 : 0.4,
           display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s',
         }}
-          onMouseEnter={e => { if (canRemove) { e.currentTarget.style.background = 'var(--danger)'; e.currentTarget.style.color = '#fff'; } }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(243,18,96,.16)'; e.currentTarget.style.color = 'var(--danger-light)'; }}>
+          onMouseEnter={e => { if (canRemove) e.currentTarget.style.background = 'rgba(255,255,255,.18)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,.08)'; }}>
           <Icon icon="solar:trash-bin-trash-bold" size={18} />
         </button>
       </div>
@@ -347,9 +347,9 @@ function FilesPanel({ onFetch, busy }) {
                   <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
                   <div style={{ fontSize: 12, color: 'var(--fg-2)', fontFamily: 'var(--font-mono)' }}>{m.label} - {fmtSize(f.size)}</div>
                 </div>
-                <button onClick={() => remove(f.id)} title="Remove" style={{ width: 34, height: 34, flex: 'none', border: 'none', borderRadius: 9, cursor: 'pointer', background: 'rgba(243,18,96,.16)', color: 'var(--danger-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger)'; e.currentTarget.style.color = '#fff'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(243,18,96,.16)'; e.currentTarget.style.color = 'var(--danger-light)'; }}>
+                <button onClick={() => remove(f.id)} title="Remove" style={{ width: 34, height: 34, flex: 'none', border: 'none', borderRadius: 9, cursor: 'pointer', background: 'rgba(255,255,255,.08)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,.18)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,.08)'; }}>
                   <Icon icon="solar:trash-bin-trash-bold" size={17} />
                 </button>
               </div>
