@@ -17,7 +17,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>FicStash Intake</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%237828c8' d='M12 3 3 8l9 5 9-5z'/%3E%3C/svg%3E" />
-  <script src="https://code.iconify.design/3/3.1.1/iconify.min.js"></script>
+  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
   <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
@@ -78,9 +78,12 @@ function initClient(cfg) {
   return false;
 }
 
+// Iconify WEB COMPONENT (shadow DOM) — React treats it as an opaque leaf, so it
+// never tries to reconcile Iconify's injected SVG (the old .iconify scan script
+// mutated React's nodes and crashed re-renders with a removeChild error).
 function Icon({ icon, size = 18, color, style }) {
-  return <span className="iconify" data-icon={icon}
-    style={{ fontSize: size, color, lineHeight: 0, display: 'inline-flex', ...style }} />;
+  return <iconify-icon icon={icon} width={size} height={size}
+    style={{ color, lineHeight: 0, display: 'inline-flex', ...style }} />;
 }
 
 // ===== file helpers (ported from the app's EPUB/TXT upload parser) ========
