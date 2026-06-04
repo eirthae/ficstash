@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <!--
-  FicStash Intake — a tiny dark "loading dock" you open from any device (laptop,
-  iPad, …) to BULK add links + files to your FicStash library. Single
+  FicStash Intake - a tiny dark "loading dock" you open from any device (laptop,
+  iPad, ...) to BULK add links + files to your FicStash library. Single
   self-contained file: host it in a public Supabase Storage bucket and open the
   URL. It writes to the SAME Supabase the phone app reads, so everything you add
   here shows up in the app.
 
   Design adapted from the "Hopper" Claude-Design mock, reskinned to FicStash's
   dark design tokens. First run asks for your Supabase URL + anon key (find them
-  in Supabase → Project Settings → API); they're saved on the device and act as
-  the gate — without them the tool does nothing.
+  in Supabase -> Project Settings -> API); they're saved on the device and act as
+  the gate - without them the tool does nothing.
 -->
 <html lang="en" data-theme="dark">
 <head>
@@ -59,7 +59,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const CFG_KEY = 'fs-intake-cfg';
 
 // Baked-in connection so the tool auto-connects on any device (no setup screen).
-// The anon key is the PUBLIC key (safe to expose — it only grants what RLS
+// The anon key is the PUBLIC key (safe to expose - it only grants what RLS
 // allows, and this file lives in a public bucket). Clearing site data falls back
 // to the manual setup screen below.
 const BAKED_CFG = {
@@ -280,7 +280,7 @@ function LinksPanel({ onFetch, busy }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
         <div>
           <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-.01em' }}>Drop in some links</div>
-          <div style={{ fontSize: 14, color: 'var(--fg-2)', marginTop: 3 }}>One per box — or paste a whole list and watch them split apart.</div>
+          <div style={{ fontSize: 14, color: 'var(--fg-2)', marginTop: 3 }}>One per box - or paste a whole list and watch them split apart.</div>
         </div>
         <span style={chipStyle('var(--accent)')}><Icon icon="solar:link-circle-bold" size={14} />{filled.length} ready</span>
       </div>
@@ -312,7 +312,7 @@ function FilesPanel({ onFetch, busy }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
         <div>
           <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-.01em' }}>Bring your own files</div>
-          <div style={{ fontSize: 14, color: 'var(--fg-2)', marginTop: 3 }}>Drag a pile in, or pick them — EPUB &amp; TXT welcome.</div>
+          <div style={{ fontSize: 14, color: 'var(--fg-2)', marginTop: 3 }}>Drag a pile in, or pick them - EPUB &amp; TXT welcome.</div>
         </div>
         <span style={chipStyle('var(--blue)')}><Icon icon="solar:cloud-upload-bold" size={14} />{files.length} queued</span>
       </div>
@@ -324,8 +324,8 @@ function FilesPanel({ onFetch, busy }) {
         <div style={{ width: 64, height: 64, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--grad)', color: '#fff', boxShadow: '0 14px 30px -10px rgba(120,40,200,.8)', animation: drag ? 'wiggle .4s ease infinite' : 'floaty 3s ease-in-out infinite' }}>
           <Icon icon="solar:upload-square-bold" size={34} />
         </div>
-        <div style={{ fontSize: 16, fontWeight: 700 }}>{drag ? 'Let go — drop them in!' : 'Drop files here'}</div>
-        <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>or <span style={{ color: 'var(--accent)', fontWeight: 600 }}>browse</span> · bulk select is fine</div>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>{drag ? 'Let go - drop them in!' : 'Drop files here'}</div>
+        <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>or <span style={{ color: 'var(--accent)', fontWeight: 600 }}>browse</span> - bulk select is fine</div>
         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
           {ACCEPT.map(x => (
             <span key={x} style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '.04em', padding: '3px 8px', borderRadius: 999, background: `rgba(${FILE_META[x].tint},.18)`, color: `rgb(${FILE_META[x].tint})`, textTransform: 'uppercase' }}>.{x}</span>
@@ -342,7 +342,7 @@ function FilesPanel({ onFetch, busy }) {
                 <div style={{ width: 40, height: 40, flex: 'none', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `rgba(${m.tint},.18)`, color: `rgb(${m.tint})` }}><Icon icon={m.icon} size={22} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--fg-2)', fontFamily: 'var(--font-mono)' }}>{m.label} · {fmtSize(f.size)}</div>
+                  <div style={{ fontSize: 12, color: 'var(--fg-2)', fontFamily: 'var(--font-mono)' }}>{m.label} - {fmtSize(f.size)}</div>
                 </div>
                 <button onClick={() => remove(f.id)} title="Remove" style={{ width: 34, height: 34, flex: 'none', border: 'none', borderRadius: 9, cursor: 'pointer', background: 'rgba(243,18,96,.16)', color: 'var(--danger-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s' }}
                   onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger)'; e.currentTarget.style.color = '#fff'; }}
@@ -368,7 +368,7 @@ function FetchBar({ count, noun, onFetch, busy }) {
       color: (count === 0 && !busy) ? 'var(--fg-2)' : '#fff', background: (count === 0 && !busy) ? 'var(--content2)' : 'var(--grad)',
       boxShadow: (count === 0 && !busy) ? 'none' : '0 16px 34px -12px rgba(120,40,200,.85)', transition: 'transform .12s, box-shadow .2s, opacity .2s', opacity: busy ? 0.92 : 1,
     }}>
-      {busy ? (<><span style={{ width: 20, height: 20, borderRadius: '50%', border: '3px solid rgba(255,255,255,.35)', borderTopColor: '#fff', animation: 'spin .7s linear infinite' }} />Fetching…</>)
+      {busy ? (<><span style={{ width: 20, height: 20, borderRadius: '50%', border: '3px solid rgba(255,255,255,.35)', borderTopColor: '#fff', animation: 'spin .7s linear infinite' }} />Fetching...</>)
         : (<><Icon icon="solar:magic-stick-3-bold" size={22} />Fetch {count > 0 ? `${count} ${noun}${count > 1 ? 's' : ''}` : ''}</>)}
     </button>
   );
@@ -383,10 +383,10 @@ function Success({ kind, results, onReset }) {
         <Icon icon="solar:check-circle-bold" size={50} />
       </div>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 23, fontWeight: 800, letterSpacing: '-.02em' }}>Off it goes! 🚀</div>
+        <div style={{ fontSize: 23, fontWeight: 800, letterSpacing: '-.02em' }}>Off it goes!</div>
         <div style={{ fontSize: 15, color: 'var(--fg-2)', marginTop: 5 }}>
           {kind === 'links'
-            ? <><b style={{ color: 'var(--fg)' }}>{okCount}</b> link{okCount === 1 ? '' : 's'} queued — they download on the next sync.</>
+            ? <><b style={{ color: 'var(--fg)' }}>{okCount}</b> link{okCount === 1 ? '' : 's'} queued - they download on the next sync.</>
             : <>Added <b style={{ color: 'var(--fg)' }}>{okCount}</b> book{okCount === 1 ? '' : 's'} to your library.</>}
         </div>
       </div>
@@ -417,7 +417,7 @@ function Setup({ onSaved }) {
     if (!/^https:\/\/.+\.supabase\.co$/i.test(u)) { setErr('Project URL looks like https://xxxx.supabase.co'); return; }
     if (k.length < 30) { setErr('That anon key looks too short.'); return; }
     const cfg = { url: u, key: k };
-    if (!initClient(cfg)) { setErr('Could not start — check the values.'); return; }
+    if (!initClient(cfg)) { setErr('Could not start - check the values.'); return; }
     localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
     onSaved();
   };
@@ -426,10 +426,10 @@ function Setup({ onSaved }) {
       <div>
         <div style={{ fontSize: 19, fontWeight: 700 }}>Connect to your FicStash</div>
         <div style={{ fontSize: 13.5, color: 'var(--fg-2)', marginTop: 4, lineHeight: 1.5 }}>
-          One-time setup. Find these in Supabase → Project Settings → API. Saved on this device only — it's how the tool reaches your library.
+          One-time setup. Find these in Supabase -> Project Settings -> API. Saved on this device only - it's how the tool reaches your library.
         </div>
       </div>
-      {[['Project URL', url, setUrl, 'https://xxxx.supabase.co', false], ['Anon (public) key', key, setKey, 'eyJhbGc…', true]].map(([label, val, set, ph, mono]) => (
+      {[['Project URL', url, setUrl, 'https://xxxx.supabase.co', false], ['Anon (public) key', key, setKey, 'eyJhbGc...', true]].map(([label, val, set, ph, mono]) => (
         <label key={label} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-2)' }}>{label}</span>
           <input value={val} onChange={e => { set(e.target.value); setErr(''); }} placeholder={ph} autoCapitalize="off" autoCorrect="off" spellCheck={false}
