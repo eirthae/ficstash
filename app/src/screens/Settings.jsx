@@ -4,7 +4,7 @@ import Icon from '../components/Icon.jsx';
 import { Segmented } from '../components/ui.jsx';
 import { fetchOfflineStats } from '../lib/library.js';
 
-export function SettingsScreen({ appMode, setAppMode, nav }) {
+export function SettingsScreen({ appMode, setAppMode, onSignOut, canSignOut, nav }) {
   const [storage, setStorage] = useState(undefined); // undefined=loading, null=unavailable
   useEffect(() => { fetchOfflineStats().then(setStorage).catch(() => setStorage(null)); }, []);
   const storageLine = storage === undefined ? 'Counting…'
@@ -21,10 +21,20 @@ export function SettingsScreen({ appMode, setAppMode, nav }) {
         <SetSection label="Sources">
           <button className="set-row pressable" style={{ width: '100%', textAlign: 'left' }} onClick={() => nav.push('connect')}>
             <div className="set-ic" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon icon="solar:widget-5-bold" size={18} /></div>
-            <div className="set-tx"><div className="set-h">How FicStash works</div><div className="set-d">A curated reader — no account, no login</div></div>
+            <div className="set-tx"><div className="set-h">How FicStash works</div><div className="set-d">A curated, private reader</div></div>
             <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
           </button>
         </SetSection>
+
+        {canSignOut && (
+          <SetSection label="Account" note="Your library is private and locked to this account. Signing out clears this device; sign back in any time.">
+            <button className="set-row pressable" style={{ width: '100%', textAlign: 'left' }} onClick={onSignOut}>
+              <div className="set-ic" style={{ background: 'var(--danger-soft, rgba(243,18,96,.12))', color: 'var(--danger, #f31260)' }}><Icon icon="solar:logout-3-bold" size={18} /></div>
+              <div className="set-tx"><div className="set-h">Sign out</div><div className="set-d">Lock this device</div></div>
+              <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
+            </button>
+          </SetSection>
+        )}
 
         <SetSection label="Appearance" note="Controls the whole app. Reader themes are separate — set them in the reader.">
           <div className="set-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
@@ -65,9 +75,10 @@ function SetSection({ label, note, children }) {
 }
 
 // ---- How FicStash works ---------------------------------------------------
-// FicStash is a curated multi-source reader, not an account mirror. There is no
-// login and no password is ever collected or stored. This screen explains where
-// stories come from and how to add them.
+// FicStash is a curated multi-source reader, not an AO3 account mirror. It has
+// its own private owner login (so only you can read your library), but it never
+// collects or stores any AO3 password. This screen explains where stories come
+// from and how to add them.
 const WAYS = [
   { icon: 'solar:magnifer-bold', title: 'Track tags & genres', body: 'Follow tags on AO3, or genres on Royal Road and Scribble Hub. New matches surface in What’s New — no account needed.' },
   { icon: 'solar:link-round-bold', title: 'Add by link', body: 'Paste a work’s URL and FicStash fetches a private, fully-offline copy.' },
@@ -85,7 +96,7 @@ export function ConnectScreen({ nav }) {
         </div>
         <div style={{ textAlign: 'center', fontSize: 21, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 8 }}>Your private, curated shelf</div>
         <div style={{ textAlign: 'center', fontSize: 14, lineHeight: 1.55, color: 'var(--text-secondary)', maxWidth: 300, margin: '0 auto 24px' }}>
-          FicStash gathers stories from several sites into one offline library. You choose what comes in — there’s no login and no password is ever stored.
+          FicStash gathers stories from several sites into one offline library. You choose what comes in. It’s locked to your own private account — and no AO3 password is ever asked for or stored.
         </div>
 
         <div className="set-group" style={{ display: 'flex', flexDirection: 'column' }}>

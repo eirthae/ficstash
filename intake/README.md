@@ -5,8 +5,10 @@ library from any device (laptop, iPad, …). It writes to the *same* Supabase th
 phone app reads, so anything you add here shows up in the app.
 
 **Live (free GitHub Pages):** https://eirthae.github.io/ficstash-intake/
-It auto-connects (URL + anon key baked in) — just open and use. Bookmark it, or
-"Install" / "Add to Home Screen" for an app icon.
+It auto-connects (URL + anon key baked in), then asks you to **sign in** with your
+FicStash email + password — the library is private and locked to your account, so
+the public anon key alone can't read or write anything. Bookmark it, or "Install" /
+"Add to Home Screen" for an app icon.
 
 ## What it does
 - **Links** — one box per link; paste a whole list and it splits into rows.

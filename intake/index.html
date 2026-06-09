@@ -59,9 +59,10 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const CFG_KEY = 'fs-intake-cfg';
 
 // Baked-in connection so the tool auto-connects on any device (no setup screen).
-// The anon key is the PUBLIC key (safe to expose - it only grants what RLS
-// allows, and this file lives in a public bucket). Clearing site data falls back
-// to the manual setup screen below.
+// The anon key is the PUBLIC key and is safe to expose: since the DB lockdown
+// (migration 0015) it grants NOTHING on its own — every table requires a
+// logged-in owner session, so the tool shows a sign-in screen after connecting.
+// Clearing site data falls back to the manual setup screen below.
 const BAKED_CFG = {
   url: 'https://onzeiamzjicbswszhbpc.supabase.co',
   key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uemVpYW16amljYnN3c3poYnBjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwMjQ3NDYsImV4cCI6MjA5NTYwMDc0Nn0.OqIb0D6FlIrXtiVdoTxpvcCI5w17xzDxi5kOB1yZFYU',
@@ -452,14 +453,70 @@ function Setup({ onSaved }) {
   );
 }
 
+// ---- sign in (owner login) ----------------------------------------------
+// The library is private: since the DB lockdown, the baked anon key reads/
+// writes nothing on its own — every table needs a logged-in owner session.
+// Sign in once with your FicStash email + password (the same as the app).
+function Login({ onSignedIn }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const submit = async (e) => {
+    e && e.preventDefault();
+    if (busy) return;
+    setErr('');
+    const em = email.trim();
+    if (!em || !password) { setErr('Enter your email and password.'); return; }
+    setBusy(true);
+    try {
+      const { error } = await sb.auth.signInWithPassword({ email: em, password });
+      if (error) throw error;
+      onSignedIn();
+    } catch (e2) { setErr((e2 && e2.message) || 'Could not sign in.'); setBusy(false); }
+  };
+  return (
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div>
+        <div style={{ fontSize: 19, fontWeight: 700 }}>Sign in to your FicStash</div>
+        <div style={{ fontSize: 13.5, color: 'var(--fg-2)', marginTop: 4, lineHeight: 1.5 }}>
+          Your library is private and locked to your account. Use your FicStash email + password (same as the app). This is not an AO3 login.
+        </div>
+      </div>
+      {[['Email', email, setEmail, 'you@example.com', 'email', 'username'], ['Password', password, setPassword, '••••••••', 'password', 'current-password']].map(([label, val, set, ph, type, ac]) => (
+        <label key={label} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-2)' }}>{label}</span>
+          <input type={type} value={val} onChange={e => { set(e.target.value); setErr(''); }} placeholder={ph} autoComplete={ac} autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            style={{ height: 48, background: 'var(--content2)', border: '2px solid var(--content3)', borderRadius: 12, padding: '0 14px', color: 'var(--fg)', fontSize: 14, fontFamily: 'var(--font-sans)', outline: 'none' }} />
+        </label>
+      ))}
+      {err && <div style={{ color: 'var(--danger-light)', fontSize: 13 }}>{err}</div>}
+      <button type="submit" disabled={busy} style={{ height: 52, border: 'none', borderRadius: 13, cursor: busy ? 'default' : 'pointer', opacity: busy ? .7 : 1, background: 'var(--grad)', color: '#fff', fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9 }}>
+        <Icon icon="solar:login-3-bold" size={20} /> {busy ? 'Signing in…' : 'Sign in'}
+      </button>
+    </form>
+  );
+}
+
 function chipStyle(color) { return { height: 26, borderRadius: 9999, padding: '0 11px', background: 'var(--content2)', color, fontSize: 12.5, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', flex: 'none' }; }
 function dashedBtn() { return { height: 48, border: '2px dashed var(--content3)', borderRadius: 12, background: 'transparent', color: 'var(--fg-2)', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }; }
 
 function App() {
   const [ready, setReady] = useState(() => initClient(loadCfg() || (BAKED_CFG.url ? BAKED_CFG : null)));
+  const [authed, setAuthed] = useState(undefined); // undefined=checking, false=login, true=in
   const [tab, setTab] = useState('links');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null); // { kind, results }
+
+  // Track the owner session once the client is configured.
+  React.useEffect(() => {
+    if (!ready || !sb) return;
+    let alive = true;
+    sb.auth.getSession().then(({ data }) => { if (alive) setAuthed(!!data.session); });
+    const { data: sub } = sb.auth.onAuthStateChange((_e, s) => { if (alive) setAuthed(!!s); });
+    return () => { alive = false; sub.subscription.unsubscribe(); };
+  }, [ready]);
+  const signOut = () => { if (sb) sb.auth.signOut().catch(() => {}); };
 
   const runFetch = async (kind, items) => {
     setBusy(true);
@@ -493,11 +550,12 @@ function App() {
             <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: -1 }}>bulk add to your library</div>
           </div>
         </div>
-        {ready && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 13px', borderRadius: 999, background: 'var(--content2)', border: '1px solid var(--divider)' }}>
+        {ready && authed && (
+          <button onClick={signOut} title="Sign out" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 13px', borderRadius: 999, background: 'var(--content2)', border: '1px solid var(--divider)', cursor: 'pointer', color: 'var(--fg-2)' }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 0 3px rgba(23,201,100,.2)' }} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg-2)' }}>Connected</span>
-          </div>
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Signed in</span>
+            <Icon icon="solar:logout-3-linear" size={15} />
+          </button>
         )}
       </header>
 
@@ -505,6 +563,8 @@ function App() {
         <div style={{ width: '100%', maxWidth: 560 }}>
           <div style={{ background: 'var(--content1)', borderRadius: 20, border: '1px solid var(--divider)', boxShadow: 'var(--shadow-pop)', padding: 26, animation: 'pop .35s ease' }}>
             {!ready ? <Setup onSaved={() => setReady(true)} />
+              : authed === undefined ? <div style={{ textAlign: 'center', color: 'var(--fg-2)', fontSize: 13, padding: '24px 0' }}>Loading…</div>
+              : !authed ? <Login onSignedIn={() => setAuthed(true)} />
               : done ? <Success kind={done.kind} results={done.results} onReset={() => setDone(null)} />
               : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -513,7 +573,7 @@ function App() {
                 </div>
               )}
           </div>
-          {ready && !done && (
+          {ready && authed && !done && (
             <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12.5, color: 'var(--fg-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               <Icon icon="solar:bolt-bold" size={14} color="var(--warning)" /> Everything you add lands in your FicStash app
             </div>

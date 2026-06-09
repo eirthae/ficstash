@@ -9,8 +9,10 @@ import { DiscoverScreen, TagResultsScreen, LaterScreen } from './screens/Discove
 import { SettingsScreen, ConnectScreen } from './screens/Settings.jsx';
 import { StoryDetailScreen } from './screens/Detail.jsx';
 import { ReaderScreen } from './screens/Reader.jsx';
+import { LoginScreen } from './screens/Login.jsx';
 import { WORKS, NEW_CHAPTERS, NEW_MATCHES } from './data/sample.js';
 import { fetchWorks } from './lib/library.js';
+import { supabase, hasSupabase } from './lib/supabase.js';
 
 const READER_DEFAULTS = { theme: 'dark', font: 'serif', size: 19, leading: 1.70, margin: 26, brightness: 1 };
 
@@ -59,6 +61,22 @@ export default function App() {
     try { localStorage.setItem('fs-reader-theme', readerSettings.theme); } catch (e) {}
   }, [readerSettings]);
 
+  // ---- auth session (private archive: login required to read anything) ----
+  // After migration 0015 the anon key reads nothing; every table needs a
+  // logged-in owner session. session === undefined → still checking; null →
+  // logged out (show LoginScreen); object → signed in. When Supabase isn't
+  // configured at all we treat it as "no auth needed" and run on sample data.
+  const [session, setSession] = useState(hasSupabase ? undefined : null);
+  useEffect(() => {
+    if (!hasSupabase) return;
+    let alive = true;
+    supabase.auth.getSession().then(({ data }) => { if (alive) setSession(data.session ?? null); });
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => { if (alive) setSession(s ?? null); });
+    return () => { alive = false; sub.subscription.unsubscribe(); };
+  }, []);
+  const authed = !hasSupabase || !!session;
+  const signOut = () => { if (hasSupabase) supabase.auth.signOut().catch(() => {}); };
+
   // ---- live library from Supabase (null = still loading) -----------------
   // When Supabase isn't configured, fetchWorks() returns null and we fall
   // back to bundled sample data so the app still has something to show.
@@ -67,12 +85,13 @@ export default function App() {
     .then(r => setWorks(r ?? WORKS))
     .catch(() => setWorks(WORKS));
   useEffect(() => {
+    if (!authed) { setWorks(null); return; } // wait until signed in to query
     let alive = true;
     fetchWorks()
       .then(r => { if (alive) setWorks(r ?? WORKS); })
       .catch(() => { if (alive) setWorks(WORKS); });
     return () => { alive = false; };
-  }, []);
+  }, [authed]);
   // Drop a removed work from the in-memory list so the library updates at once
   // (the row is already flagged hidden in the DB by the Detail screen).
   const removeFromLibrary = (id) => setWorks(ws => (ws || []).filter(w => w.id !== id));
@@ -115,6 +134,24 @@ export default function App() {
     return () => { handle.then(h => h.remove()).catch(() => {}); };
   }, []);
 
+  // Auth gates (all hooks above; safe to early-return here).
+  if (hasSupabase && session === undefined) {
+    return (
+      <div className="app-root" data-mode={resolvedMode}>
+        <div className="viewport" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Loading…</div>
+        </div>
+      </div>
+    );
+  }
+  if (!authed) {
+    return (
+      <div className="app-root" data-mode="dark">
+        <div className="viewport"><LoginScreen /></div>
+      </div>
+    );
+  }
+
   const top = stack[stack.length - 1];
   const showNav = !top;
 
@@ -123,7 +160,7 @@ export default function App() {
     if (tab === 'library') return <LibraryScreen works={works} layout="fandom" onRemove={removeFromLibrary} onReload={reloadWorks} refreshKey={refreshKey} nav={n} />;
     if (tab === 'whatsnew') return <WhatsNewScreen chapters={NEW_CHAPTERS} matches={NEW_MATCHES} nav={n} />;
     if (tab === 'discover') return <DiscoverScreen nav={n} />;
-    if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} nav={n} />;
+    if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} onSignOut={signOut} canSignOut={hasSupabase && !!session} nav={n} />;
   };
   const renderTop = () => {
     const n = nav.current, p = top.props || {};
