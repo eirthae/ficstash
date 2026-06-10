@@ -343,8 +343,16 @@ def main() -> None:
                 work_uuid = upsert_work(db, meta, origin="tag")
                 written = upsert_chapters(db, work_uuid, chapters)
                 if not written:
-                    # No text fetched — leave it un-flagged and still wanted so a
-                    # later run retries, rather than showing an empty work.
+                    # No text fetched. If the work is restricted to logged-in AO3
+                    # members, a guest can never get it — flag it and stop the
+                    # endless retry so the app can show a "read on AO3" label.
+                    # Otherwise leave it wanted so a later run retries.
+                    if ao3.is_restricted(wid):
+                        mark_flag(db, [wid], "restricted")
+                        mark_matches_saved(db, wid)
+                        save_failed += 1
+                        print(f"    requested {wid} — restricted to AO3 members; flagged (read on AO3).")
+                        continue
                     save_failed += 1
                     print(f"    requested {wid} — no chapters fetched, will retry.")
                     continue

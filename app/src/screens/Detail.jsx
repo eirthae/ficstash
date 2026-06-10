@@ -106,8 +106,9 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
   const ongoing = work.status !== 'complete';
   // Readable only when a full offline copy exists. Suggestions and metadata-only
   // library works (offline === false) aren't downloaded yet; the sample/demo
-  // build leaves offline undefined, so those stay readable.
-  const readable = !suggestion && work.offline !== false;
+  // build leaves offline undefined, so those stay readable. Restricted AO3 works
+  // (members-only) can never be fetched logged-out, so they're never readable.
+  const readable = !suggestion && !work.restricted && work.offline !== false;
 
   const queueSave = async () => {
     if (saveState !== 'idle') return;
@@ -218,7 +219,18 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
             </button>
           )}
 
-          {!suggestion && ongoing && !work.frozen && (
+          {!suggestion && work.restricted && (
+            <button className="pressable" onClick={openAtSource}
+              style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--warning-soft)', marginBottom: 18, width: '100%', textAlign: 'left', border: 'none' }}>
+              <Icon icon="solar:lock-keyhole-bold" size={20} color="var(--warning)" style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                <b style={{ color: 'var(--text-primary)' }}>Restricted to AO3 members.</b> The author limited this work to logged-in AO3 users, so FicStash can’t download it. Tap to read it on AO3 — or add it by link from your logged-in account.
+              </div>
+              <Icon icon="solar:arrow-right-up-linear" size={18} color="var(--text-tertiary)" style={{ flexShrink: 0, alignSelf: 'center' }} />
+            </button>
+          )}
+
+          {!suggestion && ongoing && !work.frozen && !work.restricted && (
             <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--success-soft, rgba(23,201,100,.12))', marginBottom: 18 }}>
               <Icon icon="solar:refresh-circle-bold" size={20} color="var(--success, #17c964)" style={{ flexShrink: 0, marginTop: 1 }} />
               <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>

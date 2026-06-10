@@ -82,6 +82,12 @@ def _is_rate_limited(exc: Exception) -> bool:
     return "429" in text or "rate limit" in text or "too many requests" in text
 
 
+def _is_restricted_redirect(status_code: int, location: str) -> bool:
+    """True if an AO3 work response redirects guests to the registered-users-only
+    login gate (i.e. the work is restricted to logged-in members)."""
+    return status_code in (301, 302, 303, 307, 308) and "restricted=true" in (location or "").lower()
+
+
 def _enable_adult_view(session) -> None:
     """Set AO3's `view_adult` cookie so Explicit/Mature works don't hit the
     "this work could have adult content — proceed?" interstitial when fetched as
@@ -110,6 +116,18 @@ class AO3Source(Source):
 
     def work_url(self, source_work_id: str) -> str:
         return f"https://archiveofourown.org/works/{source_work_id}"
+
+    def is_restricted(self, source_work_id: str) -> bool:
+        """One cheap request: does this work redirect a guest to the members-only
+        login gate? Used to label works the logged-out worker can't fetch so the
+        app can point the user to AO3 instead of retrying forever."""
+        s = self._require_session()
+        url = self.work_url(source_work_id)
+        try:
+            resp = s.session.get(url, allow_redirects=False, timeout=20)
+        except Exception:  # noqa: BLE001
+            return False
+        return _is_restricted_redirect(resp.status_code, resp.headers.get("Location", ""))
 
     def __init__(self) -> None:
         self._session: AO3.Session | None = None

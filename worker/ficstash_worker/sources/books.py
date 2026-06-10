@@ -120,16 +120,33 @@ class BooksSource(Source):
         if not inc:
             return []
         exc = [c for c in (_subject_clause(t, negate=True) for t in (exclude or [])) if c]
-        q = " ".join(inc + exc)
-        url = (
-            f"{BASE}/search.json"
-            f"?q={quote_plus(q)}"
-            f"&sort=new&limit={int(limit)}&fields={_FIELDS}"
-        )
+
+        # 1) Strict: every term must be an Open Library *subject* (newest first).
+        docs = self._query(" ".join(inc + exc), limit=limit, sort="new")
+
+        # 2) Forgiving fallback: OL subjects are a stiff catalog vocabulary, so
+        #    reader-style tags ("enemies to lovers") often match no subject under
+        #    strict AND. When the strict query is empty, retry as a loose
+        #    free-text search over the raw terms (relevance-ranked, still
+        #    subtracting any excluded subjects) so a group returns relevant books
+        #    instead of nothing. (Tags with no book-catalogue equivalent at all —
+        #    e.g. "male lead" — still find nothing; that's Open Library's limit.)
+        if not docs:
+            terms = " ".join(t.strip() for t in include if t and t.strip())
+            if terms:
+                q = " ".join([terms] + exc)
+                docs = self._query(q, limit=limit, sort=None)
+
+        return _parse_docs(docs, limit=limit)
+
+    def _query(self, q: str, *, limit: int, sort: str | None) -> list:
+        """One Open Library search.json request → its `docs` list."""
+        url = f"{BASE}/search.json?q={quote_plus(q)}&limit={int(limit)}&fields={_FIELDS}"
+        if sort:
+            url += f"&sort={sort}"
         resp = self._session.get(url, timeout=_TIMEOUT)
         resp.raise_for_status()
-        data = json.loads(resp.text)
-        return _parse_docs(data.get("docs", []), limit=limit)
+        return json.loads(resp.text).get("docs", [])
 
 
 def _parse_docs(docs: list, limit: int) -> list[WorkMeta]:

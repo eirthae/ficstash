@@ -31,6 +31,7 @@ function mapWork(row) {
     palette: row.palette,
     frozen: row.frozen,
     frozenDate: row.frozen_date,
+    restricted: !!row.restricted, // AO3 members-only work the guest worker can't fetch
     unread: row.unread,
     offline: row.offline,
     bookmarked: row.bookmarked,
