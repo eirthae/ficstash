@@ -57,6 +57,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from ficstash_worker.lang import allowed_language_set, language_allowed
+from ficstash_worker.saves import fetch_work_chapters
 from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
@@ -336,21 +337,10 @@ def main() -> None:
                     mark_matches_saved(db, wid)
                     saved_count += 1
                     continue
-                space()
-                meta = _with_backoff(
-                    lambda: ao3.fetch_work_metadata(wid),
-                    what=f"requested metadata {wid}",
+                meta, chapters = fetch_work_chapters(
+                    ao3, wid, space=space, backoff=_with_backoff
                 )
                 work_uuid = upsert_work(db, meta, origin="tag")
-                chapters = []
-                for n in range(1, meta.chapters + 1):
-                    space()
-                    chapters.append(
-                        _with_backoff(
-                            lambda n=n: ao3.fetch_chapter(wid, n),
-                            what=f"chapter {n} of {wid}",
-                        )
-                    )
                 written = upsert_chapters(db, work_uuid, chapters)
                 if not written:
                     # No text fetched — leave it un-flagged and still wanted so a
