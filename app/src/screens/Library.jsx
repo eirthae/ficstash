@@ -158,11 +158,8 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
 
   // Books auto-group by series (manual/EPUB) or, failing that, by author — so
   // uploads that share a series or author cluster without any manual work.
-  const bookGroups = isBooks ? groupBooks(shown) : [];
-  // Series grouping only in the default "Last added" tab. When the user picks a
-  // sort (A–Z / Last read) they want a flat re-ordered list, so grouping (which
-  // otherwise overrides the visible order) is turned off for those tabs.
-  const useSeries = isBooks && sort === 'added' && bookGroups.some(g => !g.standalone);
+  const bookGroups = isBooks ? groupBooks(shown, sort, lastRead) : [];
+  const useSeries = isBooks && bookGroups.some(g => !g.standalone);
   // Fandom sections only for Fics in Default sort; otherwise a flat sorted list.
   const useFandom = shelf === 'fics' && sort === 'default';
   const fandomNames = useFandom ? [...new Set(shown.map(fandomName))] : [];
@@ -310,9 +307,16 @@ function LinkRequestRow({ req, onRemove }) {
 
 // Auto-group books: by manual/EPUB series name if set, else by author. A series
 // (even one book) keeps its name; an author cluster needs ≥2 books to form a
-// section — lone books fall into "Standalone". Series order by index; author
-// groups and standalone by title.
-function groupBooks(works) {
+// section — lone books fall into "Standalone". Within a series, books order by
+// index; other groups by title.
+//
+// The GROUP order responds to the active sort, so switching tabs visibly
+// reorders the shelf:
+//   • A–Z      → groups alphabetical by their title (series/author name);
+//                ungrouped books A–Z; Standalone last.
+//   • Last added / Last read → groups ordered by their most-recent book; ditto
+//                for standalone; Standalone last.
+function groupBooks(works, sort = 'added', lastRead = {}) {
   const byKey = new Map();
   const ordered = [];
   const standalone = { name: 'Standalone', items: [], standalone: true };
@@ -328,13 +332,25 @@ function groupBooks(works) {
     if (!g.series && g.items.length < 2) standalone.items.push(...g.items);
     else real.push(g);
   }
+  // Order books within each section.
   for (const g of real) {
     g.items.sort((a, b) => g.series
       ? ((a.seriesIndex ?? 1e9) - (b.seriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''))
       : (a.title || '').localeCompare(b.title || ''));
   }
-  real.sort((a, b) => a.name.localeCompare(b.name));
-  if (standalone.items.length) real.push(standalone);
+  standalone.items = sortWorks(standalone.items, sort, lastRead);
+
+  // Order the sections by the active sort.
+  if (sort === 'title') {
+    real.sort((a, b) => a.name.localeCompare(b.name));
+  } else {
+    const recency = (g) => g.items.reduce((m, x) => {
+      const v = sort === 'read' ? (lastRead[x.id] || '') : (x.createdAt || '');
+      return v > m ? v : m;
+    }, '');
+    real.sort((a, b) => recency(b).localeCompare(recency(a))); // most-recent first
+  }
+  if (standalone.items.length) real.push(standalone); // always underneath the named groups
   return real;
 }
 
