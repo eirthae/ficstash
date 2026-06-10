@@ -82,6 +82,25 @@ def _is_rate_limited(exc: Exception) -> bool:
     return "429" in text or "rate limit" in text or "too many requests" in text
 
 
+def _enable_adult_view(session) -> None:
+    """Set AO3's `view_adult` cookie so Explicit/Mature works don't hit the
+    "this work could have adult content — proceed?" interstitial when fetched as
+    a guest. Without it, that gate page parses as 0 chapters and downloads come
+    back empty. ao3-api wraps a requests.Session; set the cookie on whichever
+    attribute actually holds it. (Restricted, login-only works are a separate
+    case that no guest cookie can unlock.)
+    """
+    for attr in ("session", "_session", "requests_session", "s"):
+        sess = getattr(session, attr, None)
+        cookies = getattr(sess, "cookies", None)
+        if cookies is not None:
+            try:
+                cookies.set("view_adult", "true", domain="archiveofourown.org")
+                return
+            except Exception:  # noqa: BLE001
+                continue
+
+
 class AO3Source(Source):
     id = "ao3"
     # AO3's public pages give us tag/language search, full downloads, ongoing-work
@@ -120,6 +139,7 @@ class AO3Source(Source):
             # authenticate() can still install a logged-in session for any future
             # account feature; until then this keeps every AO3 path working.
             self._session = AO3.GuestSession()
+            _enable_adult_view(self._session)
         return self._session
 
     # ---- reading list ------------------------------------------------------

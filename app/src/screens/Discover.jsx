@@ -96,33 +96,14 @@ export function DiscoverScreen({ nav }) {
 
   return (
     <div className="screen">
-      <Appbar large title="Discover" />
+      <Appbar large title="Discover" actions={[{ icon: 'solar:filter-bold', onClick: () => setFiltersOpen(true) }]} />
       <div className="scroll" style={{ padding: '0 20px 24px' }}>
-        <button
-          className="searchfield pressable"
-          style={{ width: '100%', marginBottom: 18, textAlign: 'left', cursor: 'pointer' }}
-          onClick={() => setBuilderOpen(true)}
-        >
-          <Icon icon="solar:magnifer-linear" size={20} color="var(--text-tertiary)" />
-          <span style={{ color: 'var(--text-tertiary)', flex: 1 }}>Track a tag, ship, or tag group…</span>
-        </button>
-
         <button className="set-group pressable" onClick={openLater}
-          style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, width: '100%', textAlign: 'left', marginBottom: 12 }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, width: '100%', textAlign: 'left', marginBottom: 18 }}>
           <div className="set-ic"><Icon icon="solar:bookmark-linear" size={18} /></div>
           <div style={{ flex: 1 }}>
             <div className="set-h">Later</div>
             <div className="set-d">Works you set aside to decide on.</div>
-          </div>
-          <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
-        </button>
-
-        <button className="set-group pressable" onClick={() => setFiltersOpen(true)}
-          style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, width: '100%', textAlign: 'left', marginBottom: 18 }}>
-          <div className="set-ic"><Icon icon="solar:filter-linear" size={18} /></div>
-          <div style={{ flex: 1 }}>
-            <div className="set-h">Discovery filters</div>
-            <div className="set-d">Limit languages, hide tags (e.g. Explicit) across all discovery.</div>
           </div>
           <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
         </button>

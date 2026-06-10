@@ -159,7 +159,10 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   // Books auto-group by series (manual/EPUB) or, failing that, by author — so
   // uploads that share a series or author cluster without any manual work.
   const bookGroups = isBooks ? groupBooks(shown) : [];
-  const useSeries = isBooks && bookGroups.some(g => !g.standalone);
+  // Series grouping only in the default "Last added" tab. When the user picks a
+  // sort (A–Z / Last read) they want a flat re-ordered list, so grouping (which
+  // otherwise overrides the visible order) is turned off for those tabs.
+  const useSeries = isBooks && sort === 'added' && bookGroups.some(g => !g.standalone);
   // Fandom sections only for Fics in Default sort; otherwise a flat sorted list.
   const useFandom = shelf === 'fics' && sort === 'default';
   const fandomNames = useFandom ? [...new Set(shown.map(fandomName))] : [];
