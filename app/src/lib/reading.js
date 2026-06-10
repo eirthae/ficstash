@@ -17,3 +17,24 @@ export function markRead(workId) {
     localStorage.setItem(KEY, JSON.stringify(m));
   } catch { /* storage unavailable — non-fatal */ }
 }
+
+// Resume position — remember which chapter you were on and how far down it you'd
+// scrolled, per work, in localStorage. On reopening the work the reader jumps
+// back to that chapter and scroll offset (≈ the paragraph you left off on). Kept
+// local: a frequent, personal, offline action that needs no round-trip.
+const POS_KEY = 'fs-readpos';
+
+export function getReadingPos(workId) {
+  if (!workId) return null;
+  try { const m = JSON.parse(localStorage.getItem(POS_KEY) || '{}'); return m[workId] || null; }
+  catch { return null; }
+}
+
+export function saveReadingPos(workId, { chapter, pct }) {
+  if (!workId || !chapter) return;
+  try {
+    const m = JSON.parse(localStorage.getItem(POS_KEY) || '{}');
+    m[workId] = { chapter, pct: Math.max(0, Math.min(1, pct || 0)), at: new Date().toISOString() };
+    localStorage.setItem(POS_KEY, JSON.stringify(m));
+  } catch { /* storage unavailable — non-fatal */ }
+}

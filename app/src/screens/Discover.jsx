@@ -176,7 +176,8 @@ export function DiscoverScreen({ nav }) {
         )}
       </div>
 
-      <TagGroupBuilder open={builderOpen} onClose={() => setBuilderOpen(false)} onCreated={onCreated} />
+      <TagGroupBuilder open={builderOpen} onClose={() => setBuilderOpen(false)} onCreated={onCreated}
+        initialSource={{ ao3: 'ao3', sites: 'royalroad', books: 'books' }[tagShelf] || 'ao3'} />
       <AddLanguageSheet open={addLangOpen} onClose={() => setAddLangOpen(false)}
         followedCodes={followedLangCodes} onPick={followLanguage} />
       <DiscoveryFiltersSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} showToast={showToast} />

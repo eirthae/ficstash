@@ -8,6 +8,7 @@ import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 import { TagGroupBuilder } from './Discover.jsx';
 import { kickSync } from '../lib/sync.js';
+import { getReadingPos } from '../lib/reading.js';
 import { workUrl, sourceLabel } from '../sources/index.js';
 
 export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onReload, nav }) {
@@ -124,7 +125,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
     }
   };
 
-  const openReader = (ch) => nav.push('reader', { work, workId: work.id, chapterTitle: ch ? ch.title : null, chapterN: ch ? ch.n : (work.lastChapter || 1) });
+  // Tapping a specific chapter opens it; the main button passes no chapter so the
+  // reader restores your saved resume position (chapter + scroll) itself.
+  const resumePos = getReadingPos(work.id);
+  const openReader = (ch) => nav.push('reader', { work, workId: work.id, chapterTitle: ch ? ch.title : null, chapterN: ch ? ch.n : undefined });
 
   const openAtSource = () => {
     if (!sourceUrl) { showToast('No source link for this work', 'solar:link-broken-linear'); return; }
@@ -180,7 +184,7 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
             {readable ? (
               <button className="btn btn-lg btn-primary btn-block" onClick={() => openReader()}>
                 <Icon icon="solar:book-2-bold" size={20} />
-                {work.progress >= 1 ? 'Read again' : work.progress > 0 ? `Continue · Ch ${work.lastChapter}` : 'Start reading'}
+                {resumePos && resumePos.chapter ? `Continue · Ch ${resumePos.chapter}` : 'Start reading'}
               </button>
             ) : (
               <button className="btn btn-lg btn-surface btn-block" disabled style={{ opacity: .85 }}>

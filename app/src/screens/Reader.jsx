@@ -4,7 +4,7 @@ import { Sheet, fmtWords } from '../components/ui.jsx';
 import { WORKS, CHAPTERS, READER_PARAS } from '../data/sample.js';
 import { fetchChapters } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
-import { markRead } from '../lib/reading.js';
+import { markRead, getReadingPos, saveReadingPos } from '../lib/reading.js';
 
 export const READER_FONTS = [
   { value: 'serif', label: 'Serif', css: 'var(--font-serif)' },
@@ -21,10 +21,16 @@ export const READER_THEMES = [
   { value: 'yellow', label: 'Yellow', bg: '#fbf1c4', fg: '#46401f' },
 ];
 
-export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitle, settings, setSettings, nav }) {
+export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterTitle, settings, setSettings, nav }) {
   const work = propWork || WORKS.find(w => w.id === workId) || WORKS[0];
   // Stamp this work as just-read (drives the library's "Last read" sort).
   useEffect(() => { markRead(work.id); }, [work.id]);
+  // Saved resume position (read once on mount): which chapter + how far down it.
+  // An explicit chapterN (e.g. tapped a specific chapter) wins; otherwise resume.
+  const savedPos = useRef(getReadingPos(work.id));
+  const positionedFor = useRef(null); // the `cur` we've already scrolled into place
+  const didRestore = useRef(false);   // saved scroll applied once (one-shot)
+  const saveTimer = useRef(null);
   const [chapters, setChapters] = useState(null); // null until live load resolves
   useEffect(() => {
     let alive = true;
@@ -41,7 +47,7 @@ export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitl
   const total = hasReal ? chapters.length
     : demo ? (work.chaptersTotal || work.chapters || CHAPTERS.length)
     : (work.chaptersTotal || work.chapters || 1);
-  const [cur, setCur] = useState(chapterN || work.lastChapter || 1);
+  const [cur, setCur] = useState(chapterN || savedPos.current?.chapter || work.lastChapter || 1);
   const curChapter = hasReal
     ? (chapters.find(c => c.n === cur) || chapters[Math.min(cur, chapters.length) - 1])
     : demo ? (CHAPTERS[Math.min(cur, CHAPTERS.length) - 1] || CHAPTERS[0])
@@ -57,14 +63,47 @@ export function ReaderScreen({ work: propWork, workId, chapterN = 1, chapterTitl
   const f = READER_FONTS.find(x => x.value === settings.font) || READER_FONTS[0];
 
   useEffect(() => { const t = setTimeout(() => setChrome(false), 2200); return () => clearTimeout(t); }, []);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; setScrollPct(0); }, [cur]);
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
+
+  // Position the viewport once per chapter, after its body is in the DOM (so
+  // scrollHeight is real). The first chapter restores the saved scroll fraction
+  // (≈ the paragraph you left off on); every other chapter starts at the top.
+  // Idempotent per `cur` (ref guard) so StrictMode double-invokes and async
+  // re-renders can't clobber a restore.
+  useEffect(() => {
+    if (positionedFor.current === cur) return;
+    const contentReady = demo || (hasReal && !!(curChapter && curChapter.content));
+    if (!contentReady) return; // wait until the chapter text has rendered
+    positionedFor.current = cur;
+    const sp = savedPos.current;
+    let pct = 0;
+    if (!didRestore.current && !chapterN && sp && sp.chapter === cur && (sp.pct || 0) > 0) pct = sp.pct;
+    didRestore.current = true;
+    let tries = 0;
+    const apply = () => {
+      const node = scrollRef.current; if (!node) return;
+      const max = node.scrollHeight - node.clientHeight;
+      if (pct > 0 && max < 80 && tries < 25) { tries++; setTimeout(apply, 40); return; }
+      node.scrollTop = max > 0 ? pct * max : 0;
+      setScrollPct(pct);
+    };
+    setTimeout(apply, 0);
+  }, [cur, chapters, hasReal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScroll = (e) => {
     const el = e.target; const max = el.scrollHeight - el.clientHeight;
-    setScrollPct(max > 0 ? Math.min(1, el.scrollTop / max) : 0);
+    const pct = max > 0 ? Math.min(1, el.scrollTop / max) : 0;
+    setScrollPct(pct);
     if (chrome) setChrome(false);
+    // Persist where we are (throttled) so reopening resumes here.
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveReadingPos(work.id, { chapter: cur, pct }), 350);
   };
-  const goCh = (n) => { if (n >= 1 && n <= total) setCur(n); };
+  const goCh = (n) => {
+    if (n < 1 || n > total) return;
+    setCur(n);
+    saveReadingPos(work.id, { chapter: n, pct: 0 }); // remember the chapter at once
+  };
 
   const onTS = (e) => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
   const onTE = (e) => {
