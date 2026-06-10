@@ -21,6 +21,19 @@ export const READER_THEMES = [
   { value: 'yellow', label: 'Yellow', bg: '#fbf1c4', fg: '#46401f' },
 ];
 
+// Shimmer placeholder shown while a downloaded chapter's text is being fetched
+// (so we never flash the misleading "not downloaded" message on a work we have).
+function ChapterSkeleton() {
+  const lines = [100, 97, 99, 64, 0, 100, 92, 98, 71, 0, 99, 95, 60];
+  return (
+    <div className="reader-skel" aria-label="Loading chapter…">
+      {lines.map((w, i) => w === 0
+        ? <span key={i} className="gap" />
+        : <span key={i} style={{ width: w + '%' }} />)}
+    </div>
+  );
+}
+
 export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterTitle, settings, setSettings, nav }) {
   const work = propWork || WORKS.find(w => w.id === workId) || WORKS[0];
   // Stamp this work as just-read (drives the library's "Last read" sort).
@@ -129,7 +142,11 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
             <div className="ch-kicker">Chapter {cur} of {total}</div>
             <div className="ch-h">{!hasReal && !demo ? work.title : (chapterTitle && cur === chapterN ? chapterTitle : ch.title)}</div>
           </div>
-          {hasReal ? (
+          {chapters === null && !demo ? (
+            // Still fetching the downloaded text — show a skeleton, not the
+            // "not downloaded" message (which wrongly implies it's missing).
+            <ChapterSkeleton />
+          ) : hasReal ? (
             curChapter && curChapter.content
               ? <div className="chapter-body" dangerouslySetInnerHTML={{ __html: curChapter.content }} />
               : <p style={{ color: 'var(--reader-text-dim)' }}>This chapter hasn’t been downloaded yet.</p>
