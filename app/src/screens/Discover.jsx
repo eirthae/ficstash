@@ -12,6 +12,7 @@ import { kickSync } from '../lib/sync.js';
 import { LANGUAGES } from '../lib/languages.js';
 import { fetchDiscoveryPrefs, updateDiscoveryPrefs } from '../lib/discovery.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
+import { GOODREADS_TAGS } from '../data/goodreadsTags.js';
 import {
   ROYALROAD_GENRES, ROYALROAD_TAGS, SCRIBBLEHUB_GENRES, SCRIBBLEHUB_TAGS, sourceLabel,
 } from '../sources/index.js';
@@ -403,15 +404,24 @@ function GenrePicker({ genres, label, picked, onAdd, onRemove }) {
 // open-ended subject vocabulary (no fixed list, no autocomplete), so the user
 // types a subject and it becomes a chip. Stored as {name, id:'', kind:'subject'}
 // so the worker queries Open Library's search.json by subject.
-function SubjectPicker({ picked, onAdd, onRemove, placeholder = 'Type a subject — fantasy, magic, dragons…', accent }) {
+function SubjectPicker({ picked, onAdd, onRemove, placeholder = 'Search reader tags — romance, m/m, enemies to lovers, hockey…', accent }) {
   const [term, setTerm] = useState('');
-  const commit = () => {
-    const name = term.trim();
-    if (!name) return;
-    onAdd({ name, id: '', kind: 'subject' });
+  const add = (name) => {
+    const n = (name || '').trim();
+    if (!n) return;
+    onAdd({ name: n, id: '', kind: 'subject' });
     setTerm('');
   };
+  const commit = () => add(term);
   const c = accent || TAG_COLOR.freeform;
+
+  // Autocomplete over the Goodreads reader-tag vocabulary (free text still works
+  // for anything not listed). Hide ones already picked.
+  const q = term.trim().toLowerCase();
+  const pickedLc = new Set(picked.map((p) => (p.name || '').toLowerCase()));
+  const suggestions = q
+    ? GOODREADS_TAGS.filter((t) => t.toLowerCase().includes(q) && !pickedLc.has(t.toLowerCase())).slice(0, 8)
+    : [];
 
   return (
     <div>
@@ -435,6 +445,16 @@ function SubjectPicker({ picked, onAdd, onRemove, placeholder = 'Type a subject 
           <Icon icon="solar:add-circle-linear" size={18} /> Add
         </button>
       </div>
+      {suggestions.length > 0 && (
+        <div className="chiprow" style={{ flexWrap: 'wrap', gap: 7, marginTop: 10 }}>
+          {suggestions.map((s) => (
+            <button key={s} className="chip pressable" onClick={() => add(s)}
+              style={{ background: 'var(--surface-2)', color: 'var(--text-secondary)' }}>
+              <Icon icon="solar:add-circle-linear" size={13} color="var(--text-tertiary)" /> {s}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
