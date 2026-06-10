@@ -1,7 +1,7 @@
 import Icon from './Icon.jsx';
 
 // ---- App header (shared) --------------------------------------------------
-export function Appbar({ title, large, sub, back, actions }) {
+export function Appbar({ title, large, sub, back, actions, onTitleClick, titleExpanded }) {
   if (large) {
     return (
       <div className="appbar lg">
@@ -23,7 +23,16 @@ export function Appbar({ title, large, sub, back, actions }) {
     <div className="appbar">
       {back && <button className="iconbtn" style={{ marginLeft: -8 }} onClick={back}><Icon icon="solar:arrow-left-linear" size={23} /></button>}
       <div className="rt-title" style={{ flex: 1, minWidth: 0 }}>
-        <div className="title-sm">{title}</div>
+        {onTitleClick ? (
+          <div onClick={onTitleClick} role="button"
+            style={{ display: 'flex', alignItems: titleExpanded ? 'flex-start' : 'center', gap: 4, cursor: 'pointer' }}>
+            <div className="title-sm" style={titleExpanded ? { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip' } : undefined}>{title}</div>
+            <Icon icon={titleExpanded ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'} size={15}
+              style={{ opacity: .5, flexShrink: 0, marginTop: titleExpanded ? 4 : 0 }} />
+          </div>
+        ) : (
+          <div className="title-sm">{title}</div>
+        )}
         {sub && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
       </div>
       {actions && actions.map((a, i) => <button key={i} className="iconbtn ghost" onClick={a.onClick}><Icon icon={a.icon} size={23} /></button>)}

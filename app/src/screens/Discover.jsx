@@ -620,6 +620,7 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
 // ---- Results: works the worker found for a tracked group -------------------
 export function TagResultsScreen({ tag, nav, onLeave }) {
   const [items, setItems] = useState(null); // null = loading
+  const [titleExpanded, setTitleExpanded] = useState(false); // tap title to see full tag-group name
   const [toast, showToast] = useToast();
   const c = TAG_COLOR[tag.kind] || 'var(--accent)';
   const kindLabel = { relationship: 'relationship', fandom: 'fandom', freeform: 'tag', character: 'character', group: 'tag group', language: 'language', genre: 'genre' }[tag.kind] || 'tag';
@@ -670,6 +671,8 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
         title={tag.name}
         sub={`${tag.count ?? list.length} works · ${kindLabel}`}
         actions={[{ icon: 'solar:trash-bin-trash-linear', onClick: removeGroup }]}
+        onTitleClick={() => setTitleExpanded((v) => !v)}
+        titleExpanded={titleExpanded}
       />
       <div className="scroll" style={{ padding: '4px 20px 24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 16, flexWrap: 'wrap' }}>
