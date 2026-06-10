@@ -18,9 +18,24 @@ const READER_DEFAULTS = { theme: 'dark', font: 'serif', size: 19, leading: 1.70,
 
 export default function App() {
   // ---- app color mode (whole chrome) -------------------------------------
-  const [appMode, setAppMode] = useState(() => localStorage.getItem('fs-mode') || 'system');
+  const [appMode, setAppModeState] = useState(() => localStorage.getItem('fs-mode') || 'system');
   const [systemDark, setSystemDark] = useState(() => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  useEffect(() => { try { localStorage.setItem('fs-mode', appMode); } catch (e) {} }, [appMode]);
+  // Mark a real user choice so async hydration never clobbers it, and so we only
+  // persist deliberate changes (not the transient initial/default state).
+  const appModeDirty = useRef(false);
+  const setAppMode = (m) => { appModeDirty.current = true; setAppModeState(m); };
+  useEffect(() => {
+    let alive = true;
+    Preferences.get({ key: 'fs-mode' })
+      .then(({ value }) => { if (alive && value && !appModeDirty.current) setAppModeState(value); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (!appModeDirty.current) return;
+    Preferences.set({ key: 'fs-mode', value: appMode }).catch(() => {});
+    try { localStorage.setItem('fs-mode', appMode); } catch (e) {}
+  }, [appMode]);
   useEffect(() => {
     if (!window.matchMedia) return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -41,23 +56,32 @@ export default function App() {
     let saved = {}; try { saved = JSON.parse(localStorage.getItem('fs-reader') || '{}'); } catch (e) {}
     return { ...READER_DEFAULTS, ...saved };
   });
-  const readerHydrated = useRef(false);
+  // `readerDirty` flips the first time the user actually changes a reader setting.
+  // It does two jobs: (1) the save effect only writes once there's a real change,
+  // so the transient initial/default state never clobbers stored values; (2) the
+  // async hydration below refuses to overwrite a change the user already made.
+  // The old code gated saves on "hydration finished" instead — but on Android the
+  // native Preferences read is slow on cold start, so a quick change in that window
+  // was dropped by the guard and then clobbered by the late hydration. This fixes
+  // that race: a user change is always persisted immediately, to BOTH stores.
+  const readerDirty = useRef(false);
+  const updateReaderSettings = (next) => { readerDirty.current = true; setReaderSettings(next); };
   useEffect(() => {
     let alive = true;
     Preferences.get({ key: 'fs-reader' })
       .then(({ value }) => {
-        if (alive && value) {
+        if (alive && value && !readerDirty.current) {
           try { setReaderSettings({ ...READER_DEFAULTS, ...JSON.parse(value) }); } catch (e) {}
         }
       })
-      .catch(() => {})
-      .finally(() => { readerHydrated.current = true; });
+      .catch(() => {});
     return () => { alive = false; };
   }, []);
   useEffect(() => {
-    if (!readerHydrated.current) return;
-    Preferences.set({ key: 'fs-reader', value: JSON.stringify(readerSettings) }).catch(() => {});
-    try { localStorage.setItem('fs-reader', JSON.stringify(readerSettings)); } catch (e) {}
+    if (!readerDirty.current) return;
+    const json = JSON.stringify(readerSettings);
+    Preferences.set({ key: 'fs-reader', value: json }).catch(() => {});
+    try { localStorage.setItem('fs-reader', json); } catch (e) {}
     try { localStorage.setItem('fs-reader-theme', readerSettings.theme); } catch (e) {}
   }, [readerSettings]);
 
@@ -165,7 +189,7 @@ export default function App() {
   const renderTop = () => {
     const n = nav.current, p = top.props || {};
     if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} onReload={p.onReload} nav={n} />;
-    if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={setReaderSettings} nav={n} />;
+    if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={updateReaderSettings} nav={n} />;
     if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
     if (top.screen === 'later') return <LaterScreen onLeave={p.onLeave} nav={n} />;
     if (top.screen === 'connect') return <ConnectScreen nav={n} />;
