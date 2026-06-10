@@ -18,6 +18,38 @@ export async function requestUrl(url) {
   return { ok: true };
 }
 
+// Pull (source, source_work_id) out of a pasted URL for the sources whose ids
+// are stable and unambiguous in the URL — so we can tell, before queueing,
+// whether the work is already in the library. A miss just means "no warning"
+// (the DB's unique(source, source_work_id) still prevents any real duplicate);
+// we only ever match on an exact id, so this never false-flags.
+function parseWorkRef(url) {
+  const u = (url || '').toLowerCase();
+  let m;
+  if ((m = u.match(/archiveofourown\.org\/works\/(\d+)/))) return { source: 'ao3', id: m[1] };
+  if ((m = u.match(/royalroad\.com\/fiction\/(\d+)/)))      return { source: 'royalroad', id: m[1] };
+  if ((m = u.match(/scribblehub\.com\/series\/(\d+)/)))     return { source: 'scribblehub', id: m[1] };
+  return null;
+}
+
+// Does this URL already correspond to a work in the library? Returns the
+// existing work ({ title, status, offline, hidden }) or null. Used to flag a
+// duplicate add before queueing it. Only checks sources with a parseable id.
+export async function findExistingWork(url) {
+  if (!hasSupabase) return null;
+  const ref = parseWorkRef(url);
+  if (!ref) return null;
+  const { data, error } = await supabase
+    .from('works')
+    .select('id,title,custom_title,status,offline,hidden')
+    .eq('source', ref.source)
+    .eq('source_work_id', ref.id)
+    .limit(1);
+  if (error || !data || !data.length) return null;
+  const w = data[0];
+  return { id: w.id, title: w.custom_title || w.title || 'this work', status: w.status, offline: w.offline, hidden: w.hidden };
+}
+
 // Remove a link request the user no longer wants — e.g. a failed download
 // cluttering the "Other" tab. Returns { ok, error? }.
 export async function removeRequest(id) {

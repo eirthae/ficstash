@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import Icon from './Icon.jsx';
 import { Sheet, useToast } from './ui.jsx';
-import { requestUrl } from '../lib/links.js';
+import { requestUrl, findExistingWork } from '../lib/links.js';
 import { uploadFile, isSupportedUpload } from '../lib/upload.js';
 
 // The global "add" menu, anchored to the centered + button in the bottom nav.
@@ -60,19 +60,34 @@ export function AddMenu({ open, onClose, onChanged }) {
 function AddLinkSheet({ open, onClose, onAdded, showToast }) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    if (busy || !url.trim()) return;
+  const [dupe, setDupe] = useState(null); // existing library work this link points to, if any
+
+  // The actual queue+download, used both for a normal add and "Add anyway".
+  const doRequest = async () => {
     setBusy(true);
     const res = await requestUrl(url);
     setBusy(false);
     if (res.ok) {
-      setUrl('');
+      setUrl(''); setDupe(null);
       showToast('Downloading… it’ll appear here shortly.');
       onAdded && onAdded();
     } else {
       showToast(res.error || 'Could not add link.', 'solar:danger-triangle-bold');
     }
   };
+
+  const submit = async () => {
+    if (busy || !url.trim()) return;
+    // Flag a link that's already in the library before queueing it.
+    setBusy(true);
+    const existing = await findExistingWork(url);
+    setBusy(false);
+    if (existing && !existing.hidden) { setDupe(existing); return; }
+    doRequest();
+  };
+
+  const onChangeUrl = (v) => { setUrl(v); if (dupe) setDupe(null); };
+
   return (
     <Sheet open={open} onClose={onClose} title="Add a work by link">
       <div style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
@@ -81,12 +96,32 @@ function AddLinkSheet({ open, onClose, onAdded, showToast }) {
       <div className="searchfield" style={{ marginBottom: 14 }}>
         <Icon icon="solar:link-linear" size={20} color="var(--text-tertiary)" />
         <input placeholder="https://www.royalroad.com/fiction/…" value={url}
-          onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()}
+          onChange={e => onChangeUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()}
           autoCapitalize="off" autoCorrect="off" spellCheck={false} inputMode="url" />
       </div>
-      <button className="btn btn-lg btn-primary" style={{ width: '100%' }} onClick={submit} disabled={busy || !url.trim()}>
-        {busy ? 'Adding…' : <><Icon icon="solar:download-minimalistic-bold" size={18} /> Download work</>}
-      </button>
+
+      {dupe && (
+        <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--warning-soft, rgba(240,160,30,.14))', marginBottom: 14 }}>
+          <Icon icon="solar:check-circle-bold" size={20} color="var(--warning, #f5a524)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+            <b style={{ color: 'var(--text-primary)' }}>Already in your library:</b> “{dupe.title}”.
+            {dupe.status === 'complete'
+              ? ' It’s complete and already saved.'
+              : ' It’s ongoing and already auto-updates with new chapters each sync.'}
+            {' '}Adding again won’t make a duplicate.
+          </div>
+        </div>
+      )}
+
+      {dupe ? (
+        <button className="btn btn-lg btn-surface" style={{ width: '100%' }} onClick={doRequest} disabled={busy}>
+          {busy ? 'Adding…' : <><Icon icon="solar:refresh-linear" size={18} /> Add anyway (re-fetch)</>}
+        </button>
+      ) : (
+        <button className="btn btn-lg btn-primary" style={{ width: '100%' }} onClick={submit} disabled={busy || !url.trim()}>
+          {busy ? 'Checking…' : <><Icon icon="solar:download-minimalistic-bold" size={18} /> Download work</>}
+        </button>
+      )}
     </Sheet>
   );
 }
