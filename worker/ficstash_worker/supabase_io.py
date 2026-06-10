@@ -247,7 +247,12 @@ def upsert_work(
     # app can link back out; AO3 rows leave source_url null.
     if meta.source != "ao3" and meta.url:
         payload["source_url"] = meta.url
-    for key in ("offline", "bookmarked", "subscribed", "in_history", "follow"):
+    # `follow` is not a manual toggle. Every still-updating work is followed by
+    # default so the refresh pass re-checks it for new chapters on each sync;
+    # complete works are unfollowed (nothing left to fetch). Derived from status
+    # on every upsert, so it self-corrects as a work flips ongoing → complete.
+    payload["follow"] = (meta.status or "").strip().lower() != "complete"
+    for key in ("offline", "bookmarked", "subscribed", "in_history"):
         if key in flags:
             payload[key] = bool(flags[key])
     if origin:
