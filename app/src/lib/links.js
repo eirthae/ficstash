@@ -1,5 +1,6 @@
 import { supabase, hasSupabase } from './supabase.js';
 import { triggerSync } from './sync.js';
+import { parseWorkRef } from './urlref.js';
 
 // Add a work by pasting its URL. The app can't fetch a site directly (it only
 // talks to Supabase), so this queues the URL and kicks the worker, which
@@ -16,20 +17,6 @@ export async function requestUrl(url) {
   // just means it waits for the next scheduled sync, so don't surface it.
   triggerSync().catch(() => {});
   return { ok: true };
-}
-
-// Pull (source, source_work_id) out of a pasted URL for the sources whose ids
-// are stable and unambiguous in the URL — so we can tell, before queueing,
-// whether the work is already in the library. A miss just means "no warning"
-// (the DB's unique(source, source_work_id) still prevents any real duplicate);
-// we only ever match on an exact id, so this never false-flags.
-function parseWorkRef(url) {
-  const u = (url || '').toLowerCase();
-  let m;
-  if ((m = u.match(/archiveofourown\.org\/works\/(\d+)/))) return { source: 'ao3', id: m[1] };
-  if ((m = u.match(/royalroad\.com\/fiction\/(\d+)/)))      return { source: 'royalroad', id: m[1] };
-  if ((m = u.match(/scribblehub\.com\/series\/(\d+)/)))     return { source: 'scribblehub', id: m[1] };
-  return null;
 }
 
 // Does this URL already correspond to a work in the library? Returns the

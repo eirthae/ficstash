@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from supabase import Client, create_client
 
 from .sources.base import Chapter, WorkMeta
+from .util import is_following
 from .sources.ao3 import palette_for
 
 
@@ -251,7 +252,7 @@ def upsert_work(
     # default so the refresh pass re-checks it for new chapters on each sync;
     # complete works are unfollowed (nothing left to fetch). Derived from status
     # on every upsert, so it self-corrects as a work flips ongoing → complete.
-    payload["follow"] = (meta.status or "").strip().lower() != "complete"
+    payload["follow"] = is_following(meta.status)
     for key in ("offline", "bookmarked", "subscribed", "in_history"):
         if key in flags:
             payload[key] = bool(flags[key])
