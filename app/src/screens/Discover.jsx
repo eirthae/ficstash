@@ -9,6 +9,8 @@ import {
   markLater, unmarkLater, fetchLaterMatches,
 } from '../lib/tags.js';
 import { kickSync } from '../lib/sync.js';
+import { LANGUAGES } from '../lib/languages.js';
+import { fetchDiscoveryPrefs, updateDiscoveryPrefs } from '../lib/discovery.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
 import {
   ROYALROAD_GENRES, ROYALROAD_TAGS, SCRIBBLEHUB_GENRES, SCRIBBLEHUB_TAGS, sourceLabel,
@@ -30,10 +32,6 @@ const TAXONOMY_BY_SOURCE = {
 // its cards just link out to Open Library and the user buys + uploads the EPUB.
 const isSavableSource = (src) => src !== 'books';
 
-// Languages you can browse straight from Discover. `code` is AO3's language_id
-// (ISO 639); `name` is shown on the tile. Add more entries to offer more.
-const LANGUAGES = [{ code: 'hy', name: 'հայերեն', label: 'Armenian', palette: 3 }];
-
 // ============================================================================
 // Discover — track AO3 tags / tag groups and review the works they turn up.
 // Groups are stored in Supabase (tracked_groups); the worker fills tag_matches.
@@ -42,6 +40,8 @@ const LANGUAGES = [{ code: 'hy', name: 'հայերեն', label: 'Armenian', pale
 export function DiscoverScreen({ nav }) {
   const [groups, setGroups] = useState(null); // null = loading
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [addLangOpen, setAddLangOpen] = useState(false); // follow a new language
+  const [filtersOpen, setFiltersOpen] = useState(false); // global discovery filters
   const [tagShelf, setTagShelf] = useState('ao3'); // ao3 | sites | books
   const [toast, showToast] = useToast();
 
@@ -79,19 +79,20 @@ export function DiscoverScreen({ nav }) {
     load();
   };
 
-  // Tap a language: open its results if already browsing, else start one.
-  const openLanguage = async (lang) => {
-    const existing = langGroups.find((g) => g.language === lang.code);
-    if (existing) { open(existing); return; }
+  // Follow a language: start a "browse this whole language" group, unless we
+  // already follow it. Codes already followed are hidden from the picker.
+  const followLanguage = async (lang) => {
+    setAddLangOpen(false);
+    if (langGroups.some((g) => g.language === lang.code)) { showToast(`Already following ${lang.english}`); return; }
     try {
-      const g = await createLanguageGroup({ code: lang.code, name: lang.name, label: lang.label });
-      showToast(`Browsing ${lang.label}`);
+      await createLanguageGroup({ code: lang.code, name: lang.native, label: lang.english });
+      showToast(`Now following ${lang.english}`);
       load();
-      open(g);
     } catch {
-      showToast("Couldn't start — check your connection", 'solar:danger-triangle-linear');
+      showToast("Couldn't add — check your connection", 'solar:danger-triangle-linear');
     }
   };
+  const followedLangCodes = new Set(langGroups.map((g) => g.language));
 
   return (
     <div className="screen">
@@ -107,11 +108,21 @@ export function DiscoverScreen({ nav }) {
         </button>
 
         <button className="set-group pressable" onClick={openLater}
-          style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, width: '100%', textAlign: 'left', marginBottom: 18 }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, width: '100%', textAlign: 'left', marginBottom: 12 }}>
           <div className="set-ic"><Icon icon="solar:bookmark-linear" size={18} /></div>
           <div style={{ flex: 1 }}>
             <div className="set-h">Later</div>
             <div className="set-d">Works you set aside to decide on.</div>
+          </div>
+          <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
+        </button>
+
+        <button className="set-group pressable" onClick={() => setFiltersOpen(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, width: '100%', textAlign: 'left', marginBottom: 18 }}>
+          <div className="set-ic"><Icon icon="solar:filter-linear" size={18} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="set-h">Discovery filters</div>
+            <div className="set-d">Limit languages, hide tags (e.g. Explicit) across all discovery.</div>
           </div>
           <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
         </button>
@@ -150,21 +161,147 @@ export function DiscoverScreen({ nav }) {
 
         {groups !== null && tagShelf === 'ao3' && (
           <>
-            <div className="section-label" style={{ marginTop: 26, marginBottom: 12 }}>Browse by language</div>
+            <div className="section-label" style={{ marginTop: 26, marginBottom: 12 }}>Followed languages</div>
             <div className="tilegrid">
-              {LANGUAGES.map((lang) => {
-                const g = langGroups.find((x) => x.language === lang.code);
-                const tile = g || { id: `lang-${lang.code}`, name: lang.name, kind: 'language', count: 0, fresh: 0, palette: lang.palette };
-                return <TagTile key={lang.code} tag={tile} onOpen={() => openLanguage(lang)} />;
-              })}
+              {langGroups.map((g) => <TagTile key={g.id} tag={g} onOpen={() => open(g)} />)}
+              <button className="tile add pressable" onClick={() => setAddLangOpen(true)}>
+                <Icon icon="solar:add-circle-linear" size={30} />
+                <div className="t-name" style={{ marginTop: 6 }}>Add language</div>
+              </button>
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 8 }}>
+              Follow a whole language to see new works in it. Follow as many as you like.
             </div>
           </>
         )}
       </div>
 
       <TagGroupBuilder open={builderOpen} onClose={() => setBuilderOpen(false)} onCreated={onCreated} />
+      <AddLanguageSheet open={addLangOpen} onClose={() => setAddLangOpen(false)}
+        followedCodes={followedLangCodes} onPick={followLanguage} />
+      <DiscoveryFiltersSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} showToast={showToast} />
       {toast}
     </div>
+  );
+}
+
+// ---- Add a language to follow --------------------------------------------
+// Searchable list of AO3 languages; ones already followed are hidden.
+function AddLanguageSheet({ open, onClose, followedCodes, onPick }) {
+  const [q, setQ] = useState('');
+  const needle = q.trim().toLowerCase();
+  const choices = LANGUAGES
+    .filter((l) => !followedCodes.has(l.code))
+    .filter((l) => !needle || l.english.toLowerCase().includes(needle) || l.native.toLowerCase().includes(needle));
+  return (
+    <Sheet open={open} onClose={onClose} title="Follow a language" maxH="80%">
+      <div className="searchfield" style={{ marginBottom: 12 }}>
+        <Icon icon="solar:magnifer-linear" size={18} color="var(--text-tertiary)" />
+        <input placeholder="Search languages…" value={q} onChange={(e) => setQ(e.target.value)}
+          autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: '52vh', overflowY: 'auto' }}>
+        {choices.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 4px' }}>No more languages to add.</div>
+        ) : choices.map((l) => (
+          <button key={l.code} className="set-row pressable" style={{ width: '100%', textAlign: 'left' }} onClick={() => onPick(l)}>
+            <div className="set-ic"><Icon icon="solar:global-linear" size={18} /></div>
+            <div className="set-tx"><div className="set-h">{l.english}</div><div className="set-d">{l.native}</div></div>
+            <Icon icon="solar:add-circle-linear" size={20} color="var(--accent)" />
+          </button>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
+// ---- Global discovery filters --------------------------------------------
+// Preferred languages (empty = all) + globally-excluded tags. Applied by the
+// worker to every tag-discovery search.
+function DiscoveryFiltersSheet({ open, onClose, showToast }) {
+  const [langs, setLangs] = useState([]);       // [{code,native,english}]
+  const [excluded, setExcluded] = useState([]); // [{name,id,kind}]
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [langPick, setLangPick] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    fetchDiscoveryPrefs()
+      .then((p) => { setLangs(p.languages || []); setExcluded(p.excludedTags || []); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  const removeLang = (code) => setLangs((ls) => ls.filter((l) => l.code !== code));
+  const addLang = (l) => { setLangs((ls) => (ls.some((x) => x.code === l.code) ? ls : [...ls, l])); setLangPick(false); };
+  const addExcluded = (t) => setExcluded((p) => (p.some((x) => x.name === t.name) ? p : [...p, t]));
+  const removeExcluded = (name) => setExcluded((p) => p.filter((x) => x.name !== name));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await updateDiscoveryPrefs({ languages: langs, excludedTags: excluded });
+      showToast('Discovery filters saved');
+      onClose();
+    } catch {
+      showToast("Couldn't save filters", 'solar:danger-triangle-linear');
+    } finally { setSaving(false); }
+  };
+
+  const pickable = LANGUAGES.filter((l) => !langs.some((x) => x.code === l.code));
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Discovery filters" maxH="86%">
+      {loading ? (
+        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 4px' }}>Loading…</div>
+      ) : (
+        <>
+          <div className="section-label" style={{ marginBottom: 8 }}>Only these languages</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 10 }}>
+            Discovery will only surface works in these languages. Leave empty to allow all.
+          </div>
+          <div className="chiprow" style={{ marginBottom: 10 }}>
+            {langs.map((l) => (
+              <button key={l.code} className="chip pressable" onClick={() => removeLang(l.code)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {l.english}
+                <Icon icon="solar:close-circle-bold" size={15} color="var(--text-tertiary)" />
+              </button>
+            ))}
+            {langs.length === 0 && <span style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>All languages</span>}
+          </div>
+          {langPick ? (
+            <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: 14 }}>
+              {pickable.map((l) => (
+                <button key={l.code} className="pressable" onClick={() => addLang(l)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '9px 12px', background: 'transparent', borderBottom: '1px solid var(--border)', fontSize: 13.5, color: 'var(--text-primary)' }}>
+                  <Icon icon="solar:global-linear" size={15} color="var(--text-tertiary)" />
+                  <span>{l.english}</span>
+                  <span style={{ color: 'var(--text-tertiary)', marginLeft: 'auto' }}>{l.native}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <button className="btn btn-surface" style={{ marginBottom: 18 }} onClick={() => setLangPick(true)}>
+              <Icon icon="solar:add-circle-linear" size={18} /> Add language
+            </button>
+          )}
+
+          <div className="section-label" style={{ marginTop: 6, marginBottom: 8 }}>Never show works tagged</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 10 }}>
+            Hide any discovered work carrying these tags — including ratings like “Explicit”.
+          </div>
+          <TagPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded}
+            placeholder="Search AO3 tags to exclude…" accent="var(--danger, #f5455c)" />
+
+          <button className="btn btn-lg btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={saving} onClick={save}>
+            {saving ? 'Saving…' : <><Icon icon="solar:check-circle-bold" size={18} /> Save filters</>}
+          </button>
+        </>
+      )}
+    </Sheet>
   );
 }
 

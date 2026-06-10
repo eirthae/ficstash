@@ -125,6 +125,26 @@ def record_chapter_updates(client: Client, work_uuid: str, source: str,
     return len(rows)
 
 
+def fetch_discovery_prefs(client: Client) -> dict:
+    """Global discovery filters (the single discovery_prefs row).
+
+    Returns {"languages": [...], "excluded_tags": [...]} or {} if the row/table
+    isn't there yet, so callers apply no extra filtering by default.
+    """
+    try:
+        resp = (
+            client.table("discovery_prefs")
+            .select("languages,excluded_tags")
+            .eq("id", 1)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        return rows[0] if rows else {}
+    except Exception:  # noqa: BLE001 — table may not exist on older deployments
+        return {}
+
+
 def fetch_ongoing_offline_works(
     client: Client, limit: int | None = None
 ) -> list[dict]:

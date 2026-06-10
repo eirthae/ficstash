@@ -61,6 +61,7 @@ from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     fetch_non_offline_works,
+    fetch_discovery_prefs,
     fetch_ongoing_offline_works,
     fetch_plaintext_chapter_works,
     fetch_requested_urls,
@@ -433,6 +434,41 @@ def main() -> None:
     print("\n== Tracked tag groups ==")
     groups = fetch_tracked_groups(db)
     print(f"{len(groups)} tracked group(s).")
+
+    # ---- global discovery filters (app-editable; discovery_prefs row) -------
+    # `languages` = only keep tag-discovery matches in these languages (empty =
+    # all). Each entry carries native + English spellings so we match a work's
+    # language string directly. `excluded_tags` are merged into every AO3 tag
+    # search (AO3 drops them server-side as excluded_tag_names) and also used as
+    # a post-filter safety net. Ratings are tags on AO3, so this covers "exclude
+    # Explicit". Language *groups* are exempt — an explicit language follow is
+    # the filter, so we never second-guess it with the global language pref.
+    prefs = fetch_discovery_prefs(db)
+    discovery_langs: set[str] = set()
+    for entry in prefs.get("languages") or []:
+        if isinstance(entry, dict):
+            for key in ("native", "english", "code"):
+                val = (entry.get(key) or "").strip().lower()
+                if val:
+                    discovery_langs.add(val)
+    global_excluded = [
+        (t.get("name") if isinstance(t, dict) else str(t))
+        for t in (prefs.get("excluded_tags") or [])
+    ]
+    global_excluded = [t for t in global_excluded if t]
+    if discovery_langs:
+        print(f"  discovery languages: {sorted(discovery_langs)}")
+    if global_excluded:
+        print(f"  global excluded tags: {global_excluded}")
+
+    def keep_discovery_language(meta) -> bool:
+        if not discovery_langs:
+            return True  # no preference set → allow every language
+        lang = (getattr(meta, "language", "") or "").strip().lower()
+        if lang in ("", "unknown"):
+            return True  # never drop on missing data
+        return lang in discovery_langs
+
     for g in groups:
         # Only surface works new since we last searched this group; on the very
         # first run (never checked) anchor to when the group was created, so a
@@ -485,6 +521,10 @@ def main() -> None:
             for t in (g.get("excluded_tags") or [])
         ]
         excluded_names = [t for t in excluded_names if t]
+        # Fold in the global excluded tags (deduped, order-stable).
+        for t in global_excluded:
+            if t not in excluded_names:
+                excluded_names.append(t)
         label = g.get("label") or " + ".join(tag_names) or g["id"]
         if not tag_names:
             print(f"    '{label}': no tags, skipped.")
@@ -503,7 +543,7 @@ def main() -> None:
                     what=f"tag search '{label}'",
                     broad=True,
                 )
-                kept = [m for m in metas if keep_language(m)]
+                kept = [m for m in metas if keep_discovery_language(m)]
                 dropped = len(metas) - len(kept)
                 written = upsert_tag_matches(db, g["id"], kept)
                 mark_group_checked(db, g["id"])
