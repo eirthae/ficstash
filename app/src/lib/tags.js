@@ -84,16 +84,19 @@ export async function fetchTrackedGroups() {
     .order('created_at', { ascending: true });
   if (error) throw error;
 
-  // One extra read to tally total/fresh matches per group, client-side.
-  // Dismissed (hidden) matches don't count toward either tally.
+  // One extra read to tally total/fresh matches per group, client-side. The
+  // tally must match what opening the group actually shows (see fetchMatches):
+  // dismissed (hidden), saved (already in the library), and later (moved to the
+  // Later stash) matches all drop out of the feed, so they don't count here —
+  // otherwise a group reads "12 tracked" but opens to 2.
   const { data: matches, error: mErr } = await supabase
     .from('tag_matches')
-    .select('group_id,seen,dismissed');
+    .select('group_id,seen,dismissed,saved,later');
   if (mErr) throw mErr;
 
   const counts = {};
   for (const m of matches || []) {
-    if (m.dismissed) continue;
+    if (m.dismissed || m.saved || m.later) continue;
     const c = counts[m.group_id] || (counts[m.group_id] = { total: 0, fresh: 0 });
     c.total += 1;
     if (!m.seen) c.fresh += 1;

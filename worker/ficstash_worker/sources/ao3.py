@@ -338,9 +338,10 @@ class AO3Source(Source):
         self,
         tags: list[str],
         match_mode: str = "all",
-        limit: int = 30,
+        limit: int = 120,
         excluded_tags: list[str] | None = None,
         since: datetime | None = None,
+        max_pages: int = 8,
     ) -> list[WorkMeta]:
         """Find recent works matching a tracked tag group, via AO3's own search.
 
@@ -353,8 +354,10 @@ class AO3Source(Source):
         carrying one is dropped before it becomes a match.
         `since` constrains results to works revised on/after that moment (AO3's
         own date filter), so a run only surfaces works new since the last sync;
-        None searches all-time. Results are newest-first by date posted, deduped,
-        capped at `limit`.
+        None searches all-time (a freshly tracked tag's whole back-catalogue).
+        We walk result pages (up to `max_pages`) until one comes back empty/short
+        or `limit` is reached, so a tag with more than one page of works is fully
+        covered — not silently truncated to the first 30. Newest-first, deduped.
         """
         tags = [t for t in (tags or []) if t]
         if not tags:
@@ -367,13 +370,17 @@ class AO3Source(Source):
         for qi, q in enumerate(queries):
             if qi:
                 time.sleep(RATE_LIMIT_SECONDS)  # space multi-tag 'any' searches
-            for w in self._run_tag_search(q, limit, excluded_tags=excluded_csv, revised_at=revised):
+            for w in self._run_tag_search(
+                q, limit, excluded_tags=excluded_csv, revised_at=revised, max_pages=max_pages
+            ):
                 wid = str(getattr(w, "id", "") or "")
                 if not wid or wid in seen:
                     continue
                 seen[wid] = _work_to_meta(self.id, wid, w)
                 if len(seen) >= limit:
                     break
+            if len(seen) >= limit:
+                break
         return list(seen.values())[:limit]
 
     # ---- language discovery ------------------------------------------------
@@ -447,32 +454,61 @@ class AO3Source(Source):
         return works[:limit] if limit else works
 
     def _run_tag_search(
-        self, tags_csv: str, limit: int, excluded_tags: str = "", revised_at: str = ""
+        self,
+        tags_csv: str,
+        limit: int,
+        excluded_tags: str = "",
+        revised_at: str = "",
+        max_pages: int = 8,
     ):
         s = self._require_session()
-        try:
+
+        def _make_search(page: int):
             try:
-                search = AO3.Search(
+                return AO3.Search(
                     tags=tags_csv,
                     excluded_tags=excluded_tags,
                     revised_at=revised_at,
                     sort_column="created_at",
+                    page=page,
                     session=s,
                 )
             except TypeError:
-                # Older ao3-api signatures lack revised_at / sort_column / excluded_tags.
+                # Older ao3-api signatures lack revised_at / sort_column / page / excluded_tags.
                 try:
-                    search = AO3.Search(
-                        tags=tags_csv, excluded_tags=excluded_tags, session=s
-                    )
+                    search = AO3.Search(tags=tags_csv, excluded_tags=excluded_tags, session=s)
                 except TypeError:
                     search = AO3.Search(tags=tags_csv, session=s)
-            search.update()
-        except Exception as exc:  # noqa: BLE001
-            if _is_rate_limited(exc):
-                raise RateLimitError(str(exc)) from exc
-            raise
-        return (getattr(search, "results", None) or [])[:limit]
+                try:
+                    search.page = page
+                except Exception:  # noqa: BLE001
+                    pass
+                return search
+
+        out: list = []
+        seen_ids: set[str] = set()
+        for page in range(1, max_pages + 1):
+            try:
+                search = _make_search(page)
+                search.update()
+            except Exception as exc:  # noqa: BLE001
+                if _is_rate_limited(exc):
+                    raise RateLimitError(str(exc)) from exc
+                raise
+            results = getattr(search, "results", None) or []
+            if not results:
+                break  # walked past the last page
+            for w in results:
+                wid = str(getattr(w, "id", "") or "")
+                if wid and wid not in seen_ids:
+                    seen_ids.add(wid)
+                    out.append(w)
+            if len(out) >= limit:
+                break
+            if len(results) < 15:
+                break  # short final page — we've reached the tail
+            time.sleep(RATE_LIMIT_SECONDS)  # be kind between pages
+        return out[:limit]
 
 
 # ---- helpers ---------------------------------------------------------------

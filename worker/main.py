@@ -468,14 +468,15 @@ def main() -> None:
         return lang in discovery_langs
 
     for g in groups:
-        # Only surface works new since we last searched this group; on the very
-        # first run (never checked) anchor to when the group was created, so a
-        # freshly tracked tag pulls works posted from that moment on rather than
-        # the tag's whole back-catalogue. Both manual and auto syncs stamp
-        # last_checked, so the window always advances to the previous sync.
+        # First run (never checked) SEEDS the tag's whole back-catalogue: since
+        # stays None → AO3 searches all-time, so a freshly tracked tag surfaces
+        # its existing works (capped/paginated in search_group), not just ones
+        # posted after you added it. Every run after that is incremental — only
+        # works new since the previous sync. Both manual and auto syncs stamp
+        # last_checked, so the window always advances.
         last_checked = _parse_ts(g.get("last_checked"))
-        since = last_checked or _parse_ts(g.get("created_at"))
-        anchor = "last sync" if last_checked else "first run / created"
+        since = last_checked  # None on first run → all-time seed
+        anchor = "last sync" if last_checked else "first run / all-time seed"
         window = since.isoformat() if since else "all-time"
         source_id = g.get("source") or "ao3"
         print(f"  window: works since {window} ({anchor}) · source {source_id}")

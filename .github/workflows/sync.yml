@@ -7,9 +7,10 @@ name: Sync
 on:
   workflow_dispatch:
   schedule:
-    # Daily at 04:00 Japan time (JST = UTC+9), i.e. 19:00 UTC.
+    # Daily at 03:00 Japan time (JST = UTC+9), i.e. 18:00 UTC. Moved earlier from
+    # 04:00 to give the (now all-time first-run) tag fetch more overnight headroom.
     # AO3 is a volunteer nonprofit — keep this to once a day.
-    - cron: "0 19 * * *"
+    - cron: "0 18 * * *"
 
 # Don't let a scheduled run and a manual run hammer AO3 at the same time.
 concurrency:

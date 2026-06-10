@@ -295,22 +295,28 @@ function TagPicker({ picked, onAdd, onRemove, placeholder, accent }) {
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const debounce = useRef();
+  const reqId = useRef(0); // monotonic id so a slow earlier search can't overwrite a newer one
 
   useEffect(() => {
     clearTimeout(debounce.current);
     const q = term.trim();
     if (q.length < 2) { setResults([]); setSearching(false); return; }
+    const id = ++reqId.current; // this query's ticket
     setSearching(true);
     debounce.current = setTimeout(() => {
       autocompleteTags(q)
-        .then((r) => setResults(r))
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false));
+        .then((r) => { if (id === reqId.current) setResults(r); })   // ignore stale resolutions
+        .catch(() => { if (id === reqId.current) setResults([]); })
+        .finally(() => { if (id === reqId.current) setSearching(false); });
     }, 280);
     return () => clearTimeout(debounce.current);
   }, [term]);
 
-  const add = (t) => { onAdd(t); setTerm(''); setResults([]); };
+  const add = (t) => { onAdd(t); setTerm(''); setResults([]); reqId.current++; };
+  // Close this picker's suggestion list when it loses focus, so moving to the
+  // other (include ↔ exclude) field doesn't leave a stale dropdown open. Delay
+  // so a tap on a suggestion still registers before the list clears.
+  const onBlur = () => { reqId.current++; setTimeout(() => setResults([]), 150); };
 
   return (
     <div>
@@ -329,7 +335,7 @@ function TagPicker({ picked, onAdd, onRemove, placeholder, accent }) {
           })}
         </div>
       )}
-      <SearchField placeholder={placeholder} value={term} onChange={setTerm} />
+      <SearchField placeholder={placeholder} value={term} onChange={setTerm} onBlur={onBlur} />
       {searching && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 6, paddingLeft: 2 }}>Searching AO3…</div>}
       {results.length > 0 && (
         <div className="tag-suggest" style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>

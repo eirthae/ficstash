@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import html as _html
 import re
+import time
 
 import requests
 
@@ -30,11 +31,29 @@ _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
 _TIMEOUT = 25
 _MAX_INCLUDE = 3   # cap shelves fetched per group (politeness)
 _MAX_EXCLUDE = 2
+_DESC_LIMIT = 12   # only fetch a real blurb for the first N results (one request each)
+_DESC_PAUSE = 0.4  # polite gap between per-book detail fetches
 
 
 def _slug(tag: str) -> str:
     """A Goodreads shelf slug: lowercase, non-alphanumerics → single hyphens."""
     return re.sub(r"[^a-z0-9]+", "-", (tag or "").strip().lower()).strip("-")
+
+
+def parse_description(html_text: str) -> str:
+    """Pull a book's blurb from a Goodreads /book/show page.
+
+    The shelf listing carries no synopsis, but the book page exposes it for SEO
+    in a social-share meta tag (`og:description`, falling back to the plain
+    `description` meta). Pure/regex-based so it's unit-testable without network.
+    """
+    for prop in ('property="og:description"', 'name="description"'):
+        for tag in re.findall(r"<meta\b[^>]*>", html_text or ""):
+            if prop in tag:
+                cm = re.search(r'content="([^"]*)"', tag)
+                if cm and cm.group(1).strip():
+                    return _html.unescape(cm.group(1)).strip()
+    return ""
 
 
 def parse_shelf(html_text: str, limit: int = 50) -> list[dict]:
@@ -79,6 +98,16 @@ class BooksSource(Source):
     def work_url(self, source_work_id: str) -> str:
         return f"{BASE}/book/show/{source_work_id}"
 
+    def _description(self, bid: str) -> str:
+        """Fetch one book page and extract its blurb ("" on any failure)."""
+        try:
+            resp = self._session.get(f"{BASE}/book/show/{bid}", timeout=_TIMEOUT)
+            if resp.status_code != 200:
+                return ""
+            return parse_description(resp.text)
+        except Exception:  # noqa: BLE001 — a flaky fetch shouldn't kill the sync
+            return ""
+
     def _shelf(self, tag: str, limit: int = 50) -> list[dict]:
         slug = _slug(tag)
         if not slug:
@@ -121,17 +150,28 @@ class BooksSource(Source):
                 ids.discard(b["id"])
 
         # Order by the primary shelf (Goodreads' own popularity order).
-        ordered = [b["id"] for b in shelves[0] if b["id"] in ids]
-        return [self._to_meta(by_id[i]) for i in ordered[:limit]]
+        ordered = [b["id"] for b in shelves[0] if b["id"] in ids][:limit]
+        # Enrich the first few with a real description (one extra fetch each,
+        # capped + spaced); the rest keep a light placeholder.
+        metas: list[WorkMeta] = []
+        for idx, bid in enumerate(ordered):
+            desc = ""
+            if idx < _DESC_LIMIT:
+                if idx:
+                    time.sleep(_DESC_PAUSE)
+                desc = self._description(bid)
+            metas.append(self._to_meta(by_id[bid], desc))
+        return metas
 
-    def _to_meta(self, b: dict) -> WorkMeta:
+    def _to_meta(self, b: dict, description: str = "") -> WorkMeta:
         rating = f" · {b['rating']}★ avg" if b.get("rating") else ""
+        summary = description.strip() if description else f"Book on Goodreads{rating}"
         return WorkMeta(
             source="books",
             source_work_id=b["id"],
             title=b["title"],
             author=b["author"],
-            summary=f"Book on Goodreads{rating}",
+            summary=summary,
             tags=[{"t": "Book", "k": "freeform"}],
             status="complete",  # a published book is a finished work
             url=self.work_url(b["id"]),

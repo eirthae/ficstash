@@ -18,23 +18,49 @@ export function markRead(workId) {
   } catch { /* storage unavailable — non-fatal */ }
 }
 
-// Resume position — remember which chapter you were on and how far down it you'd
-// scrolled, per work, in localStorage. On reopening the work the reader jumps
-// back to that chapter and scroll offset (≈ the paragraph you left off on). Kept
-// local: a frequent, personal, offline action that needs no round-trip.
+// Resume position — remember how far down EACH chapter you'd scrolled, per work,
+// in localStorage. We keep a position per chapter (not just one per work) so that
+// leaving a chapter near the end, reading ahead, then coming BACK returns you to
+// where you were — not the top. `last` points at the chapter to resume on reopen.
+// Kept local: a frequent, personal, offline action that needs no round-trip.
+//
+// Shape: { [workId]: { chapters: { [n]: pct }, last: n, at: iso } }
+// (Older builds stored { chapter, pct } — read() migrates that on the fly.)
 const POS_KEY = 'fs-readpos';
 
+function readAll() {
+  try { return JSON.parse(localStorage.getItem(POS_KEY) || '{}'); } catch { return {}; }
+}
+function entry(m, workId) {
+  const e = m[workId];
+  if (e && e.chapters) return e;
+  if (e && e.chapter) return { chapters: { [e.chapter]: e.pct || 0 }, last: e.chapter, at: e.at }; // migrate legacy
+  return { chapters: {}, last: null, at: null };
+}
+
+// Where to resume the work as a whole (latest chapter touched + its scroll).
 export function getReadingPos(workId) {
   if (!workId) return null;
-  try { const m = JSON.parse(localStorage.getItem(POS_KEY) || '{}'); return m[workId] || null; }
-  catch { return null; }
+  const e = entry(readAll(), workId);
+  if (!e.last) return null;
+  return { chapter: e.last, pct: e.chapters[e.last] || 0 };
+}
+
+// Saved scroll fraction for a SPECIFIC chapter (0 if never visited).
+export function getChapterPos(workId, chapter) {
+  if (!workId || !chapter) return 0;
+  return entry(readAll(), workId).chapters[chapter] || 0;
 }
 
 export function saveReadingPos(workId, { chapter, pct }) {
   if (!workId || !chapter) return;
   try {
-    const m = JSON.parse(localStorage.getItem(POS_KEY) || '{}');
-    m[workId] = { chapter, pct: Math.max(0, Math.min(1, pct || 0)), at: new Date().toISOString() };
+    const m = readAll();
+    const e = entry(m, workId);
+    e.chapters[chapter] = Math.max(0, Math.min(1, pct || 0));
+    e.last = chapter;
+    e.at = new Date().toISOString();
+    m[workId] = e;
     localStorage.setItem(POS_KEY, JSON.stringify(m));
   } catch { /* storage unavailable — non-fatal */ }
 }

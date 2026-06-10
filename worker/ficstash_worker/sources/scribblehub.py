@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import html as _html
 import re
+import time
 
 import requests
 
@@ -46,6 +47,23 @@ _HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 _TIMEOUT = 25
+_DESC_LIMIT = 12   # only fetch a real blurb for the first N finder results
+_DESC_PAUSE = 0.4  # polite gap between per-series detail fetches
+
+
+def parse_description(html_text: str) -> str:
+    """A Scribble Hub series blurb from its /series page.
+
+    The Series Finder cards carry no synopsis, but each series page exposes one
+    for SEO in the `og:description` social-share meta tag. Pure/regex-based so it
+    unit-tests without network.
+    """
+    for tag in re.findall(r"<meta\b[^>]*>", html_text or ""):
+        if 'property="og:description"' in tag:
+            cm = re.search(r'content="([^"]*)"', tag)
+            if cm and cm.group(1).strip():
+                return _html.unescape(cm.group(1)).strip()
+    return ""
 
 # Scribble Hub's genres, shown in the app's tracker so users pick from the real
 # taxonomy. `slug` is what /genre/<slug>/feed/ expects; `name` is the label.
@@ -246,7 +264,35 @@ class ScribbleHubSource(Source):
             f"{BASE}/series-finder/", params=params, timeout=_TIMEOUT
         )
         resp.raise_for_status()
-        return _parse_finder(resp.text, limit=limit)
+        return self._enrich_descriptions(_parse_finder(resp.text, limit=limit))
+
+    def _description(self, wid: str) -> str:
+        """Fetch one series page and extract its blurb ("" on any failure)."""
+        try:
+            resp = self._session.get(f"{BASE}/series/{wid}/", timeout=_TIMEOUT)
+            if resp.status_code != 200:
+                return ""
+            return parse_description(resp.text)
+        except Exception:  # noqa: BLE001 — a flaky fetch shouldn't kill the sync
+            return ""
+
+    def _enrich_descriptions(self, metas: list[WorkMeta]) -> list[WorkMeta]:
+        """Fill in a real synopsis for the first few finder results (one extra
+        fetch each, capped + spaced). Finder cards carry no summary, so without
+        this the discovery feed shows blank blurbs."""
+        fetched = 0
+        for m in metas:
+            if fetched >= _DESC_LIMIT:
+                break
+            if getattr(m, "summary", ""):
+                continue
+            if fetched:
+                time.sleep(_DESC_PAUSE)
+            desc = self._description(m.source_work_id)
+            fetched += 1
+            if desc:
+                m.summary = desc
+        return metas
 
 
 # ---- Series Finder HTML parsing (multi-genre AND results) -------------------

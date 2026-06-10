@@ -119,12 +119,13 @@ export function fmtWords(n) {
   return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k words` : `${n} words`;
 }
 
-export function SearchField({ placeholder, value, onChange, onSubmit }) {
+export function SearchField({ placeholder, value, onChange, onSubmit, onBlur }) {
   return (
     <div className="searchfield">
       <Icon icon="solar:magnifer-linear" size={20} color="var(--text-tertiary)" />
       <input placeholder={placeholder} value={value || ''}
         onChange={e => onChange && onChange(e.target.value)}
+        onBlur={() => onBlur && onBlur()}
         onKeyDown={e => e.key === 'Enter' && onSubmit && onSubmit()} />
       {value ? <button className="iconbtn" style={{ width: 26, height: 26 }} onClick={() => onChange('')}>
         <Icon icon="solar:close-circle-bold" size={18} color="var(--text-tertiary)" /></button> : null}

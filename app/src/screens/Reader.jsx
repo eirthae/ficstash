@@ -4,7 +4,7 @@ import { Sheet, fmtWords } from '../components/ui.jsx';
 import { WORKS, CHAPTERS, READER_PARAS } from '../data/sample.js';
 import { fetchChapters } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
-import { markRead, getReadingPos, saveReadingPos } from '../lib/reading.js';
+import { markRead, getReadingPos, getChapterPos, saveReadingPos } from '../lib/reading.js';
 
 export const READER_FONTS = [
   { value: 'serif', label: 'Serif', css: 'var(--font-serif)' },
@@ -42,7 +42,7 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
   // An explicit chapterN (e.g. tapped a specific chapter) wins; otherwise resume.
   const savedPos = useRef(getReadingPos(work.id));
   const positionedFor = useRef(null); // the `cur` we've already scrolled into place
-  const didRestore = useRef(false);   // saved scroll applied once (one-shot)
+  const positioned = useRef(new Set()); // chapters we've already placed this mount
   const saveTimer = useRef(null);
   const [chapters, setChapters] = useState(null); // null until live load resolves
   useEffect(() => {
@@ -79,8 +79,10 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
   // Position the viewport once per chapter, after its body is in the DOM (so
-  // scrollHeight is real). The first chapter restores the saved scroll fraction
-  // (≈ the paragraph you left off on); every other chapter starts at the top.
+  // scrollHeight is real). Each chapter restores ITS OWN saved scroll fraction
+  // (≈ the paragraph you left off on), so reading ahead and coming back returns
+  // you to where you were — not the top. An explicit chapter tap (chapterN)
+  // opens that one chapter at the top on the very first placement.
   // Idempotent per `cur` (ref guard) so StrictMode double-invokes and async
   // re-renders can't clobber a restore.
   useEffect(() => {
@@ -88,10 +90,11 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
     const contentReady = demo || (hasReal && !!(curChapter && curChapter.content));
     if (!contentReady) return; // wait until the chapter text has rendered
     positionedFor.current = cur;
-    const sp = savedPos.current;
-    let pct = 0;
-    if (!didRestore.current && !chapterN && sp && sp.chapter === cur && (sp.pct || 0) > 0) pct = sp.pct;
-    didRestore.current = true;
+    const firstPlacement = positioned.current.size === 0;
+    positioned.current.add(cur);
+    // First placement honours an explicit chapter tap (top); otherwise restore
+    // this chapter's own saved scroll position.
+    let pct = (firstPlacement && chapterN) ? 0 : getChapterPos(work.id, cur);
     let tries = 0;
     const apply = () => {
       const node = scrollRef.current; if (!node) return;
@@ -114,8 +117,12 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
   };
   const goCh = (n) => {
     if (n < 1 || n > total) return;
+    // Bank where we are in the chapter we're leaving, so returning restores it.
+    saveReadingPos(work.id, { chapter: cur, pct: scrollPct });
+    // Move the resume pointer to the new chapter without losing any scroll it
+    // already had (0 if first visit) — its own restore happens on placement.
+    saveReadingPos(work.id, { chapter: n, pct: getChapterPos(work.id, n) });
     setCur(n);
-    saveReadingPos(work.id, { chapter: n, pct: 0 }); // remember the chapter at once
   };
 
   const onTS = (e) => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };

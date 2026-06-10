@@ -47,3 +47,23 @@ class ParseShelfTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- Description enrichment (parse_description, pure) -----------------------
+from ficstash_worker.sources.books import parse_description as _book_desc  # noqa: E402
+
+
+class ParseDescriptionTests(unittest.TestCase):
+    def test_prefers_og_description(self):
+        html = (
+            '<meta name="description" content="generic seo text">'
+            '<meta property="og:description" content="A hockey enemies-to-lovers romance.">'
+        )
+        self.assertEqual(_book_desc(html), "A hockey enemies-to-lovers romance.")
+
+    def test_falls_back_to_name_description(self):
+        html = '<meta name="description" content="Just the blurb &amp; more.">'
+        self.assertEqual(_book_desc(html), "Just the blurb & more.")
+
+    def test_empty_when_absent(self):
+        self.assertEqual(_book_desc("<html><body>no meta</body></html>"), "")
