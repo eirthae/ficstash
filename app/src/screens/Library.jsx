@@ -213,8 +213,15 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '0 20px 16px' }}>
             {isBooks ? (
               <>
-                <SortDropdown value={activeSort} options={SORTS} onChange={setSort} align="left" />
-                <div className="countpill" style={{ flex: 1 }}>All · {shelfWorks.length}</div>
+                {/* Books sort as three tabs (Last added / A–Z / Last read), like
+                    the Fics status tabs — no dropdown, no "All" pill. */}
+                <div className="seg statusseg" style={{ flex: 1 }}>
+                  {SORTS.map(s => (
+                    <button key={s} className={activeSort === s ? 'on' : ''} onClick={() => setSort(s)}>
+                      {SORT_OPTS[s].label}
+                    </button>
+                  ))}
+                </div>
                 {collapseBtn}
               </>
             ) : (
