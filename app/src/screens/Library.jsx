@@ -161,9 +161,16 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   const bookGroups = isBooks ? groupBooks(shown, sort, lastRead) : [];
   const useSeries = isBooks && bookGroups.some(g => !g.standalone);
   // Fandom sections only for Fics in Default sort; otherwise a flat sorted list.
+  // In that grouped view, AO3 series are pulled out first (auto-grouped like
+  // Books); the rest ("loose") group by fandom as before.
   const useFandom = shelf === 'fics' && sort === 'default';
-  const fandomNames = useFandom ? [...new Set(shown.map(fandomName))] : [];
-  const sectionNames = useFandom ? fandomNames : useSeries ? bookGroups.map(g => g.name) : [];
+  const { seriesGroups: ficsSeries, loose: ficsLoose } = useFandom
+    ? groupFicsSeries(shown)
+    : { seriesGroups: [], loose: shown };
+  const fandomNames = useFandom ? [...new Set(ficsLoose.map(fandomName))] : [];
+  const sectionNames = useFandom
+    ? [...ficsSeries.map(g => g.name), ...fandomNames]
+    : useSeries ? bookGroups.map(g => g.name) : [];
   const anyExpanded = sectionNames.some(n => !collapsed[n]);
   const showCollapseToggle = sectionNames.length > 1 && shown.length > 0;
   const toggleAll = () => {
@@ -254,7 +261,12 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
         ) : useSeries ? (
           <SeriesSections groups={bookGroups} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
         ) : useFandom ? (
-          <FandomSections works={shown} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
+          <>
+            {ficsSeries.length > 0 && (
+              <SeriesSections groups={ficsSeries} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
+            )}
+            <FandomSections works={ficsLoose} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
+          </>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
             {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => setPendingDelete(w)} />)}
@@ -352,6 +364,29 @@ function groupBooks(works, sort = 'added', lastRead = {}) {
   }
   if (standalone.items.length) real.push(standalone); // always underneath the named groups
   return real;
+}
+
+// Auto-group AO3 fics by their AO3 series: works sharing a series cluster under
+// the series name, ordered by part; everything else is "loose" and falls through
+// to the existing fandom grouping. Like Books, a series keeps its section even
+// with one downloaded work. Series sections sort alphabetically by series name.
+function groupFicsSeries(works) {
+  const byKey = new Map();
+  const loose = [];
+  for (const w of works) {
+    const key = (w.ao3SeriesId || '').trim();
+    const name = (w.ao3SeriesName || '').trim();
+    if (!key || !name) { loose.push(w); continue; }
+    let g = byKey.get(key);
+    if (!g) { g = { name, items: [] }; byKey.set(key, g); }
+    g.items.push(w);
+  }
+  const seriesGroups = [...byKey.values()];
+  for (const g of seriesGroups) {
+    g.items.sort((a, b) => (a.ao3SeriesIndex ?? 1e9) - (b.ao3SeriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''));
+  }
+  seriesGroups.sort((a, b) => a.name.localeCompare(b.name));
+  return { seriesGroups, loose };
 }
 
 // Books grouped into their series/author sections (see groupBooks).

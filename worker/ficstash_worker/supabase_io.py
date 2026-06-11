@@ -268,6 +268,13 @@ def upsert_work(
     # app can link back out; AO3 rows leave source_url null.
     if meta.source != "ao3" and meta.url:
         payload["source_url"] = meta.url
+    # AO3 series membership for auto-grouping — written only when known, so a
+    # lazy/unloaded refresh (series == "") never wipes a previously-set series.
+    if getattr(meta, "series_id", ""):
+        payload["ao3_series_id"] = meta.series_id
+        payload["ao3_series_name"] = meta.series_name
+    if getattr(meta, "series_index", None) is not None:
+        payload["ao3_series_index"] = meta.series_index
     # `follow` is not a manual toggle. Every still-updating work is followed by
     # default so the refresh pass re-checks it for new chapters on each sync;
     # complete works are unfollowed (nothing left to fetch). Derived from status
@@ -524,3 +531,60 @@ def upsert_chapters(client: Client, work_id: str, chapters: list[Chapter]) -> in
         return 0
     client.table("chapters").upsert(rows, on_conflict="work_id,n").execute()
     return len(rows)
+
+
+# ---- AO3 series (follow / download-all queue) ------------------------------
+def fetch_followed_series(client: Client) -> list[dict]:
+    """Rows in followed_series: series the user asked to download / follow."""
+    resp = (
+        client.table("followed_series")
+        .select("id,series_id,series_name,follow,last_checked,created_at")
+        .order("created_at")
+        .execute()
+    )
+    return list(resp.data or [])
+
+
+def mark_series_checked(client: Client, series_id: str, *, name: str | None = None) -> None:
+    """Stamp a followed series as just-enumerated (and refresh its name)."""
+    patch: dict = {"last_checked": datetime.now(timezone.utc).isoformat()}
+    if name:
+        patch["series_name"] = name
+    client.table("followed_series").update(patch).eq("series_id", series_id).execute()
+
+
+def delete_series_follow(client: Client, series_id: str) -> None:
+    """Drop a followed_series row (used after a one-shot 'download all')."""
+    client.table("followed_series").delete().eq("series_id", series_id).execute()
+
+
+def set_work_series(
+    client: Client,
+    source_work_id: str,
+    series_id: str,
+    series_name: str,
+    series_index: float | None,
+) -> None:
+    """Tag an already-stored AO3 work with its series + position (auto-grouping)."""
+    patch: dict = {"ao3_series_id": series_id, "ao3_series_name": series_name}
+    if series_index is not None:
+        patch["ao3_series_index"] = series_index
+    (
+        client.table("works")
+        .update(patch)
+        .eq("source", "ao3")
+        .eq("source_work_id", source_work_id)
+        .execute()
+    )
+
+
+def fetch_offline_ao3_ids(client: Client) -> set[str]:
+    """source_work_ids of AO3 works already downloaded (offline), for dedup."""
+    resp = (
+        client.table("works")
+        .select("source_work_id")
+        .eq("source", "ao3")
+        .eq("offline", True)
+        .execute()
+    )
+    return {r["source_work_id"] for r in (resp.data or []) if r.get("source_work_id")}

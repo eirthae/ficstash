@@ -60,6 +60,10 @@ class WorkMeta:
     status: str = "ongoing"  # "ongoing" | "complete"
     updated: str | None = None  # ISO-8601 last-updated timestamp
     url: str = ""
+    # AO3 series membership (the work's primary series), for auto-grouping.
+    series_id: str = ""
+    series_name: str = ""
+    series_index: float | None = None  # position in the series (set when known)
     # Only set for reading-history stubs: when the user last opened the work on
     # AO3 (ISO-8601). Lets the app build a "read in <year>" archive shelf.
     history_read_at: str | None = None

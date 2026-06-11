@@ -61,8 +61,11 @@ from ficstash_worker.saves import fetch_work_chapters
 from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
+    delete_series_follow,
+    fetch_followed_series,
     fetch_non_offline_works,
     fetch_discovery_prefs,
+    fetch_offline_ao3_ids,
     fetch_ongoing_offline_works,
     fetch_plaintext_chapter_works,
     fetch_requested_urls,
@@ -74,8 +77,10 @@ from ficstash_worker.supabase_io import (
     mark_group_checked,
     mark_matches_saved,
     mark_request,
+    mark_series_checked,
     record_chapter_updates,
     reset_empty_offline,
+    set_work_series,
     upsert_chapters,
     upsert_tag_matches,
     upsert_work,
@@ -205,6 +210,15 @@ def _refresh_ongoing_max() -> int | None:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_REFRESH_ONGOING_MAX
+
+
+def _series_max() -> int:
+    """Max NEW works to download per followed series per run (politeness cap)."""
+    raw = os.environ.get("SERIES_MAX", "").strip()
+    try:
+        return max(1, int(raw)) if raw else 12
+    except ValueError:
+        return 12
 
 
 def _parse_ts(value) -> datetime | None:
@@ -759,6 +773,66 @@ def main() -> None:
             rc_failed += 1
             print(f"    refresh {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Refresh ongoing: {rc_updated} updated, {rc_same} unchanged, {rc_failed} failed.")
+
+    # ---- Pass 8: AO3 series → download all works + follow for new ones ------
+    # `followed_series` rows come from the app: "Download all works in this
+    # series" (follow=false, one-shot) and "Follow series" (follow=true, kept).
+    # We enumerate each series from AO3's public index and download any work not
+    # already offline (capped per run), tagging every work with its series + part
+    # so the library auto-groups it. One-shot rows are dropped once fully pulled.
+    print("\n== AO3 series ==")
+    followed = fetch_followed_series(db)
+    print(f"{len(followed)} followed/requested series.")
+    if followed:
+        offline_ids = fetch_offline_ao3_ids(db)
+        series_cap = _series_max()
+        for srow in followed:
+            sid = (srow.get("series_id") or "").strip()
+            if not sid:
+                continue
+            sname = srow.get("series_name") or ""
+            try:
+                space()
+                works = _with_backoff(
+                    lambda: ao3.series_works(sid), what=f"series {sid}", broad=True
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"    series {sid} skipped ({type(exc).__name__}: {exc})")
+                continue
+            got = 0
+            hit_cap = False
+            for index, (wid, _t) in enumerate(works, start=1):
+                if wid in offline_ids:
+                    # Already downloaded — make sure it's tagged with this series.
+                    try:
+                        set_work_series(db, wid, sid, sname, float(index))
+                    except Exception:  # noqa: BLE001
+                        pass
+                    continue
+                if got >= series_cap:
+                    hit_cap = True
+                    break
+                try:
+                    meta, chapters = fetch_work_chapters(
+                        ao3, wid, space=space, backoff=_with_backoff
+                    )
+                    if not chapters:  # restricted/gated — skip, don't loop forever
+                        continue
+                    meta.series_id = sid
+                    meta.series_name = sname or meta.series_name
+                    meta.series_index = float(index)
+                    work_uuid = upsert_work(db, meta, origin="series")
+                    upsert_chapters(db, work_uuid, chapters)
+                    mark_flag(db, [wid], "offline")
+                    offline_ids.add(wid)
+                    got += 1
+                except Exception as exc:  # noqa: BLE001
+                    print(f"    series work {wid} skipped ({type(exc).__name__}: {exc})")
+            mark_series_checked(db, sid, name=sname)
+            print(f"    series {sid} '{sname}': +{got} work(s){' (more next run)' if hit_cap else ''}.")
+            # A one-shot "download all" drops out once everything's pulled.
+            if not srow.get("follow") and not hit_cap:
+                delete_series_follow(db, sid)
 
     print("\nSync complete.")
 

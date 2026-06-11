@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 import time
 from datetime import datetime, timezone
 
@@ -159,6 +160,49 @@ class AO3Source(Source):
             self._session = AO3.GuestSession()
             _enable_adult_view(self._session)
         return self._session
+
+    # ---- series ------------------------------------------------------------
+    def series_works(self, series_id: str, max_pages: int = 10) -> list[tuple[str, str]]:
+        """All works in an AO3 series as [(work_id, title), …], in series order.
+
+        Scrapes the public /series/<id> work index directly (the guest session
+        already has the adult-content cookie, so age-gated series enumerate too),
+        walking pages until one is empty/short or returns nothing new. Polite:
+        spaced by RATE_LIMIT_SECONDS, bounded by `max_pages`.
+        """
+        sid = str(series_id or "").strip()
+        if not sid or not sid.isdigit():
+            return []
+        s = self._require_session()
+        out: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for page in range(1, max_pages + 1):
+            try:
+                resp = s.session.get(
+                    f"https://archiveofourown.org/series/{sid}",
+                    params={"page": page},
+                    timeout=30,
+                )
+                htmltext = resp.text if resp.status_code == 200 else ""
+            except Exception as exc:  # noqa: BLE001
+                if _is_rate_limited(exc):
+                    raise RateLimitError(str(exc)) from exc
+                if page == 1:
+                    raise
+                break
+            rows = _parse_series_work_ids(htmltext)
+            if not rows:
+                break
+            new = 0
+            for wid, title in rows:
+                if wid not in seen:
+                    seen.add(wid)
+                    out.append((wid, title))
+                    new += 1
+            if new == 0 or len(rows) < 20:  # same page again, or the short last page
+                break
+            time.sleep(RATE_LIMIT_SECONDS)
+        return out
 
     # ---- reading list ------------------------------------------------------
     def import_reading_list(self, session: str = "") -> list[WorkMeta]:
@@ -724,6 +768,8 @@ def _work_to_meta(source: str, source_work_id: str, work: "AO3.Work") -> WorkMet
     if not words:
         words = _soup_int(soup, "dd.words")
 
+    series_id, series_name = _series_of(work, soup)
+
     return WorkMeta(
         source=source,
         source_work_id=source_work_id,
@@ -740,4 +786,59 @@ def _work_to_meta(source: str, source_work_id: str, work: "AO3.Work") -> WorkMet
         status=_status(work),
         updated=updated_iso,
         url=f"https://archiveofourown.org/works/{source_work_id}",
+        series_id=series_id,
+        series_name=series_name,
     )
+
+
+def _parse_series_work_ids(html_text: str) -> list[tuple[str, str]]:
+    """Pure parser: an AO3 /series/<id> page → [(work_id, title), …] in order.
+
+    Reads only the series work index (`<ul class="series work index group">`)
+    so navigation/related links elsewhere on the page aren't mistaken for works.
+    Unit-tested against a fixture; no network here.
+    """
+    text = html_text or ""
+    m = re.search(r'<ul[^>]*class="[^"]*series work index[^"]*"[^>]*>(.*?)</ul>', text, re.S)
+    block = m.group(1) if m else text
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for mm in re.finditer(
+        r'<h4[^>]*class="[^"]*heading[^"]*"[^>]*>\s*<a href="/works/(\d+)"[^>]*>([^<]*)</a>',
+        block,
+        re.S,
+    ):
+        wid = mm.group(1)
+        if wid in seen:
+            continue
+        seen.add(wid)
+        out.append((wid, html.unescape(mm.group(2)).strip()))
+    return out
+
+
+def _series_of(work, soup=None) -> tuple[str, str]:
+    """The work's PRIMARY AO3 series as (series_id, series_name), or ("", "").
+
+    Prefers ao3-api's parsed `work.series` (a list of Series with .id/.name);
+    falls back to the work-page soup's `dd.series span.position a` when the work
+    object isn't fully loaded. Multi-series works keep only the first.
+    """
+    try:
+        series = list(getattr(work, "series", None) or [])
+        if series:
+            s0 = series[0]
+            sid = str(getattr(s0, "id", "") or "")
+            name = (getattr(s0, "name", "") or "").strip()
+            if sid:
+                return sid, name
+    except Exception:  # noqa: BLE001 — lazy/unloaded work, fall through to soup
+        pass
+    if soup is not None:
+        try:
+            a = soup.select_one("dd.series span.position a")
+            if a is not None and a.get("href"):
+                sid = a["href"].rstrip("/").split("/")[-1]
+                return (sid if sid.isdigit() else ""), (a.get_text() or "").strip()
+        except Exception:  # noqa: BLE001
+            pass
+    return "", ""

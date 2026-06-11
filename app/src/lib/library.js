@@ -16,6 +16,9 @@ function mapWork(row) {
     seriesName: row.series_name || '',    // manual/auto series grouping (Books)
     seriesIndex: row.series_index,        // reading order within the series
     externalUrl: row.external_url || '',  // user-set open-at-source link
+    ao3SeriesId: row.ao3_series_id || '',     // AO3 series this work belongs to
+    ao3SeriesName: row.ao3_series_name || '', // for auto-grouping the Fics shelf
+    ao3SeriesIndex: row.ao3_series_index,     // part # within the AO3 series
     author: row.author,
     fandom: row.fandom,
     pairing: row.pairing,

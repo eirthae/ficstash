@@ -6,6 +6,7 @@ import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
 import { fetchChapters, removeWork, updateWorkFields, fetchSeriesNames } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
+import { getSeriesFollow, requestSeriesDownload, setSeriesFollow } from '../lib/series.js';
 import { TagGroupBuilder } from './Discover.jsx';
 import { kickSync } from '../lib/sync.js';
 import { getReadingPos } from '../lib/reading.js';
@@ -269,6 +270,11 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
             </div>
           )}
 
+          {work.source === 'ao3' && work.ao3SeriesId && (
+            <SeriesCard seriesId={work.ao3SeriesId} seriesName={work.ao3SeriesName}
+              part={work.ao3SeriesIndex} showToast={showToast} />
+          )}
+
           <div className="section-label" style={{ marginBottom: 8 }}>Summary</div>
           <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text-secondary)', margin: '0 0 16px' }}>{work.summary}</p>
 
@@ -357,6 +363,70 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
 
       <EditDetailsSheet open={showEdit} onClose={() => setShowEdit(false)} isBook={isBook}
         initial={meta} placeholderTitle={work.title} saving={savingEdit} onSave={saveEdit} />
+    </div>
+  );
+}
+
+// AO3 series card: shows this work's series, with one tap to download every work
+// in the series and a toggle to follow it (auto-pull works added later). Both
+// just write to the followed_series queue; the worker does the fetching.
+function SeriesCard({ seriesId, seriesName, part, showToast }) {
+  const [follow, setFollow] = useState(null);   // null = unknown/loading
+  const [queued, setQueued] = useState(false);  // a one-shot download is in flight
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    getSeriesFollow(seriesId).then((r) => {
+      if (!alive) return;
+      setFollow(!!(r && r.follow));
+      setQueued(!!r); // a row exists → already queued (download or follow)
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [seriesId]);
+
+  const download = async () => {
+    if (busy || queued) return;
+    setBusy(true);
+    const res = await requestSeriesDownload(seriesId, seriesName);
+    setBusy(false);
+    if (res.ok) { setQueued(true); showToast('Downloading the whole series — works arrive each sync', 'solar:check-circle-bold'); }
+    else showToast(res.error || "Couldn't queue — try again", 'solar:danger-triangle-linear');
+  };
+  const toggleFollow = async () => {
+    if (busy) return;
+    const next = !follow;
+    setBusy(true);
+    const res = await setSeriesFollow(seriesId, seriesName, next);
+    setBusy(false);
+    if (res.ok) {
+      setFollow(next);
+      if (next) setQueued(true);
+      showToast(next ? 'Following series — new works download automatically' : 'Unfollowed series', next ? 'solar:bell-bold' : 'solar:bell-off-linear');
+    } else showToast(res.error || "Couldn't update — try again", 'solar:danger-triangle-linear');
+  };
+
+  return (
+    <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--surface-2)', border: '1px solid var(--border)', marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <Icon icon="solar:bookmark-square-bold" size={20} color="var(--accent)" />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.2 }}>{seriesName || 'AO3 series'}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+            {part != null ? `Part ${Number.isInteger(part) ? part : Math.round(part)} of this series` : 'Part of a series'}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className={`btn ${queued ? 'btn-surface' : 'btn-primary'}`} style={{ flex: 1 }} disabled={busy || queued} onClick={download}>
+          <Icon icon={queued ? 'solar:check-read-linear' : 'solar:download-minimalistic-bold'} size={18} />
+          {queued ? 'Queued' : 'Download all works'}
+        </button>
+        <button className={`btn ${follow ? 'btn-flat' : 'btn-surface'}`} style={{ flex: 'none', width: 132 }} disabled={busy || follow === null} onClick={toggleFollow}>
+          <Icon icon={follow ? 'solar:bell-bing-bold' : 'solar:bell-linear'} size={18} />
+          {follow ? 'Following' : 'Follow series'}
+        </button>
+      </div>
     </div>
   );
 }
