@@ -11,9 +11,9 @@ whereas Open Library only has stiff library-catalogue subjects, so reader-style
 tags returned nothing. We scrape `/shelf/show/<tag>` — a public HTML book list.
 
 A multi-tag group ANDs by intersecting the books that appear on EVERY include
-shelf (falling back to the primary shelf if the intersection is empty, so a
-niche combo still surfaces something); excluded tags' books are removed. Request
-counts are capped to stay polite.
+shelf — if the tags never co-occur the card shows nothing (rather than dumping
+one shelf's unrelated books); excluded tags' books are removed. Request counts
+are capped to stay polite.
 """
 
 from __future__ import annotations
@@ -137,12 +137,14 @@ class BooksSource(Source):
             return []
 
         by_id = {b["id"]: b for s in shelves for b in s}
-        # AND: books present on every include shelf.
+        # AND: books present on EVERY include shelf. If a multi-tag card's tags
+        # don't overlap we return nothing rather than dumping the primary shelf's
+        # unrelated books — otherwise a "gay romance + magic school" card whose
+        # tags never co-occur would surface plain magic-school books (Harry
+        # Potter), which reads as the card showing the wrong genre entirely.
         ids = set(b["id"] for b in shelves[0])
         for s in shelves[1:]:
             ids &= set(b["id"] for b in s)
-        if not ids:  # niche combo with no overlap → fall back to the primary shelf
-            ids = set(b["id"] for b in shelves[0])
 
         # Remove anything that also sits on an excluded shelf.
         for t in (exclude or [])[:_MAX_EXCLUDE]:

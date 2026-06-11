@@ -83,7 +83,7 @@ const WAYS = [
   { icon: 'solar:magnifer-bold', title: 'Track tags & genres', body: 'Follow tags on AO3, or genres on Royal Road and Scribble Hub. New matches surface in What’s New — no account needed.' },
   { icon: 'solar:link-round-bold', title: 'Add by link', body: 'Paste a work’s URL and FicStash fetches a private, fully-offline copy.' },
   { icon: 'solar:upload-minimalistic-bold', title: 'Upload a file', body: 'Bring your own EPUB, HTML, or TXT. It’s parsed on-device and stored offline.' },
-  { icon: 'solar:book-bookmark-bold', title: 'Watch for new books', body: 'Track an author on Open Library to hear about new releases, then buy the EPUB and upload it.' },
+  { icon: 'solar:book-bookmark-bold', title: 'Discover books', body: 'Find books by the reader tags people use on Goodreads. FicStash can’t download published books — get the EPUB and upload it to read here.' },
 ];
 
 export function ConnectScreen({ nav }) {

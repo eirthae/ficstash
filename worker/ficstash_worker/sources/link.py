@@ -43,12 +43,39 @@ _UA = {
 # id that matches the app's source registry where one exists.
 _SOURCE_ALIASES = {"archiveofourown": "ao3"}
 
+# Known fiction hosts → their app source id. Matched as a substring of the host
+# so a pasted AO3 / Royal Road / Scribble Hub link is ALWAYS classified into the
+# right library shelf (AO3 → Fics, the rest → Stories) — never mis-filed under
+# Books — regardless of what FanFicFare reports for "site" (full URL, subdomain,
+# or empty). This is the primary signal; the registrable-name parse below is a
+# fallback for every other host.
+_HOST_SOURCES = (
+    ("archiveofourown.org", "ao3"),
+    ("royalroad.com", "royalroad"),
+    ("scribblehub.com", "scribblehub"),
+    ("fanfiction.net", "ffn"),
+    ("fictionpress.com", "fictionpress"),
+)
+
 
 class UnsupportedSite(Exception):
     """The pasted URL isn't a site FanFicFare can download."""
 
 
+def _source_from_host(value: str) -> str:
+    """Known-fiction-host detection by substring ("" if none match)."""
+    h = (value or "").strip().lower()
+    for needle, sid in _HOST_SOURCES:
+        if needle in h:
+            return sid
+    return ""
+
+
 def _source_id(site: str) -> str:
+    # Known fiction hosts win outright (robust to odd/empty FanFicFare strings).
+    known = _source_from_host(site)
+    if known:
+        return known
     host = (site or "").strip().lower()
     if host.startswith("www."):
         host = host[4:]
@@ -60,6 +87,17 @@ def _source_id(site: str) -> str:
     else:
         label = "link"
     return _SOURCE_ALIASES.get(label, label)
+
+
+def _resolve_source(site: str, url: str) -> str:
+    """Best source id for a link work: known host (from FanFicFare's site OR the
+    pasted URL), else the registrable-name parse, else a generic 'link'."""
+    return (
+        _source_from_host(site)
+        or _source_from_host(urlparse(url).netloc)
+        or _source_id(site)
+        or "link"
+    )
 
 
 def _strip_html(html: str) -> str:
@@ -159,7 +197,7 @@ class LinkFetcher:
 
         chapters = adapter.get_chapters()
         site = meta("site") or ""
-        source = _source_id(site)
+        source = _resolve_source(site, url)
         story_id = meta("storyId") or url
         story_url = meta("storyUrl") or url
 
@@ -243,7 +281,7 @@ class LinkFetcher:
         date = getattr(md, "date", "") or None
         host = urlparse(url).netloc
         wm = WorkMeta(
-            source=_source_id(host),
+            source=_resolve_source(host, url),
             source_work_id=url,
             title=title.strip()[:300] or "Untitled",
             author=(author or "").strip(),

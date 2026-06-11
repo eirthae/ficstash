@@ -16,8 +16,8 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
   const total = work.chaptersTotal || work.chapters || 1;
   const srcLabel = sourceLabel(work.source);
   const isBook = (work.origin || '') === 'upload';
-  // Which builder source a tapped tag should open: uploaded books track Open
-  // Library subjects; AO3/RR/SH pass through; anything else falls back to AO3.
+  // Which builder source a tapped tag should open: uploaded books track Goodreads
+  // reader tags; AO3/RR/SH pass through; anything else falls back to AO3.
   const TRACK_SOURCES = ['ao3', 'royalroad', 'scribblehub', 'books'];
   const builderSource = isBook ? 'books' : (TRACK_SOURCES.includes(work.source) ? work.source : 'ao3');
   // Editable Books fields (rename / series / external link). Seeded from the
@@ -109,6 +109,10 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
   // build leaves offline undefined, so those stay readable. Restricted AO3 works
   // (members-only) can never be fetched logged-out, so they're never readable.
   const readable = !suggestion && !work.restricted && work.offline !== false;
+  // A book discovery suggestion (Goodreads). FicStash can't download a published
+  // book, so "Save" here would be misleading — we point the reader to Goodreads
+  // and tell them to source the EPUB and upload it instead.
+  const isBookSuggestion = suggestion && work.source === 'books';
 
   const queueSave = async () => {
     if (saveState !== 'idle') return;
@@ -182,31 +186,48 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
           </div>
 
           <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-            {readable ? (
-              <button className="btn btn-lg btn-primary btn-block" onClick={() => openReader()}>
-                <Icon icon="solar:book-2-bold" size={20} />
-                {resumePos && resumePos.chapter ? `Continue · Ch ${resumePos.chapter}` : 'Start reading'}
+            {isBookSuggestion ? (
+              <button className="btn btn-lg btn-primary btn-block" onClick={openAtSource} disabled={!canOpenAtSource}>
+                <Icon icon="solar:square-top-down-linear" size={20} /> Find on Goodreads
               </button>
             ) : (
-              <button className="btn btn-lg btn-surface btn-block" disabled style={{ opacity: .85 }}>
-                <Icon icon="solar:clock-circle-linear" size={20} />
-                {suggestion ? 'Not saved yet' : 'Not downloaded yet'}
-              </button>
+              <>
+                {readable ? (
+                  <button className="btn btn-lg btn-primary btn-block" onClick={() => openReader()}>
+                    <Icon icon="solar:book-2-bold" size={20} />
+                    {resumePos && resumePos.chapter ? `Continue · Ch ${resumePos.chapter}` : 'Start reading'}
+                  </button>
+                ) : (
+                  <button className="btn btn-lg btn-surface btn-block" disabled style={{ opacity: .85 }}>
+                    <Icon icon="solar:clock-circle-linear" size={20} />
+                    {suggestion ? 'Not saved yet' : 'Not downloaded yet'}
+                  </button>
+                )}
+                {suggestion ? (
+                  <button
+                    className={`btn btn-lg ${saveState === 'idle' ? 'btn-flat' : 'btn-surface'}`}
+                    onClick={queueSave}
+                    disabled={saveState !== 'idle'}
+                    style={{ flex: 'none', width: 56, padding: 0 }}
+                    title={saveState === 'saved' ? 'In your library' : saveState === 'queued' ? 'Downloading — sync started' : 'Save to library'}
+                  >
+                    <Icon icon={saveState === 'saved' ? 'solar:check-read-linear' : saveState === 'queued' ? 'solar:clock-circle-linear' : 'solar:download-minimalistic-bold'} size={22} /></button>
+                ) : canOpenAtSource ? (
+                  <button className="btn btn-lg btn-surface" onClick={openAtSource} style={{ flex: 'none', width: 56, padding: 0 }} title={openLabel}>
+                    <Icon icon="solar:square-top-down-linear" size={22} /></button>
+                ) : null}
+              </>
             )}
-            {suggestion ? (
-              <button
-                className={`btn btn-lg ${saveState === 'idle' ? 'btn-flat' : 'btn-surface'}`}
-                onClick={queueSave}
-                disabled={saveState !== 'idle'}
-                style={{ flex: 'none', width: 56, padding: 0 }}
-                title={saveState === 'saved' ? 'In your library' : saveState === 'queued' ? 'Downloading — sync started' : 'Save to library'}
-              >
-                <Icon icon={saveState === 'saved' ? 'solar:check-read-linear' : saveState === 'queued' ? 'solar:clock-circle-linear' : 'solar:download-minimalistic-bold'} size={22} /></button>
-            ) : canOpenAtSource ? (
-              <button className="btn btn-lg btn-surface" onClick={openAtSource} style={{ flex: 'none', width: 56, padding: 0 }} title={openLabel}>
-                <Icon icon="solar:square-top-down-linear" size={22} /></button>
-            ) : null}
           </div>
+
+          {isBookSuggestion && (
+            <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--info-soft)', marginBottom: 18 }}>
+              <Icon icon="solar:book-bookmark-bold" size={20} color="var(--info)" style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                <b style={{ color: 'var(--text-primary)' }}>FicStash can’t download published books.</b> If you’d like to read this, get it in <b>EPUB</b> format (buy it, or your library), then add it from <b>Library → Add files</b> to read it offline here.
+              </div>
+            </div>
+          )}
 
           {suggestion && ongoing && (
             <button className="pressable" onClick={openAtSource}
