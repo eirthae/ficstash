@@ -62,6 +62,7 @@ from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     delete_series_follow,
+    fetch_all_offline_works,
     fetch_followed_series,
     fetch_non_offline_works,
     fetch_discovery_prefs,
@@ -210,6 +211,23 @@ def _refresh_ongoing_max() -> int | None:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_REFRESH_ONGOING_MAX
+
+
+def _full_refresh() -> bool:
+    """True when this run should re-check EVERY work, not just ongoing ones."""
+    return os.environ.get("FULL_REFRESH", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _full_refresh_max() -> int | None:
+    """Cap for a full refresh (None = every work; the run may need to repeat for
+    a very large library since there's no resume cursor)."""
+    raw = os.environ.get("FULL_REFRESH_MAX", "").strip()
+    if not raw or raw.lower() in ("0", "all", "none"):
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return None
 
 
 def _series_max() -> int:
@@ -700,15 +718,23 @@ def main() -> None:
             print(f"    reflow {wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Reflow: {rf_done} re-downloaded, {rf_failed} failed.")
 
-    # ---- Pass 7: refresh ongoing works → pull new chapters -----------------
-    # Every saved work that's still ONGOING is re-checked each sync and any new
-    # chapters are appended — no "subscribe on the site" step needed. We only
-    # fetch the chapters we don't already have, spaced RATE_LIMIT_SECONDS apart
-    # and capped per run, so it stays polite. Works flip to complete here too.
-    print("\n== Refresh ongoing works ==")
-    refresh_max = _refresh_ongoing_max()
-    ongoing = fetch_ongoing_offline_works(db, limit=refresh_max)
-    print(f"{len(ongoing)} ongoing work(s) to re-check (max {refresh_max or 'no cap'}).")
+    # ---- Pass 7: refresh works → pull new chapters + re-read metadata ------
+    # Normally we re-check only ONGOING works (and append new chapters). A "full
+    # refresh" (FULL_REFRESH=1, e.g. the workflow's "Re-check ALL works" toggle)
+    # instead re-reads EVERY downloaded work — refreshing status/counts, pulling
+    # any new chapters, and backfilling AO3 series tags on the existing library.
+    # Either way it's spaced RATE_LIMIT_SECONDS apart and capped to stay polite.
+    full = _full_refresh()
+    if full:
+        print("\n== Full refresh: re-check ALL works ==")
+        refresh_max = _full_refresh_max()
+        ongoing = fetch_all_offline_works(db, limit=refresh_max)
+        print(f"{len(ongoing)} work(s) to re-check (max {refresh_max or 'no cap'}).")
+    else:
+        print("\n== Refresh ongoing works ==")
+        refresh_max = _refresh_ongoing_max()
+        ongoing = fetch_ongoing_offline_works(db, limit=refresh_max)
+        print(f"{len(ongoing)} ongoing work(s) to re-check (max {refresh_max or 'no cap'}).")
     rc_updated = rc_same = rc_failed = 0
     refresh_linker = None
     for row in ongoing:

@@ -166,6 +166,25 @@ def fetch_ongoing_offline_works(
     return list(query.execute().data or [])
 
 
+def fetch_all_offline_works(client: Client, limit: int | None = None) -> list[dict]:
+    """Return EVERY downloaded work (any status), for a full library revamp.
+
+    Like fetch_ongoing_offline_works but without the status filter — used by the
+    on-demand "full refresh" to re-read each work's metadata (status, counts,
+    AO3 series) and pull any chapters it's missing. Newest-activity first.
+    """
+    query = (
+        client.table("works")
+        .select("id,source,source_work_id,source_url,chapters,chapters_total,status")
+        .eq("offline", True)
+        .eq("hidden", False)
+        .order("source_updated", desc=True)
+    )
+    if limit:
+        query = query.limit(limit)
+    return list(query.execute().data or [])
+
+
 def fetch_untitled_works(
     client: Client, source: str = "ao3", limit: int | None = None
 ) -> list[str]:
