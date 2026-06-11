@@ -213,9 +213,6 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
                     title={saveState === 'saved' ? 'In your library' : saveState === 'queued' ? 'Downloading — sync started' : 'Save to library'}
                   >
                     <Icon icon={saveState === 'saved' ? 'solar:check-read-linear' : saveState === 'queued' ? 'solar:clock-circle-linear' : 'solar:download-minimalistic-bold'} size={22} /></button>
-                ) : canOpenAtSource ? (
-                  <button className="btn btn-lg btn-surface" onClick={openAtSource} style={{ flex: 'none', width: 56, padding: 0 }} title={openLabel}>
-                    <Icon icon="solar:square-top-down-linear" size={22} /></button>
                 ) : null}
               </>
             )}
@@ -293,7 +290,9 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
               <div className="set-ic"><Icon icon="solar:square-top-down-linear" size={18} /></div>
               <div style={{ flex: 1 }}>
                 <div className="set-h">{openLabel}</div>
-                <div className="set-d">Follow or bookmark on the site — FicStash never touches your account.</div>
+                <div className="set-d">{meta.externalUrl
+                  ? 'Open the external link you added to this work.'
+                  : `Bookmark, comment or follow on ${srcLabel} — FicStash only reads, never touches your account.`}</div>
               </div>
               <Icon icon="solar:arrow-right-up-linear" size={18} color="var(--text-tertiary)" />
             </button>
