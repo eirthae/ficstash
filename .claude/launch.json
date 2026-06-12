@@ -14,6 +14,13 @@
       "runtimeArgs": ["-m", "http.server", "5176"],
       "cwd": "intake",
       "port": 5176
+    },
+    {
+      "name": "bookstash",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5189", "--strictPort"],
+      "cwd": "../bookstash",
+      "port": 5189
     }
   ]
 }

@@ -297,6 +297,7 @@ input,textarea { font-family:inherit; }
 .fetch .ring .track { stroke:var(--border-strong); }
 .fetch .ring .bar { stroke:var(--accent); stroke-linecap:round; transform:rotate(-90deg); transform-origin:center; transition:stroke-dashoffset .3s; }
 @keyframes spin { to { transform:rotate(360deg); } }
+.spin { width:14px; height:14px; border-radius:50%; border:2px solid var(--border-strong); border-top-color:var(--accent); display:inline-block; animation:spin .7s linear infinite; }
 
 /* Reader loading skeleton — shimmering text lines while a chapter body loads. */
 .reader-skel { padding:4px 0 18px; }

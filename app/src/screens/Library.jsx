@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
-import { EmptyState, useToast, Sheet } from '../components/ui.jsx';
+import { EmptyState, useToast, Sheet, PullToRefresh } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { LibraryCard } from '../components/cards.jsx';
 import { triggerSync } from '../lib/sync.js';
@@ -107,6 +107,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
     showToast('Starting sync…');
     const res = await triggerSync();
     setSyncing(false);
+    onReload?.();
     showToast(res.ok ? 'Sync started — new works arrive shortly.' : (res.error || 'Sync failed.'));
   };
   const syncAction = { icon: syncing ? 'solar:refresh-circle-bold' : 'solar:refresh-circle-linear', onClick: doSync };
@@ -208,7 +209,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
     <div className="screen">
       <Appbar large title="Library" actions={[syncAction]} />
       {toast}
-      <div className="scroll">
+      <PullToRefresh onRefresh={doSync}>
         <div className="seg src-seg" style={{ margin: '0 20px 14px' }}>
           {SHELVES.map(s => (
             <button key={s.id} className={shelf === s.id ? 'on' : ''} onClick={() => switchShelf(s.id)}>
@@ -273,7 +274,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
             {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => setPendingDelete(w)} />)}
           </div>
         )}
-      </div>
+      </PullToRefresh>
 
       <Sheet open={!!pendingDelete} onClose={() => setPendingDelete(null)} title="Remove from library?">
         <div style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--text-secondary)', marginBottom: 16 }}>
