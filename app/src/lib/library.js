@@ -65,6 +65,38 @@ export async function fetchWorks() {
   return (data || []).map(mapWork);
 }
 
+// Day bucket for the What's New feeds (Today / Yesterday / This week + "Xh ago").
+function dayBucketLocal(iso) {
+  if (!iso) return { day: 'This week', time: '' };
+  const then = new Date(iso); const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.floor((startOfToday - new Date(then.getFullYear(), then.getMonth(), then.getDate())) / 86400000);
+  const day = diffDays <= 0 ? 'Today' : diffDays === 1 ? 'Yesterday' : 'This week';
+  const secs = Math.max((now - then) / 1000, 0);
+  const time = secs < 3600 ? `${Math.max(1, Math.floor(secs / 60))}m ago` : secs < 86400 ? `${Math.floor(secs / 3600)}h ago` : `${Math.floor(secs / 86400)}d ago`;
+  return { day, time };
+}
+
+// Works the user SAVED from Discovery that have actually been fetched into the
+// library (origin 'tag'). This is the "Saved" feed in What's New — the things
+// you chose, now downloaded — not the raw discovery match stream.
+export async function fetchSavedWorks() {
+  if (!hasSupabase) return null;
+  const { data, error } = await supabase
+    .from('works')
+    .select('*')
+    .eq('hidden', false)
+    .eq('origin', 'tag')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data || []).map((row) => {
+    const w = mapWork(row);
+    const { day, time } = dayBucketLocal(row.created_at);
+    return { ...w, day, time, fresh: !!w.unread };
+  });
+}
+
 // All downloaded works belonging to an AO3 series, in reading order (part #).
 // Powers the Series screen and the reader's prev/next-in-series navigation.
 export async function fetchSeriesWorks(ao3SeriesId) {
