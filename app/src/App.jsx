@@ -13,6 +13,7 @@ import { ReaderScreen } from './screens/Reader.jsx';
 import { LoginScreen } from './screens/Login.jsx';
 import { WORKS, NEW_CHAPTERS, NEW_MATCHES } from './data/sample.js';
 import { fetchWorks } from './lib/library.js';
+import { notifySavedAvailable } from './lib/notify.js';
 import { supabase, hasSupabase } from './lib/supabase.js';
 
 const READER_DEFAULTS = { theme: 'dark', font: 'serif', size: 19, leading: 1.70, margin: 26, brightness: 1 };
@@ -106,14 +107,27 @@ export default function App() {
   // When Supabase isn't configured, fetchWorks() returns null and we fall
   // back to bundled sample data so the app still has something to show.
   const [works, setWorks] = useState(null);
+  // Saved-work arrival notifications: remember which saved-from-Discovery works
+  // (origin 'tag') we've already seen; when a reload/sync surfaces new ones, fire
+  // an OS notification. The first load only SEEDS the set (no notification spam
+  // for the existing backlog).
+  const knownSaved = useRef(null); // null until seeded
+  const noteSavedArrivals = (list) => {
+    const saved = (list || []).filter(w => w && w.origin === 'tag');
+    const ids = new Set(saved.map(w => w.id));
+    if (knownSaved.current === null) { knownSaved.current = ids; return; } // seed only
+    const fresh = saved.filter(w => !knownSaved.current.has(w.id));
+    knownSaved.current = ids;
+    if (fresh.length) notifySavedAvailable(fresh);
+  };
   const reloadWorks = () => fetchWorks()
-    .then(r => setWorks(r ?? WORKS))
+    .then(r => { const list = r ?? WORKS; setWorks(list); noteSavedArrivals(list); })
     .catch(() => setWorks(WORKS));
   useEffect(() => {
     if (!authed) { setWorks(null); return; } // wait until signed in to query
     let alive = true;
     fetchWorks()
-      .then(r => { if (alive) setWorks(r ?? WORKS); })
+      .then(r => { if (alive) { const list = r ?? WORKS; setWorks(list); noteSavedArrivals(list); } })
       .catch(() => { if (alive) setWorks(WORKS); });
     return () => { alive = false; };
   }, [authed]);
