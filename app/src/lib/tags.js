@@ -33,6 +33,7 @@ function mapGroup(g, counts = { total: 0, fresh: 0 }) {
     excludedTags,
     excludedNames: excludedTags.map((t) => t.name).filter(Boolean),
     matchMode: g.match_mode || 'all',
+    status: g.status || 'all', // 'all' | 'ongoing' | 'complete' (completion filter)
     kind,
     language: langTag ? langTag.id || langTag.name : null,
     count: counts.total,
@@ -104,7 +105,7 @@ export async function fetchTrackedGroups() {
   return (groups || []).map((g) => mapGroup(g, counts[g.id]));
 }
 
-export async function createGroup({ label = '', tags, excludedTags = [], matchMode = 'all', source = 'ao3' }) {
+export async function createGroup({ label = '', tags, excludedTags = [], matchMode = 'all', source = 'ao3', status = 'all' }) {
   if (!hasSupabase) throw new Error('Supabase not configured');
   const cleanTags = (list) => (list || [])
     .map((t) => ({ name: t.name, id: t.id ?? '', kind: t.kind || 'freeform' }))
@@ -121,6 +122,7 @@ export async function createGroup({ label = '', tags, excludedTags = [], matchMo
       tags: clean,
       excluded_tags: excluded,
       match_mode: matchMode === 'any' ? 'any' : 'all',
+      status: ['ongoing', 'complete'].includes(status) ? status : 'all',
       palette: paletteIndexFor(seed),
     })
     .select()

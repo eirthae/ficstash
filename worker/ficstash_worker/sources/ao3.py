@@ -386,6 +386,7 @@ class AO3Source(Source):
         excluded_tags: list[str] | None = None,
         since: datetime | None = None,
         max_pages: int = 8,
+        completed: bool | None = None,
     ) -> list[WorkMeta]:
         """Find recent works matching a tracked tag group, via AO3's own search.
 
@@ -415,7 +416,7 @@ class AO3Source(Source):
             if qi:
                 time.sleep(RATE_LIMIT_SECONDS)  # space multi-tag 'any' searches
             for w in self._run_tag_search(
-                q, limit, excluded_tags=excluded_csv, revised_at=revised, max_pages=max_pages
+                q, limit, excluded_tags=excluded_csv, revised_at=revised, max_pages=max_pages, completed=completed
             ):
                 wid = str(getattr(w, "id", "") or "")
                 if not wid or wid in seen:
@@ -504,6 +505,7 @@ class AO3Source(Source):
         excluded_tags: str = "",
         revised_at: str = "",
         max_pages: int = 8,
+        completed: bool | None = None,
     ):
         s = self._require_session()
 
@@ -513,6 +515,7 @@ class AO3Source(Source):
                     tags=tags_csv,
                     excluded_tags=excluded_tags,
                     revised_at=revised_at,
+                    completion_status=completed,
                     sort_column="created_at",
                     page=page,
                     session=s,

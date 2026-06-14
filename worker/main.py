@@ -561,6 +561,16 @@ def main() -> None:
             print(f"    '{label}': no tags, skipped.")
             continue
 
+        # Completion-status filter on the group: 'complete' / 'ongoing' / 'all'.
+        grp_status = (g.get("status") or "all").strip().lower()
+        completed = True if grp_status == "complete" else False if grp_status == "ongoing" else None
+
+        def _keep_status(m):
+            if completed is None:
+                return True
+            is_complete = (getattr(m, "status", "") or "").lower() == "complete"
+            return is_complete == completed
+
         if source_id == "ao3":
             try:
                 space()
@@ -570,11 +580,12 @@ def main() -> None:
                         match_mode=g.get("match_mode", "all"),
                         excluded_tags=excluded_names,
                         since=since,
+                        completed=completed,
                     ),
                     what=f"tag search '{label}'",
                     broad=True,
                 )
-                kept = [m for m in metas if keep_discovery_language(m)]
+                kept = [m for m in metas if keep_discovery_language(m) and _keep_status(m)]
                 dropped = len(metas) - len(kept)
                 written = upsert_tag_matches(db, g["id"], kept)
                 mark_group_checked(db, g["id"])
@@ -615,6 +626,7 @@ def main() -> None:
                 what=f"{source_id} tag search '{label}'",
                 broad=True,
             )
+            metas = [m for m in metas if _keep_status(m)]
             written = upsert_tag_matches(db, g["id"], metas)
             mark_group_checked(db, g["id"])
             note = f" (excluding {len(exclude_terms)})" if exclude_terms else ""
