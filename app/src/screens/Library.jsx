@@ -13,6 +13,13 @@ function fandomName(work) {
   return (work.fandom || 'Other').split('–')[0].split(' - ')[0].trim() || 'Other';
 }
 
+// Lowercased tag texts of a work (tags are [{ t, k }]), for search + filtering.
+function workTagSet(work) {
+  return (Array.isArray(work.tags) ? work.tags : [])
+    .map(t => (typeof t === 'string' ? t : (t && (t.t || t.name)) || '').toLowerCase())
+    .filter(Boolean);
+}
+
 // Which shelf a work belongs to. Routing is automatic by how it entered the
 // library: uploaded EPUBs are Books; AO3 works (bookmarks, tag saves, AO3 links)
 // are Fics; everything else added from another site is a Story.
@@ -79,6 +86,56 @@ function SortDropdown({ value, options, onChange, align = 'right' }) {
   );
 }
 
+// Advanced tag filter: pick tags from the shelf's own pool. Tapping a tag
+// requires it (AND across all required tags); the − button excludes it. A tag
+// can't be both — toggling one clears the other.
+function FilterSheet({ open, onClose, pool, inc, exc, setInc, setExc }) {
+  const [q, setQ] = useState('');
+  const needle = q.trim().toLowerCase();
+  const list = pool.filter(t => !needle || t.toLowerCase().includes(needle)).slice(0, 100);
+  const toggle = (set, other, t) => { set(xs => xs.includes(t) ? xs.filter(x => x !== t) : [...xs, t]); other(xs => xs.filter(x => x !== t)); };
+  return (
+    <Sheet open={open} onClose={onClose} title="Filter by tags" maxH="82%">
+      <div className="searchfield" style={{ marginBottom: 10 }}>
+        <Icon icon="solar:magnifer-linear" size={18} color="var(--text-tertiary)" />
+        <input placeholder="Find a tag…" value={q} onChange={(e) => setQ(e.target.value)} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10, lineHeight: 1.45 }}>
+        Tap a tag to require it · − to exclude. Works must match every required tag.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: '50vh', overflowY: 'auto' }}>
+        {list.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 4px' }}>No tags on this shelf.</div>
+        ) : list.map(t => {
+          const isInc = inc.includes(t), isExc = exc.includes(t);
+          return (
+            <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button className="pressable" onClick={() => toggle(setInc, setExc, t)}
+                style={{ flex: 1, textAlign: 'left', background: 'transparent', padding: '10px 4px', fontSize: 13.5,
+                  fontWeight: (isInc || isExc) ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  color: isInc ? 'var(--accent)' : isExc ? 'var(--danger,#f5455c)' : 'var(--text-primary)' }}>
+                {isInc ? '✓ ' : ''}{t}
+              </button>
+              <button className="iconbtn" onClick={() => toggle(setExc, setInc, t)} aria-label="Exclude tag"
+                style={{ width: 30, height: 30, borderRadius: 8, flex: 'none',
+                  background: isExc ? 'color-mix(in srgb, var(--danger,#f5455c) 18%, transparent)' : 'var(--surface-2)',
+                  color: isExc ? 'var(--danger,#f5455c)' : 'var(--text-tertiary)' }}>
+                <Icon icon="solar:minus-circle-linear" size={16} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+        {(inc.length > 0 || exc.length > 0) && (
+          <button className="btn btn-surface" style={{ flex: 1 }} onClick={() => { setInc([]); setExc([]); }}>Clear</button>
+        )}
+        <button className="btn btn-primary" style={{ flex: 1 }} onClick={onClose}>Done</button>
+      </div>
+    </Sheet>
+  );
+}
+
 export function LibraryScreen({ works, layout = 'fandom', connected = true, onRemove, onReload, refreshKey, nav }) {
   const open = (w) => nav.push('detail', { work: w, onRemoved: onRemove, onReload });
   const [toast, showToast] = useToast();
@@ -89,6 +146,10 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   const [pendingLinks, setPendingLinks] = useState([]);
   const [collapsed, setCollapsed] = useState({});   // fandom name -> collapsed?
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [query, setQuery] = useState('');           // search box (title/author/fandom/tag)
+  const [incTags, setIncTags] = useState([]);        // advanced filter: must have ALL of these
+  const [excTags, setExcTags] = useState([]);        // advanced filter: must have NONE of these
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const toggleSection = (name) => setCollapsed(c => ({ ...c, [name]: !c[name] }));
 
   const reloadLinks = () => fetchPendingLinks().then(setPendingLinks).catch(() => {});
@@ -142,7 +203,38 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   // Counts per shelf (for the tab labels) and the works for the active shelf.
   const counts = { fics: 0, stories: 0, books: 0 };
   for (const w of ready) counts[shelfOf(w)]++;
-  const shelfWorks = ready.filter(w => shelfOf(w) === shelf);
+  const shelfAll = ready.filter(w => shelfOf(w) === shelf);
+
+  // Search + advanced tag filter (applied before status/sort). Search matches
+  // title/author/fandom/tags; include tags require ALL present; exclude tags
+  // require NONE present. The tag pool offered in the filter sheet is built from
+  // this shelf's own works (the "big tags" you actually have).
+  const q = query.trim().toLowerCase();
+  const inc = incTags.map(t => t.toLowerCase());
+  const exc = excTags.map(t => t.toLowerCase());
+  const matchesSearch = (w) => !q || [w.title, w.customTitle, w.author, w.fandom, w.pairing]
+    .some(s => (s || '').toLowerCase().includes(q)) || workTagSet(w).some(t => t.includes(q));
+  const matchesTags = (w) => {
+    if (!inc.length && !exc.length) return true;
+    const set = workTagSet(w);
+    if (inc.length && !inc.every(t => set.includes(t))) return false;
+    if (exc.length && exc.some(t => set.includes(t))) return false;
+    return true;
+  };
+  const filterActive = !!q || inc.length > 0 || exc.length > 0;
+  const shelfWorks = shelfAll.filter(w => matchesSearch(w) && matchesTags(w));
+
+  // Tag pool for the filter sheet: this shelf's tags, most-common first (keeps
+  // original casing; deduped case-insensitively).
+  const tagPool = (() => {
+    const m = new Map();
+    for (const w of shelfAll) for (const t of (Array.isArray(w.tags) ? w.tags : [])) {
+      const text = (typeof t === 'string' ? t : (t && (t.t || t.name)) || '').trim();
+      if (!text) continue;
+      const e = m.get(text.toLowerCase()) || { text, n: 0 }; e.n++; m.set(text.toLowerCase(), e);
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n).map(e => e.text);
+  })();
 
   // Status filter (fics/stories only).
   const ongoingCount = shelfWorks.filter(w => w.status !== 'complete').length;
@@ -215,6 +307,42 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
           ))}
         </div>
 
+        {(shelfAll.length > 0 || filterActive) && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '0 20px 12px' }}>
+            <div className="searchfield" style={{ flex: 1 }}>
+              <Icon icon="solar:magnifer-linear" size={18} color="var(--text-tertiary)" />
+              <input placeholder={`Search ${shelf}…`} value={query} onChange={(e) => setQuery(e.target.value)}
+                autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+              {query && <button className="iconbtn" style={{ width: 22, height: 22 }} onClick={() => setQuery('')}><Icon icon="solar:close-circle-bold" size={16} color="var(--text-tertiary)" /></button>}
+            </div>
+            {!isBooks && (
+              <button className="iconbtn ghost" onClick={() => setFiltersOpen(true)}
+                style={{ flex: 'none', width: 42, height: 42, borderRadius: 'var(--radius-md)',
+                  background: (incTags.length || excTags.length) ? 'var(--accent-soft)' : 'var(--surface-2)',
+                  color: (incTags.length || excTags.length) ? 'var(--accent)' : undefined }}
+                aria-label="Filter by tags">
+                <Icon icon="solar:tuning-2-linear" size={20} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {(incTags.length > 0 || excTags.length > 0) && (
+          <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8, margin: '0 20px 12px' }}>
+            {incTags.map(t => (
+              <span key={`i${t}`} className="chip" style={{ background: 'var(--accent-soft)', color: 'var(--accent)', paddingRight: 6 }}>
+                {t}<button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => setIncTags(xs => xs.filter(x => x !== t))}><Icon icon="solar:close-circle-bold" size={14} color="var(--accent)" /></button>
+              </span>
+            ))}
+            {excTags.map(t => (
+              <span key={`e${t}`} className="chip" style={{ background: 'color-mix(in srgb, var(--danger,#f5455c) 16%, transparent)', color: 'var(--danger,#f5455c)', paddingRight: 6 }}>
+                –{t}<button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => setExcTags(xs => xs.filter(x => x !== t))}><Icon icon="solar:close-circle-bold" size={14} color="var(--danger,#f5455c)" /></button>
+              </span>
+            ))}
+            <button className="linklike" style={{ fontSize: 12 }} onClick={() => { setIncTags([]); setExcTags([]); }}>Clear</button>
+          </div>
+        )}
+
         {(shelfWorks.length > 0 || pending.length > 0) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '0 20px 16px' }}>
             {isBooks ? (
@@ -269,6 +397,9 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
           </div>
         )}
       </PullToRefresh>
+
+      <FilterSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} pool={tagPool}
+        inc={incTags} exc={excTags} setInc={setIncTags} setExc={setExcTags} />
 
       <Sheet open={!!pendingDelete} onClose={() => setPendingDelete(null)} title="Remove from library?">
         <div style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--text-secondary)', marginBottom: 16 }}>
