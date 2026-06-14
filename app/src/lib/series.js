@@ -21,17 +21,17 @@ export async function getSeriesFollow(seriesId) {
   return { id: r.id, seriesId: r.series_id, seriesName: r.series_name, follow: !!r.follow, lastChecked: r.last_checked };
 }
 
-// Queue a one-shot "download all works in this series" (unless already followed,
-// in which case the follow already covers it). Kicks the worker.
+// "Download all works in this series" — also follows it (follow=true), so new
+// works added to the series later keep arriving automatically. Kicks the worker.
 export async function requestSeriesDownload(seriesId, seriesName = '') {
   if (!hasSupabase) return { ok: false, error: 'Connect your account first.' };
   if (!seriesId) return { ok: false, error: 'No series id' };
   const { error } = await supabase
     .from('followed_series')
-    .upsert({ series_id: String(seriesId), series_name: seriesName }, { onConflict: 'series_id' });
+    .upsert({ series_id: String(seriesId), series_name: seriesName, follow: true }, { onConflict: 'series_id' });
   if (error) return { ok: false, error: error.message || String(error) };
   triggerSync().catch(() => {});
-  return { ok: true };
+  return { ok: true, follow: true };
 }
 
 // Turn "follow this series" on/off. Following also pulls the whole series (the

@@ -8,6 +8,7 @@ import { WhatsNewScreen } from './screens/WhatsNew.jsx';
 import { DiscoverScreen, TagResultsScreen, LaterScreen } from './screens/Discover.jsx';
 import { SettingsScreen, ConnectScreen } from './screens/Settings.jsx';
 import { StoryDetailScreen } from './screens/Detail.jsx';
+import { SeriesScreen } from './screens/Series.jsx';
 import { ReaderScreen } from './screens/Reader.jsx';
 import { LoginScreen } from './screens/Login.jsx';
 import { WORKS, NEW_CHAPTERS, NEW_MATCHES } from './data/sample.js';
@@ -189,6 +190,7 @@ export default function App() {
   const renderTop = () => {
     const n = nav.current, p = top.props || {};
     if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} onReload={p.onReload} nav={n} />;
+    if (top.screen === 'series') return <SeriesScreen seriesId={p.seriesId} seriesName={p.seriesName} onReload={p.onReload} nav={n} />;
     if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={updateReaderSettings} nav={n} />;
     if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
     if (top.screen === 'later') return <LaterScreen onLeave={p.onLeave} nav={n} />;

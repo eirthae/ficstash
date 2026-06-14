@@ -161,17 +161,14 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   // uploads that share a series or author cluster without any manual work.
   const bookGroups = isBooks ? groupBooks(shown, sort, lastRead) : [];
   const useSeries = isBooks && bookGroups.some(g => !g.standalone);
-  // Fics ALWAYS group (by AO3 series first, then fandom) — every sort reorders
-  // the sections instead of flattening, so the collapse toggle never vanishes
-  // and the row never jumps when you change sort. AO3 series are pulled out
-  // first (auto-grouped like Books); the rest ("loose") group by fandom.
+  // Fics group BY FANDOM (keeping the fandom separation). Within each fandom, a
+  // multi-work AO3 series collapses into ONE clickable series card (opens the
+  // series page) — series no longer get pulled into a separate top cluster that
+  // scrambled the fandom grouping. Every sort reorders sections (no flatten).
   const useFandom = shelf === 'fics';
-  const { seriesGroups: ficsSeries, loose: ficsLoose } = useFandom
-    ? groupFicsSeries(shown, sort, lastRead)
-    : { seriesGroups: [], loose: shown };
-  const fandomNames = useFandom ? [...new Set(ficsLoose.map(fandomName))] : [];
+  const ficsGroups = useFandom ? groupFics(shown, sort, lastRead) : [];
   const sectionNames = useFandom
-    ? [...ficsSeries.map(g => g.name), ...fandomNames]
+    ? ficsGroups.map(g => g.name)
     : useSeries ? bookGroups.map(g => g.name) : [];
   const anyExpanded = sectionNames.some(n => !collapsed[n]);
   const showCollapseToggle = sectionNames.length > 1 && shown.length > 0;
@@ -263,12 +260,9 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
         ) : useSeries ? (
           <SeriesSections groups={bookGroups} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
         ) : useFandom ? (
-          <>
-            {ficsSeries.length > 0 && (
-              <SeriesSections groups={ficsSeries} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
-            )}
-            <FandomSections works={ficsLoose} open={open} onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} sort={sort} lastRead={lastRead} />
-          </>
+          <FicsSections groups={ficsGroups} open={open}
+            openSeries={(s) => nav.push('series', { seriesId: s.seriesId, seriesName: s.name, onReload })}
+            onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
             {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => setPendingDelete(w)} />)}
@@ -368,27 +362,42 @@ function groupBooks(works, sort = 'added', lastRead = {}) {
   return real;
 }
 
-// Auto-group AO3 fics by their AO3 series: works sharing a series cluster under
-// the series name, ordered by part; everything else is "loose" and falls through
-// to the existing fandom grouping. Like Books, a series keeps its section even
-// with one downloaded work. Series sections sort alphabetically by series name.
-function groupFicsSeries(works, sort = 'default', lastRead = {}) {
-  const byKey = new Map();
-  const loose = [];
+// Group AO3 fics BY FANDOM, with multi-work series collapsed into one clickable
+// series card inside their fandom. Each section = { name, series:[{seriesId,
+// name, items}], loose:[works], items:[all] }. A series is filed under the
+// fandom of its first work (by part). A single-work series stays a normal card
+// (no point in a one-item series page). Sections + loose works obey the sort.
+function groupFics(works, sort = 'default', lastRead = {}) {
+  const seriesByKey = new Map();
+  const looseAll = [];
   for (const w of works) {
-    const key = (w.ao3SeriesId || '').trim();
-    const name = (w.ao3SeriesName || '').trim();
-    if (!key || !name) { loose.push(w); continue; }
-    let g = byKey.get(key);
-    if (!g) { g = { name, items: [] }; byKey.set(key, g); }
-    g.items.push(w);
+    const sid = (w.ao3SeriesId || '').trim();
+    const sname = (w.ao3SeriesName || '').trim();
+    if (!sid || !sname) { looseAll.push(w); continue; }
+    let s = seriesByKey.get(sid);
+    if (!s) { s = { seriesId: sid, name: sname, items: [] }; seriesByKey.set(sid, s); }
+    s.items.push(w);
   }
-  const seriesGroups = [...byKey.values()];
-  for (const g of seriesGroups) {
-    g.items.sort((a, b) => (a.ao3SeriesIndex ?? 1e9) - (b.ao3SeriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''));
+  const byFandom = new Map();
+  const ensure = (name) => {
+    let g = byFandom.get(name);
+    if (!g) { g = { name, series: [], loose: [], items: [] }; byFandom.set(name, g); }
+    return g;
+  };
+  for (const w of looseAll) { const g = ensure(fandomName(w)); g.loose.push(w); g.items.push(w); }
+  for (const s of seriesByKey.values()) {
+    s.items.sort((a, b) => (a.ao3SeriesIndex ?? 1e9) - (b.ao3SeriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''));
+    if (s.items.length < 2) { const w = s.items[0]; const g = ensure(fandomName(w)); g.loose.push(w); g.items.push(w); continue; }
+    const g = ensure(fandomName(s.items[0]));
+    g.series.push(s); g.items.push(...s.items);
   }
-  orderGroups(seriesGroups, sort, lastRead);
-  return { seriesGroups, loose };
+  const groups = [...byFandom.values()];
+  for (const g of groups) {
+    g.loose = sortWorks(g.loose, sort, lastRead);
+    g.series.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  orderGroups(groups, sort, lastRead);
+  return groups;
 }
 
 // Order section groups by the active sort (shared by fandom + fics-series
@@ -435,17 +444,9 @@ function SeriesSections({ groups, open, onDelete, collapsed, toggle }) {
   );
 }
 
-function FandomSections({ works, open, onDelete, collapsed, toggle, sort = 'default', lastRead = {} }) {
-  const groups = [];
-  const byName = new Map();
-  for (const w of works) {
-    const name = fandomName(w);
-    let g = byName.get(name);
-    if (!g) { g = { name, items: [] }; byName.set(name, g); groups.push(g); }
-    g.items.push(w);
-  }
-  orderGroups(groups, sort, lastRead);
-
+// Fics shelf: fandom sections, each with its series cards (clickable → series
+// page) above its loose works. Built by groupFics.
+function FicsSections({ groups, open, openSeries, onDelete, collapsed, toggle }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '0 20px 24px' }}>
       {groups.map(g => {
@@ -460,12 +461,31 @@ function FandomSections({ works, open, onDelete, collapsed, toggle, sort = 'defa
             </button>
             {isOpen && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 13, paddingTop: 11 }}>
-                {g.items.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => onDelete(w)} />)}
+                {g.series.map(s => <SeriesRow key={s.seriesId} series={s} onOpen={() => openSeries(s)} />)}
+                {g.loose.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => onDelete(w)} />)}
               </div>
             )}
           </div>
         );
       })}
     </div>
+  );
+}
+
+// A series, collapsed to one row in the fandom list. Tap → the series page.
+function SeriesRow({ series, onOpen }) {
+  const n = series.items.length;
+  const have = series.items.filter(w => (w.chapters || 0) > 0 || w.offline).length;
+  return (
+    <button className="series-row pressable" onClick={onOpen}
+      style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left',
+        padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+      <Icon icon="solar:bookmark-square-bold" size={22} color="var(--accent)" />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{series.name}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>Series · {n} work{n === 1 ? '' : 's'}{have < n ? ` · ${have} downloaded` : ''}</div>
+      </div>
+      <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
+    </button>
   );
 }

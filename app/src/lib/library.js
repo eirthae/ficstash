@@ -65,6 +65,21 @@ export async function fetchWorks() {
   return (data || []).map(mapWork);
 }
 
+// All downloaded works belonging to an AO3 series, in reading order (part #).
+// Powers the Series screen and the reader's prev/next-in-series navigation.
+export async function fetchSeriesWorks(ao3SeriesId) {
+  if (!hasSupabase || !ao3SeriesId) return [];
+  const { data, error } = await supabase
+    .from('works')
+    .select('*')
+    .eq('ao3_series_id', String(ao3SeriesId))
+    .eq('hidden', false);
+  if (error) throw error;
+  return (data || [])
+    .map(mapWork)
+    .sort((a, b) => (a.ao3SeriesIndex ?? 1e9) - (b.ao3SeriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''));
+}
+
 // "Remove from library" = hide the work. We don't hard-delete: the work may
 // still be bookmarked on AO3, and a delete would just reappear on the next sync.
 // Setting hidden=true is durable — the app filters it out and the worker skips
