@@ -13,7 +13,7 @@ import { ReaderScreen } from './screens/Reader.jsx';
 import { LoginScreen } from './screens/Login.jsx';
 import { WORKS, NEW_CHAPTERS, NEW_MATCHES } from './data/sample.js';
 import { fetchWorks } from './lib/library.js';
-import { notifySavedAvailable } from './lib/notify.js';
+import { notifySavedAvailable, ensureNotifyPermission } from './lib/notify.js';
 import { supabase, hasSupabase } from './lib/supabase.js';
 
 const READER_DEFAULTS = { theme: 'dark', font: 'serif', size: 19, leading: 1.70, margin: 26, brightness: 1 };
@@ -129,6 +129,9 @@ export default function App() {
     fetchWorks()
       .then(r => { if (alive) { const list = r ?? WORKS; setWorks(list); noteSavedArrivals(list); } })
       .catch(() => { if (alive) setWorks(WORKS); });
+    // Ask for notification permission once, up front — otherwise the prompt only
+    // appears the first time a saved work happens to arrive, which may be never.
+    ensureNotifyPermission().catch(() => {});
     return () => { alive = false; };
   }, [authed]);
   // Drop a removed work from the in-memory list so the library updates at once
