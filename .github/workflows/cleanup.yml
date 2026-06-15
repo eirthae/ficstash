@@ -1,0 +1,43 @@
+name: Cleanup stale works
+
+# Targeted cleanup of old/stale works (NOT a full purge). Manual only.
+#  - No inputs  → DRY RUN: prints a breakdown by origin / restricted / hidden.
+#  - hide_bookmarks → hides the original bookmark-import works (origin='bookmark').
+#  - hide_restricted → hides AO3 members-only works the worker can't fetch.
+# Hiding (works.hidden=true) drops them from the library AND the refresh passes,
+# so stale works stop blocking syncs. Reversible — rows are kept, not deleted.
+on:
+  workflow_dispatch:
+    inputs:
+      hide_bookmarks:
+        description: "Hide works from the original bookmark import (origin='bookmark')"
+        type: boolean
+        default: false
+      hide_restricted:
+        description: "Hide AO3 members-only works the worker can't fetch"
+        type: boolean
+        default: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run cleanup
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          HIDE_BOOKMARKS: ${{ inputs.hide_bookmarks && '1' || '' }}
+          HIDE_RESTRICTED: ${{ inputs.hide_restricted && '1' || '' }}
+        run: python cleanup.py
