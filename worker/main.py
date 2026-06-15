@@ -323,13 +323,27 @@ def main() -> None:
             print(f"[link] {url}")
             try:
                 mark_request(db, rid, status="fetching")
-                space()
-                meta, chap_list = linker.prepare(url)
-                work_uuid = upsert_work(db, meta, origin="link")
-                chapters = []
-                for i, ch in enumerate(chap_list):
+                ao3_id = re.search(r"/works/(\d+)", url) if "archiveofourown.org" in url else None
+                if ao3_id:
+                    # AO3 link → use the AO3 source (rich tags/fandom/summary, the
+                    # adult-content cookie, all chapters) and stamp source='ao3' so
+                    # it lands in the Fics shelf. FanFicFare would trip on AO3's
+                    # age-gate and fall back to a bare, mis-shelved 'other' work.
+                    wid = ao3_id.group(1)
+                    if ao3.is_restricted(wid):
+                        mark_request(db, rid, status="error", error="Restricted to AO3 members — open it on AO3.")
+                        link_failed += 1
+                        print("    restricted to AO3 members.")
+                        continue
+                    meta, chapters = fetch_work_chapters(ao3, wid, space=space, backoff=_with_backoff)
+                else:
                     space()
-                    chapters.append(linker.fetch_chapter(url, i, ch))
+                    meta, chap_list = linker.prepare(url)
+                    chapters = []
+                    for i, ch in enumerate(chap_list):
+                        space()
+                        chapters.append(linker.fetch_chapter(url, i, ch))
+                work_uuid = upsert_work(db, meta, origin="link")
                 written = upsert_chapters(db, work_uuid, chapters)
                 if not written:
                     mark_request(db, rid, status="error", error="No chapters fetched.")
