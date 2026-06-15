@@ -11,6 +11,10 @@ on:
         description: "Re-check ALL works (status, new chapters, AO3 series), not just ongoing ones"
         type: boolean
         default: false
+      saves_only:
+        description: "Fast path: fetch only requested links + saves, then stop (real-time Save)"
+        type: boolean
+        default: false
   schedule:
     # Daily at 03:00 Japan time (JST = UTC+9), i.e. 18:00 UTC. Moved earlier from
     # 04:00 to give the (now all-time first-run) tag fetch more overnight headroom.
@@ -18,8 +22,10 @@ on:
     - cron: "0 18 * * *"
 
 # Don't let a scheduled run and a manual run hammer AO3 at the same time.
+# Saves-only (real-time Save) runs in their OWN lane so they fire immediately
+# instead of queuing behind a full sweep.
 concurrency:
-  group: ficstash-sync
+  group: ${{ (github.event.inputs.saves_only == 'true') && 'ficstash-save' || 'ficstash-sync' }}
   cancel-in-progress: false
 
 jobs:
@@ -49,6 +55,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # "Re-check ALL works" toggle on a manual run → full library revamp.
           FULL_REFRESH: ${{ inputs.full_refresh && '1' || '' }}
+          SAVES_ONLY: ${{ inputs.saves_only && '1' || '' }}
           # No AO3 login: the worker only reads AO3's public pages now. The
           # AO3_USERNAME/AO3_PASSWORD secrets are no longer used and can be deleted.
         run: python main.py

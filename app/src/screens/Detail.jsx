@@ -8,7 +8,7 @@ import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 import { getSeriesFollow, requestSeriesDownload, setSeriesFollow } from '../lib/series.js';
 import { TagGroupBuilder } from './Discover.jsx';
-import { kickSync } from '../lib/sync.js';
+import { kickSave } from '../lib/sync.js';
 import { getReadingPos } from '../lib/reading.js';
 import { workUrl, sourceLabel } from '../sources/index.js';
 
@@ -120,7 +120,7 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
     setSaveState('queued');
     try {
       await requestSave(work.matchId || work.id);
-      kickSync();
+      kickSave();
       onSaved?.();
       showToast(ongoing
         ? 'Saved — downloading; new chapters arrive on each sync'

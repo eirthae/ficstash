@@ -228,7 +228,10 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   // multi-work AO3 series collapses into ONE clickable series card (opens the
   // series page) — series no longer get pulled into a separate top cluster that
   // scrambled the fandom grouping. Every sort reorders sections (no flatten).
-  const useFandom = shelf === 'fics';
+  // Fics group by fandom only on the Default sort. The time sorts (Last added /
+  // updated / read) show a FLAT chronological list across all fandoms, so "Last
+  // added" really is newest-first — not buried inside fandom sections.
+  const useFandom = shelf === 'fics' && activeSort === 'default';
   const ficsGroups = useFandom ? groupFics(shown, sort, lastRead) : [];
   const sectionNames = useFandom
     ? ficsGroups.map(g => g.name)

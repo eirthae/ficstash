@@ -8,7 +8,7 @@ import {
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches,
 } from '../lib/tags.js';
-import { kickSync, triggerSync } from '../lib/sync.js';
+import { kickSave, triggerSync } from '../lib/sync.js';
 import { LANGUAGES } from '../lib/languages.js';
 import { fetchDiscoveryPrefs, updateDiscoveryPrefs } from '../lib/discovery.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
@@ -685,7 +685,7 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
 
   const save = (w) => {
     setItems((arr) => (arr || []).map((x) => (x.id === w.id ? { ...x, wanted: true } : x)));
-    requestSave(w.matchId || w.id).then(() => kickSync()).catch(() => {});
+    requestSave(w.matchId || w.id).then(() => kickSave()).catch(() => {});
     showToast('Saved — starting download', 'solar:download-minimalistic-linear');
   };
   const saveStateOf = (w) => (w.saved ? 'saved' : w.wanted ? 'queued' : 'idle');
@@ -766,7 +766,7 @@ export function LaterScreen({ nav, onLeave }) {
   };
   const save = (w) => {
     setItems((arr) => (arr || []).map((x) => (x.id === w.id ? { ...x, wanted: true } : x)));
-    requestSave(w.matchId || w.id).then(() => kickSync()).catch(() => {});
+    requestSave(w.matchId || w.id).then(() => kickSave()).catch(() => {});
     showToast('Saved — starting download', 'solar:download-minimalistic-linear');
   };
   const saveStateOf = (w) => (w.saved ? 'saved' : w.wanted ? 'queued' : 'idle');

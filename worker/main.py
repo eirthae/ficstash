@@ -219,6 +219,13 @@ def _full_refresh() -> bool:
     return os.environ.get("FULL_REFRESH", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _saves_only() -> bool:
+    """Fast path: fetch ONLY user-requested links + saves, then stop. Triggered
+    when the app's Save button wants a work pulled in right now, so it doesn't
+    wait behind the full library sweep (discovery, repair, refresh-all)."""
+    return os.environ.get("SAVES_ONLY", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _full_refresh_max() -> int | None:
     """Cap for a full refresh (None = every work; the run may need to repeat for
     a very large library since there's no resume cursor)."""
@@ -430,6 +437,12 @@ def main() -> None:
             save_failed += 1
             print(f"    requested {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
+
+    # Fast path: the app asked for a real-time Save — links + saves are done, so
+    # stop here instead of running the slow full sweep (repair/discovery/refresh).
+    if _saves_only():
+        print("\n== Saves-only run: skipping repair/discovery/refresh. Done. ==")
+        return
 
     # ---- Pass 3: repair works with blank metadata --------------------------
     # Older builds tolerated an ao3-api reload() abort without falling back to

@@ -73,19 +73,26 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, run: await latestRun() });
     }
 
-    // POST → dispatch the workflow, but ONLY if a run isn't already queued or in
-    // progress. Without this guard every pull-to-refresh / save / app-open POST
-    // dispatches a fresh run; they pile up in the concurrency group and supersede
-    // (cancel) each other, so a run never completes and queued works never land.
-    const current = await latestRun();
-    const st = (current as { status?: string } | null)?.status;
-    if (st === "queued" || st === "in_progress") {
-      return json({ ok: true, alreadyRunning: true, run: current });
+    // A "saves-only" POST is a real-time Save: it runs in its own workflow lane
+    // (separate concurrency group), so it fires immediately and we DON'T guard it
+    // against a running full sync.
+    let savesOnly = false;
+    try { savesOnly = !!(await req.json())?.savesOnly; } catch (_e) { /* no body */ }
+
+    // For a normal sync, only dispatch if one isn't already queued/in progress —
+    // otherwise every pull-to-refresh / save / app-open POST piles up runs that
+    // supersede (cancel) each other so none completes and works never land.
+    if (!savesOnly) {
+      const current = await latestRun();
+      const st = (current as { status?: string } | null)?.status;
+      if (st === "queued" || st === "in_progress") {
+        return json({ ok: true, alreadyRunning: true, run: current });
+      }
     }
     const res = await fetch(gh(`actions/workflows/${WORKFLOW}/dispatches`), {
       method: "POST",
       headers: { ...ghHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ ref: "main" }),
+      body: JSON.stringify({ ref: "main", inputs: savesOnly ? { saves_only: true } : {} }),
     });
     // GitHub returns 204 No Content on a successful dispatch.
     if (res.status === 204) return json({ ok: true, dispatched: true });
