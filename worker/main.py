@@ -58,6 +58,7 @@ from dotenv import load_dotenv
 
 from ficstash_worker.lang import allowed_language_set, language_allowed
 from ficstash_worker.saves import fetch_work_chapters
+from ficstash_worker.util import status_matches
 from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
@@ -565,11 +566,8 @@ def main() -> None:
         grp_status = (g.get("status") or "all").strip().lower()
         completed = True if grp_status == "complete" else False if grp_status == "ongoing" else None
 
-        def _keep_status(m):
-            if completed is None:
-                return True
-            is_complete = (getattr(m, "status", "") or "").lower() == "complete"
-            return is_complete == completed
+        def _keep_status(m, gs=grp_status):
+            return status_matches(getattr(m, "status", ""), gs)
 
         if source_id == "ao3":
             try:

@@ -14,3 +14,18 @@ def is_following(status: str | None) -> bool:
     a work we don't need than to silently stop updating one that's ongoing.
     """
     return (status or "").strip().lower() != "complete"
+
+
+def status_matches(work_status: str | None, group_status: str | None) -> bool:
+    """Whether a work passes a tracked group's completion-status filter.
+
+    group_status 'all' (or anything unrecognised) matches everything; 'complete'
+    keeps only finished works; 'ongoing' keeps only still-in-progress ones.
+    Used by the discovery pass to drop non-matching works for AO3 (belt) and
+    Royal Road / Scribble Hub (sole filter).
+    """
+    gs = (group_status or "all").strip().lower()
+    if gs not in ("complete", "ongoing"):
+        return True
+    is_complete = (work_status or "").strip().lower() == "complete"
+    return is_complete == (gs == "complete")
