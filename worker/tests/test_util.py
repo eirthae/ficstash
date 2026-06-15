@@ -5,7 +5,32 @@ Run from the worker/ directory:  python -m unittest discover -s tests
 
 import unittest
 
-from ficstash_worker.util import is_ao3_series_url, is_following, status_matches
+from ficstash_worker.util import (
+    is_ao3_series_url,
+    is_following,
+    is_phantom_link_error,
+    status_matches,
+)
+
+
+class IsPhantomLinkErrorTests(unittest.TestCase):
+    def test_not_found_is_phantom(self):
+        self.assertTrue(is_phantom_link_error("InvalidIdError", "Cannot find work 999999999"))
+        self.assertTrue(is_phantom_link_error("HTTPError", "404 Not Found"))
+        self.assertTrue(is_phantom_link_error("Exception", "Page not found"))
+
+    def test_transient_and_blocked_are_kept(self):
+        # Real works that hit a temporary or site-side problem — never delete.
+        self.assertFalse(is_phantom_link_error("RateLimitError", "429 too many requests"))
+        self.assertFalse(is_phantom_link_error("HTTPError", "403 Forbidden (Cloudflare)"))
+        self.assertFalse(is_phantom_link_error("ConnectionError", "Connection reset by peer"))
+        self.assertFalse(is_phantom_link_error("TimeoutError", "Read timed out"))
+        self.assertFalse(is_phantom_link_error("HTTPError", "503 Service Unavailable"))
+
+    def test_unknown_error_is_kept(self):
+        # Don't delete a possibly-real work over an error we don't recognise.
+        self.assertFalse(is_phantom_link_error("ValueError", "something weird happened"))
+        self.assertFalse(is_phantom_link_error(None, None))
 
 
 class IsAo3SeriesUrlTests(unittest.TestCase):

@@ -58,11 +58,12 @@ from dotenv import load_dotenv
 
 from ficstash_worker.lang import allowed_language_set, language_allowed
 from ficstash_worker.saves import fetch_work_chapters
-from ficstash_worker.util import status_matches
+from ficstash_worker.util import is_phantom_link_error, status_matches
 from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
     clear_series_requests,
+    delete_request,
     delete_series_follow,
     fetch_all_offline_works,
     fetch_followed_series,
@@ -189,6 +190,12 @@ def _link_error_message(exc: Exception) -> str:
     if "404" in low or "not found" in low:
         return "Story not found (404) — check the URL is correct and public."
     return text
+
+
+def _should_drop_link_error(exc: Exception) -> bool:
+    """Whether a failed link is a phantom (made-up / non-existent work) to delete
+    rather than leave as a red error. Delegates to the pure, unit-tested helper."""
+    return is_phantom_link_error(type(exc).__name__, str(exc))
 
 
 def _reflow_max() -> int | None:
@@ -319,7 +326,7 @@ def main() -> None:
         print(f"Removed {series_dropped} unsupported AO3 series link(s).")
     link_requests = fetch_requested_urls(db)
     print(f"{len(link_requests)} link request(s).")
-    link_done = link_failed = 0
+    link_done = link_failed = link_dropped = 0
     if link_requests:
         from ficstash_worker.sources.link import UnsupportedSite
 
@@ -350,12 +357,20 @@ def main() -> None:
                     for i, ch in enumerate(chap_list):
                         space()
                         chapters.append(linker.fetch_chapter(url, i, ch))
+                if not chapters:
+                    # Empty / non-existent work (e.g. an AI-hallucinated link that
+                    # points nowhere): drop it entirely rather than creating a
+                    # blank work and leaving a red error in the queue.
+                    delete_request(db, rid)
+                    link_dropped += 1
+                    print("    empty — no chapters; dropped.")
+                    continue
                 work_uuid = upsert_work(db, meta, origin="link")
                 written = upsert_chapters(db, work_uuid, chapters)
                 if not written:
-                    mark_request(db, rid, status="error", error="No chapters fetched.")
-                    link_failed += 1
-                    print("    no chapters fetched.")
+                    delete_request(db, rid)
+                    link_dropped += 1
+                    print("    empty — nothing written; dropped.")
                     continue
                 mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
                 mark_request(
@@ -373,10 +388,20 @@ def main() -> None:
                 link_failed += 1
                 print(f"    unsupported site ({exc}).")
             except Exception as exc:  # noqa: BLE001
-                mark_request(db, rid, status="error", error=_link_error_message(exc))
-                link_failed += 1
-                print(f"    skipped ({type(exc).__name__}: {exc})")
-    print(f"Requested links: {link_done} downloaded, {link_failed} failed.")
+                if _should_drop_link_error(exc):
+                    # Made-up / non-existent work (404 / invalid id) → drop it so
+                    # it doesn't clutter the queue as a permanent red error.
+                    delete_request(db, rid)
+                    link_dropped += 1
+                    print(f"    not found / invalid — dropped ({type(exc).__name__}: {exc})")
+                else:
+                    # Real work that hit a transient hiccup or site block — keep it
+                    # as a retryable error rather than silently deleting it.
+                    mark_request(db, rid, status="error", error=_link_error_message(exc))
+                    link_failed += 1
+                    print(f"    kept as error ({type(exc).__name__}: {exc})")
+    extra = f", {link_dropped} dropped (empty/not found)" if link_dropped else ""
+    print(f"Requested links: {link_done} downloaded, {link_failed} failed{extra}.")
 
     # ---- Pass 2: requested saves → full offline copies ---------------------
     # Works the user tapped "Save" on in the app (tag_matches.wanted), across

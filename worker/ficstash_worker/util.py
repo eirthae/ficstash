@@ -16,6 +16,27 @@ def is_ao3_series_url(url: str | None) -> bool:
     return "archiveofourown.org" in u and "/series/" in u
 
 
+def is_phantom_link_error(name: str | None, message: str | None) -> bool:
+    """Whether a failed link points to a work that doesn't exist (a made-up /
+    404 / invalid-id "phantom") and should be dropped from the queue.
+
+    Conservative: keep (return False) anything that looks transient or site-side
+    — rate limit, network/timeout, 5xx, Cloudflare 403 — so a real work isn't
+    silently deleted over a temporary hiccup. Only drop on clear "doesn't exist"
+    signals, and keep unknown failures by default.
+    """
+    text = f"{name or ''} {message or ''}".lower()
+    keep = (
+        "403", "cloudflare", "forbidden", "timeout", "timed out", "connection",
+        "temporarily", "ratelimit", "rate limit", "429", "502", "503", "504",
+        "reset by peer", "max retries",
+    )
+    if any(k in text for k in keep):
+        return False
+    drop = ("404", "not found", "invalid", "no such", "does not exist", "page not found", "missing")
+    return any(d in text for d in drop)
+
+
 def is_following(status: str | None) -> bool:
     """Whether a work should be auto-followed for new-chapter refreshes.
 

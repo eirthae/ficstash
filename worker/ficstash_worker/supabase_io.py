@@ -543,6 +543,12 @@ def clear_series_requests(client: Client) -> int:
     return len(ids)
 
 
+def delete_request(client: Client, request_id: str) -> None:
+    """Remove a single link request entirely (used to drop empty / non-existent
+    works so they don't linger in the app as red failures)."""
+    client.table("requested_urls").delete().eq("id", request_id).execute()
+
+
 def mark_request(client: Client, request_id: str, **fields) -> None:
     """Update a link request's progress (status/source/source_work_id/title/error)."""
     payload = {k: v for k, v in fields.items() if v is not None}
