@@ -1,0 +1,41 @@
+name: Purge all data
+
+# DANGER: wipes ALL FicStash content to a blank slate — works, chapters, tag
+# matches, chapter-updates, tracked tag groups, followed series, link/save queues,
+# and discovery filters. Your auth (app_owners) is KEPT so you stay signed in.
+# IRREVERSIBLE. Manual only, and requires typing PURGE to confirm.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type PURGE to wipe ALL data (irreversible)"
+        type: string
+        required: true
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard
+        run: |
+          if [ "${{ inputs.confirm }}" != "PURGE" ]; then
+            echo "Confirm input was not 'PURGE' — aborting, nothing changed."; exit 1
+          fi
+      - name: Truncate all data tables (keep auth)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          ref="$(printf '%s' "$SUPABASE_URL" | sed -E 's#https?://([^.]+)\..*#\1#')"
+          if [ -z "$ref" ]; then echo "Could not derive project ref"; exit 1; fi
+          sql="truncate table public.chapters, public.chapter_updates, public.tag_matches, public.works, public.followed_series, public.requested_urls, public.tracked_groups, public.discovery_prefs restart identity cascade;"
+          payload="$(jq -Rn --arg q "$sql" '{query: $q}')"
+          code="$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+            -X POST "https://api.supabase.com/v1/projects/$ref/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$payload")"
+          echo "HTTP $code"; cat /tmp/resp.json; echo
+          if [ "$code" != "200" ] && [ "$code" != "201" ]; then echo "Purge failed."; exit 1; fi
+          echo "Purged. FicStash is now a blank slate (auth kept)."
