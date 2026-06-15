@@ -525,6 +525,24 @@ def fetch_requested_urls(client: Client) -> list[dict]:
     return list(resp.data or [])
 
 
+def clear_series_requests(client: Client) -> int:
+    """Delete AO3 series-link requests from the queue (any status).
+
+    Series URLs (…/series/<id>) can't be imported as a single work, so they'd
+    otherwise sit in the app as red 'Bad Story URL' failures forever (the queue
+    only re-runs status='queued'). Removing them up front keeps the link list
+    clean. Series are handled via follow / download-all instead. Returns the
+    number removed.
+    """
+    from ficstash_worker.util import is_ao3_series_url
+
+    resp = client.table("requested_urls").select("id,url").execute()
+    ids = [r["id"] for r in (resp.data or []) if is_ao3_series_url(r.get("url"))]
+    for rid in ids:
+        client.table("requested_urls").delete().eq("id", rid).execute()
+    return len(ids)
+
+
 def mark_request(client: Client, request_id: str, **fields) -> None:
     """Update a link request's progress (status/source/source_work_id/title/error)."""
     payload = {k: v for k, v in fields.items() if v is not None}

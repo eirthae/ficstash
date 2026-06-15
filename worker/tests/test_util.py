@@ -5,7 +5,22 @@ Run from the worker/ directory:  python -m unittest discover -s tests
 
 import unittest
 
-from ficstash_worker.util import is_following, status_matches
+from ficstash_worker.util import is_ao3_series_url, is_following, status_matches
+
+
+class IsAo3SeriesUrlTests(unittest.TestCase):
+    def test_series_url_detected(self):
+        self.assertTrue(is_ao3_series_url("https://archiveofourown.org/series/1203031"))
+        self.assertTrue(is_ao3_series_url("http://ARCHIVEOFOUROWN.org/series/689388"))
+
+    def test_work_url_is_not_a_series(self):
+        self.assertFalse(is_ao3_series_url("https://archiveofourown.org/works/123456"))
+        self.assertFalse(is_ao3_series_url("https://archiveofourown.org/works/123456/chapters/789"))
+
+    def test_other_sites_and_blank_are_not_series(self):
+        self.assertFalse(is_ao3_series_url("https://www.royalroad.com/fiction/12345/series/9"))
+        self.assertFalse(is_ao3_series_url(""))
+        self.assertFalse(is_ao3_series_url(None))
 
 
 class IsFollowingTests(unittest.TestCase):

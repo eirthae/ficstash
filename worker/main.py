@@ -62,6 +62,7 @@ from ficstash_worker.util import status_matches
 from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
+    clear_series_requests,
     delete_series_follow,
     fetch_all_offline_works,
     fetch_followed_series,
@@ -310,6 +311,12 @@ def main() -> None:
     # Hub, FFN, …). Runs first so a just-pasted link downloads promptly rather
     # than waiting behind the full library sweep. Polite per-chapter spacing.
     print("\n== Requested links ==")
+    # Drop unsupported AO3 series links first (…/series/<id>) so they don't sit
+    # in the app as 'Bad Story URL' failures. Individual work links still parse;
+    # series are handled via follow / download-all.
+    series_dropped = clear_series_requests(db)
+    if series_dropped:
+        print(f"Removed {series_dropped} unsupported AO3 series link(s).")
     link_requests = fetch_requested_urls(db)
     print(f"{len(link_requests)} link request(s).")
     link_done = link_failed = 0

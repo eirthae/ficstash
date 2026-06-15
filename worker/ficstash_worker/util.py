@@ -4,6 +4,18 @@ without a Supabase client, network, or any third-party package installed."""
 from __future__ import annotations
 
 
+def is_ao3_series_url(url: str | None) -> bool:
+    """Whether a pasted link is an AO3 *series* URL (…/series/<id>).
+
+    Series links aren't importable as a single work — FanFicFare only handles
+    …/works/<id> — so the link queue drops them rather than failing each run.
+    Series are handled separately via follow / download-all. Work links (and any
+    other site) are unaffected.
+    """
+    u = (url or "").lower()
+    return "archiveofourown.org" in u and "/series/" in u
+
+
 def is_following(status: str | None) -> bool:
     """Whether a work should be auto-followed for new-chapter refreshes.
 
