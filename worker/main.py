@@ -509,15 +509,27 @@ def main() -> None:
                 val = (entry.get(key) or "").strip().lower()
                 if val:
                     discovery_langs.add(val)
-    global_excluded = [
-        (t.get("name") if isinstance(t, dict) else str(t))
-        for t in (prefs.get("excluded_tags") or [])
-    ]
-    global_excluded = [t for t in global_excluded if t]
+    # Excluded tags are scoped per Discovery shelf: {ao3:[],sites:[],books:[]}, so
+    # the user can exclude e.g. "litrpg" from Stories without touching AO3. A
+    # legacy flat array (older rows) is treated as AO3-only. Each shelf's list is
+    # folded into that shelf's group searches below.
+    def _shelf_for_source(src: str) -> str:
+        return "books" if src == "books" else "ao3" if src == "ao3" else "sites"
+
+    def _names(items):
+        return [n for n in ((t.get("name") if isinstance(t, dict) else str(t)) for t in (items or [])) if n]
+
+    raw_excluded = prefs.get("excluded_tags") or []
+    global_excluded_by_shelf: dict[str, list[str]] = {"ao3": [], "sites": [], "books": []}
+    if isinstance(raw_excluded, dict):
+        for shelf in ("ao3", "sites", "books"):
+            global_excluded_by_shelf[shelf] = _names(raw_excluded.get(shelf))
+    elif isinstance(raw_excluded, list):
+        global_excluded_by_shelf["ao3"] = _names(raw_excluded)  # legacy = AO3-only
     if discovery_langs:
         print(f"  discovery languages: {sorted(discovery_langs)}")
-    if global_excluded:
-        print(f"  global excluded tags: {global_excluded}")
+    if any(global_excluded_by_shelf.values()):
+        print(f"  global excluded tags by shelf: {global_excluded_by_shelf}")
 
     def keep_discovery_language(meta) -> bool:
         if not discovery_langs:
@@ -580,8 +592,8 @@ def main() -> None:
             for t in (g.get("excluded_tags") or [])
         ]
         excluded_names = [t for t in excluded_names if t]
-        # Fold in the global excluded tags (deduped, order-stable).
-        for t in global_excluded:
+        # Fold in this shelf's global excluded tags (deduped, order-stable).
+        for t in global_excluded_by_shelf.get(_shelf_for_source(source_id), []):
             if t not in excluded_names:
                 excluded_names.append(t)
         label = g.get("label") or " + ".join(tag_names) or g["id"]
@@ -644,6 +656,11 @@ def main() -> None:
 
         include_terms = _terms(tags_raw)
         exclude_terms = _terms(g.get("excluded_tags"))
+        # Fold in this shelf's global excluded tags (e.g. exclude "litrpg" from
+        # Stories). Matched by name in the site's own search query.
+        for t in global_excluded_by_shelf.get(_shelf_for_source(source_id), []):
+            if t not in exclude_terms:
+                exclude_terms.append(t)
         try:
             space()
             metas = _with_backoff(
