@@ -231,7 +231,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   // Fics group by fandom only on the Default sort. The time sorts (Last added /
   // updated / read) show a FLAT chronological list across all fandoms, so "Last
   // added" really is newest-first — not buried inside fandom sections.
-  const useFandom = shelf === 'fics' && activeSort === 'default';
+  const useFandom = shelf === 'fics' && sort === 'default';
   const ficsGroups = useFandom ? groupFics(shown, sort, lastRead) : [];
   const sectionNames = useFandom
     ? ficsGroups.map(g => g.name)
