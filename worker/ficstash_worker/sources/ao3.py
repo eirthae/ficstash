@@ -119,16 +119,28 @@ class AO3Source(Source):
         return f"https://archiveofourown.org/works/{source_work_id}"
 
     def is_restricted(self, source_work_id: str) -> bool:
-        """One cheap request: does this work redirect a guest to the members-only
-        login gate? Used to label works the logged-out worker can't fetch so the
-        app can point the user to AO3 instead of retrying forever."""
+        """Does this work redirect a guest to the members-only login gate?
+
+        Used to label works the logged-out worker can't fetch so the app can
+        point the user to AO3 instead of retrying forever. AO3 is often slow, so
+        we RETRY on a network error rather than treating a single timeout as
+        "not restricted" — a swallowed timeout used to misclassify a genuinely
+        members-only work as fetchable, which then looped as an empty re-queue
+        instead of showing the honest "read on AO3" label.
+        """
         s = self._require_session()
         url = self.work_url(source_work_id)
-        try:
-            resp = s.session.get(url, allow_redirects=False, timeout=20)
-        except Exception:  # noqa: BLE001
-            return False
-        return _is_restricted_redirect(resp.status_code, resp.headers.get("Location", ""))
+        for attempt in range(3):
+            try:
+                resp = s.session.get(url, allow_redirects=False, timeout=30)
+            except Exception as exc:  # noqa: BLE001 — AO3 hiccup; retry before giving up
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                print(f"    note: could not check restriction for {source_work_id} ({type(exc).__name__})")
+                return False  # couldn't reach AO3 — let the caller retry later
+            return _is_restricted_redirect(resp.status_code, resp.headers.get("Location", ""))
+        return False
 
     def __init__(self) -> None:
         self._session: AO3.Session | None = None
