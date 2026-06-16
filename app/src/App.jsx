@@ -12,6 +12,7 @@ import { SeriesScreen } from './screens/Series.jsx';
 import { ReaderScreen } from './screens/Reader.jsx';
 import { LoginScreen } from './screens/Login.jsx';
 import { WORKS, NEW_CHAPTERS, NEW_MATCHES } from './data/sample.js';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { fetchWorks } from './lib/library.js';
 import { notifySavedAvailable, ensureNotifyPermission } from './lib/notify.js';
 import { supabase, hasSupabase } from './lib/supabase.js';
@@ -107,6 +108,7 @@ export default function App() {
   // When Supabase isn't configured, fetchWorks() returns null and we fall
   // back to bundled sample data so the app still has something to show.
   const [works, setWorks] = useState(null);
+  const worksRef = useRef([]); worksRef.current = works || []; // latest works for the notification-tap reader deep-link
   // Saved-work arrival notifications: remember which saved-from-Discovery works
   // (origin 'tag') we've already seen; when a reload/sync surfaces new ones, fire
   // an OS notification. The first load only SEEDS the set (no notification spam
@@ -160,7 +162,7 @@ export default function App() {
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
-  const switchTab = (id) => { setStack([]); setTab(id); };
+  const switchTab = (id) => { setStack([]); setTab(id); if (id === 'library') reloadWorks(); }; // refresh so saved works show in the library at once (not just What's New)
 
   // Android hardware back / swipe-back gesture. Capacitor routes both through
   // the backButton event; once we register a listener it stops auto-closing the
@@ -173,6 +175,17 @@ export default function App() {
       if (stack.length) { setNavDir('back'); setStack(s => s.slice(0, -1)); }
       else if (tab !== 'library') switchTab('library');
       else CapApp.exitApp();
+    });
+    return () => { handle.then(h => h.remove()).catch(() => {}); };
+  }, []);
+
+  // Tapping a "saved work ready to read" notification deep-links into its reader.
+  useEffect(() => {
+    const handle = LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+      const wid = action && action.notification && action.notification.extra && action.notification.extra.workId;
+      if (!wid) return;
+      const w = (worksRef.current || []).find(x => x.id === wid);
+      if (w) { setNavDir('fwd'); setStack(s => [...s, { screen: 'reader', props: { work: w } }]); }
     });
     return () => { handle.then(h => h.remove()).catch(() => {}); };
   }, []);

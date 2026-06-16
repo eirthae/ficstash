@@ -30,9 +30,12 @@ export async function notifySavedAvailable(works) {
   const body = list.length === 1
     ? `“${first}” finished downloading — tap to read.`
     : `“${first}” and ${list.length - 1} more are downloaded and ready.`;
+  // Tapping a single-work notification deep-links into its reader (App.jsx reads
+  // extra.workId in its localNotificationActionPerformed listener).
+  const workId = list.length === 1 ? (list[0].id || '') : '';
   try {
     await LocalNotifications.schedule({
-      notifications: [{ id: (nid = (nid % 2000000000) + 1), title, body, smallIcon: 'ic_stat_icon_config_sample' }],
+      notifications: [{ id: (nid = (nid % 2000000000) + 1), title, body, smallIcon: 'ic_stat_icon_config_sample', extra: { workId } }],
     });
   } catch (e) { /* notifications optional — never block the app */ }
 }
