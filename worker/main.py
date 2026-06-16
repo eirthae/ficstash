@@ -198,6 +198,28 @@ def _should_drop_link_error(exc: Exception) -> bool:
     return is_phantom_link_error(type(exc).__name__, str(exc))
 
 
+def _handle_empty_ao3_link(db, rid, ao3, wid) -> bool:
+    """Resolve an AO3 link request whose fetch returned no chapters.
+
+    This is a REAL work (a fake id would have raised InvalidIdError, handled as a
+    phantom drop), so we never silently delete it — that left the user staring at
+    "Downloading…" forever with no work and no error. AO3's adult / age gate
+    routinely parses as zero chapters, so we mirror the saves pass:
+
+      * members-only (is_restricted) → terminal 'error' with a "read on AO3"
+        message, since no logged-out fetch can ever get it. Returns True.
+      * otherwise transient (gate / rate-limit / hiccup) → put the request back to
+        'queued' so the next sync retries it. Returns False.
+    """
+    if ao3.is_restricted(wid):
+        mark_request(db, rid, status="error", error="Restricted to AO3 members — open it on AO3.")
+        print("    restricted to AO3 members.")
+        return True
+    mark_request(db, rid, status="queued")
+    print("    AO3 returned no chapters (likely adult gate / rate-limit) — re-queued to retry.")
+    return False
+
+
 def _reflow_max() -> int | None:
     raw = os.environ.get("REFLOW_MAX", "").strip()
     if not raw:
@@ -326,7 +348,7 @@ def main() -> None:
         print(f"Removed {series_dropped} unsupported AO3 series link(s).")
     link_requests = fetch_requested_urls(db)
     print(f"{len(link_requests)} link request(s).")
-    link_done = link_failed = link_dropped = 0
+    link_done = link_failed = link_dropped = link_requeued = 0
     if link_requests:
         from ficstash_worker.sources.link import UnsupportedSite
 
@@ -343,14 +365,17 @@ def main() -> None:
                     # adult-content cookie, all chapters) and stamp source='ao3' so
                     # it lands in the Fics shelf. FanFicFare would trip on AO3's
                     # age-gate and fall back to a bare, mis-shelved 'other' work.
+                    #
+                    # Fetch the work FIRST and only consult is_restricted() if it
+                    # comes back empty (see _handle_empty_ao3_link) — mirroring the
+                    # saves pass. A pre-flight is_restricted() request fired right
+                    # before the metadata request meant two unspaced AO3 hits per
+                    # link; the second could be throttled into a gate/error page
+                    # that parses as zero chapters, which then got silently dropped.
                     wid = ao3_id.group(1)
-                    if ao3.is_restricted(wid):
-                        mark_request(db, rid, status="error", error="Restricted to AO3 members — open it on AO3.")
-                        link_failed += 1
-                        print("    restricted to AO3 members.")
-                        continue
                     meta, chapters = fetch_work_chapters(ao3, wid, space=space, backoff=_with_backoff)
                 else:
+                    wid = None
                     space()
                     meta, chap_list = linker.prepare(url)
                     chapters = []
@@ -358,9 +383,20 @@ def main() -> None:
                         space()
                         chapters.append(linker.fetch_chapter(url, i, ch))
                 if not chapters:
-                    # Empty / non-existent work (e.g. an AI-hallucinated link that
-                    # points nowhere): drop it entirely rather than creating a
-                    # blank work and leaving a red error in the queue.
+                    if ao3_id:
+                        # A REAL AO3 work (a made-up id raises InvalidIdError and is
+                        # dropped in the handler below) that returned no text. AO3's
+                        # adult / age gate routinely parses as zero chapters, so this
+                        # is usually transient — never silently delete it. Members-
+                        # only → terminal "read on AO3"; otherwise re-queue so the
+                        # next sync retries, exactly like the saves pass does.
+                        if _handle_empty_ao3_link(db, rid, ao3, wid):
+                            link_failed += 1
+                        else:
+                            link_requeued += 1
+                        continue
+                    # Generic (FanFicFare) empty result → an AI-hallucinated link
+                    # that points nowhere: drop it rather than leaving a red error.
                     delete_request(db, rid)
                     link_dropped += 1
                     print("    empty — no chapters; dropped.")
@@ -368,6 +404,12 @@ def main() -> None:
                 work_uuid = upsert_work(db, meta, origin="link")
                 written = upsert_chapters(db, work_uuid, chapters)
                 if not written:
+                    if ao3_id:
+                        if _handle_empty_ao3_link(db, rid, ao3, wid):
+                            link_failed += 1
+                        else:
+                            link_requeued += 1
+                        continue
                     delete_request(db, rid)
                     link_dropped += 1
                     print("    empty — nothing written; dropped.")
@@ -401,6 +443,7 @@ def main() -> None:
                     link_failed += 1
                     print(f"    kept as error ({type(exc).__name__}: {exc})")
     extra = f", {link_dropped} dropped (empty/not found)" if link_dropped else ""
+    extra += f", {link_requeued} re-queued (AO3 empty, will retry)" if link_requeued else ""
     print(f"Requested links: {link_done} downloaded, {link_failed} failed{extra}.")
 
     # ---- Pass 2: requested saves → full offline copies ---------------------
