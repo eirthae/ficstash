@@ -148,14 +148,15 @@ export default function App() {
   // ---- navigation stack --------------------------------------------------
   const [tab, setTab] = useState('library');
   const [stack, setStack] = useState([]);
+  const [navDir, setNavDir] = useState('fwd'); // last nav direction → screen transition (fwd: slide in from right, back: slide in from left)
   const nav = useRef();
   nav.current = {
-    push: (screen, props = {}) => { setStack(s => [...s, { screen, props }]); try { history.pushState({ fs: 1 }, ''); } catch (e) {} },
-    pop: () => setStack(s => s.slice(0, -1)),
+    push: (screen, props = {}) => { setNavDir('fwd'); setStack(s => [...s, { screen, props }]); try { history.pushState({ fs: 1 }, ''); } catch (e) {} },
+    pop: () => { setNavDir('back'); setStack(s => s.slice(0, -1)); },
     reset: (tabId) => { setStack([]); setTab(tabId); },
   };
   useEffect(() => {
-    const onPop = () => setStack(s => (s.length ? s.slice(0, -1) : s));
+    const onPop = () => { setNavDir('back'); setStack(s => (s.length ? s.slice(0, -1) : s)); };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -169,7 +170,7 @@ export default function App() {
   useEffect(() => {
     const handle = CapApp.addListener('backButton', () => {
       const { stack, tab } = navState.current;
-      if (stack.length) setStack(s => s.slice(0, -1));
+      if (stack.length) { setNavDir('back'); setStack(s => s.slice(0, -1)); }
       else if (tab !== 'library') switchTab('library');
       else CapApp.exitApp();
     });
@@ -219,7 +220,7 @@ export default function App() {
     <div className="app-root" data-mode={resolvedMode}>
       <div className="viewport">
         {renderTab()}
-        {top && <div className="screen" style={{ zIndex: 30 }}>{renderTop()}</div>}
+        {top && <div className={`screen ${navDir === 'back' ? 'view-back' : 'view-enter'}`} key={stack.length} style={{ zIndex: 30 }}>{renderTop()}</div>}
       </div>
       {showNav && <BottomNav active={tab} onTab={(id) => { setAddOpen(false); switchTab(id); }} onAdd={() => setAddOpen(o => !o)} addActive={addOpen} />}
       {showNav && <AddMenu open={addOpen} onClose={() => setAddOpen(false)} onChanged={onLibraryChanged} />}
