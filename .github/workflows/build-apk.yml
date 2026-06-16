@@ -74,8 +74,14 @@ jobs:
             npx cap add android
           fi
 
-      - name: Generate app icons
-        run: npx --yes @capacitor/assets generate --android --assetPath resources
+      - name: Generate app icons + splash from resources/icon-only.png
+        # The icon is a full-bleed square on #06030A, so set that as the adaptive-icon
+        # + splash background to keep it edge-to-edge. logo.png (a copy of the icon)
+        # is the splash logo.
+        run: |
+          npx --yes @capacitor/assets generate --android --assetPath resources \
+            --iconBackgroundColor '#06030A' --iconBackgroundColorDark '#06030A' \
+            --splashBackgroundColor '#06030A' --splashBackgroundColorDark '#06030A'
 
       - name: Sync web bundle into Android
         run: npx cap sync android
