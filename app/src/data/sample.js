@@ -74,7 +74,44 @@ export const WORKS = [
     words: 12400, chapters: 3, chaptersTotal: 12, status: 'ongoing', updated: 'yesterday',
     progress: 0, lastChapter: 0, palette: 6, unread: true, subscribed: true,
   },
+  {
+    id: 'wchat', source: 'ao3', title: 'Read Receipts', author: 'after_hours',
+    fandom: 'Heated Rivalry – Rachel Reid', pairing: 'Shane Hollander/Ilya Rozanov',
+    summary: 'A texting fic. Three time zones, one group chat they shouldn’t be in, and a thread that says more than either of them will out loud.',
+    tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Epistolary', 'freeform'), T('Texting', 'freeform'), T('Fluff', 'freeform')],
+    words: 9800, chapters: 1, chaptersTotal: 1, status: 'complete', updated: 'Apr 2',
+    progress: 0, lastChapter: 0, palette: 2, unread: true,
+    // A sample AO3 work skin. NOTE the last rule is a deliberately BAD prose
+    // override (#workskin p) — the sanitizer must strip it so prose keeps your
+    // reader settings; only the .text/.msg/.who chat classes should style.
+    workSkin: "#workskin .text{max-width:94%;margin:16px auto;font-family:-apple-system,'Segoe UI',sans-serif}#workskin .who{font-size:11px;color:#9a9a9f;margin:10px 0 2px 8px}#workskin .msg{display:block;width:fit-content;max-width:76%;padding:8px 13px;margin:4px 0;border-radius:18px;font-size:15px;line-height:1.35}#workskin .them{background:#e9e9eb;color:#111}#workskin .me{background:#0a7cff;color:#fff;margin-left:auto}#workskin .post{max-width:300px;margin:18px auto;border:1px solid #dbdbdb;border-radius:10px;overflow:hidden;background:#fff;color:#111;font-family:-apple-system,sans-serif}#workskin .phead{display:flex;align-items:center;gap:9px;padding:9px 11px}#workskin .pav{width:30px;height:30px;border-radius:50%;background:#1d6e56;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}#workskin .puser{font-size:13px;font-weight:600}#workskin .pimg{display:block;width:100%;height:auto}#workskin .pacts{display:flex;gap:14px;padding:9px 11px 2px;font-size:14px;color:#222}#workskin .plikes{font-size:13px;font-weight:600;padding:2px 11px}#workskin .pcap{font-size:13px;line-height:1.4;padding:3px 11px 11px}#workskin p{line-height:4 !important;color:#c0392b !important}",
+  },
 ];
+
+// Demo chapter bodies for sample works that need real HTML in the reader (the
+// reader normally falls back to sample prose). Used by fetchChapters when there's
+// no Supabase, so the chatfic styling can be previewed end-to-end.
+export const DEMO_CHAPTERS = {
+  wchat: [{
+    n: 1, title: 'Read Receipts', words: 9800,
+    content: '<p>Ilya didn\'t answer for six minutes. Shane watched the three dots appear, vanish, appear again, and tried to remember how to breathe like a person who wasn\'t waiting.</p>'
+      + '<div class="text"><div class="who">Ilya</div>'
+      + '<span class="msg them">you\'re up late</span>'
+      + '<span class="msg them">or early. i can never tell with you anymore</span>'
+      + '<span class="msg me">couldn\'t sleep. the trade rumours again</span>'
+      + '<span class="msg them">come to Boston. problem solved</span>'
+      + '<span class="msg me">you\'re impossible</span>'
+      + '<span class="msg me">…what time is your flight</span></div>'
+      + '<p>He hit send before he could think better of it. Two hours later, a notification:</p>'
+      + '<div class="post"><div class="phead"><span class="pav">IR</span><span class="puser">ilya.rozanov</span></div>'
+      + '<img class="pimg" alt="a lake at sunrise" src="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 4 3%27%3E%3Crect width=%274%27 height=%273%27 fill=%27%231d6e56%27/%3E%3Ctext x=%272%27 y=%271.75%27 font-size=%270.4%27 fill=%27white%27 text-anchor=%27middle%27%3Ephoto%3C/text%3E%3C/svg%3E">'
+      + '<img class="pimg" alt="the rink, empty" src="https://i.imgur.com/linkrotted.jpg">'
+      + '<div class="pacts"><span>♡</span><span>○</span><span>➤</span></div>'
+      + '<div class="plikes">1,247 likes</div>'
+      + '<div class="pcap"><b>ilya.rozanov</b> offseason hits different when someone keeps stealing the blanket 🏒</div></div>'
+      + '<p>Shane stared at it for a long time, then finally let himself smile.</p>',
+  }],
+};
 
 export const TRACKED_TAGS = [
   { id: 't1', name: 'Shane Hollander/Ilya Rozanov', kind: 'relationship', count: 47, fresh: 6, palette: 0 },

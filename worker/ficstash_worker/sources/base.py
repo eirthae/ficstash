@@ -64,6 +64,9 @@ class WorkMeta:
     series_id: str = ""
     series_name: str = ""
     series_index: float | None = None  # position in the series (set when known)
+    # AO3 "work skin" CSS (chat/texting/social styling), captured raw; the app
+    # sanitizes + scopes it at render. Empty for ordinary fics.
+    work_skin: str = ""
     # Only set for reading-history stubs: when the user last opened the work on
     # AO3 (ISO-8601). Lets the app build a "read in <year>" archive shelf.
     history_read_at: str | None = None

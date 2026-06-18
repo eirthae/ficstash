@@ -240,7 +240,7 @@ export default function App() {
     if (item.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} onReload={p.onReload} nav={n} />;
     if (item.screen === 'series') return <SeriesScreen seriesId={p.seriesId} seriesName={p.seriesName} onReload={p.onReload} nav={n} />;
     if (item.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={updateReaderSettings} nav={n} />;
-    if (item.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
+    if (item.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} onEdit={p.onEdit} nav={n} />;
     if (item.screen === 'later') return <LaterScreen onLeave={p.onLeave} nav={n} />;
     if (item.screen === 'connect') return <ConnectScreen nav={n} />;
     return null;

@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import Icon from '../components/Icon.jsx';
 import { Sheet, fmtWords } from '../components/ui.jsx';
 import { WORKS, CHAPTERS, READER_PARAS } from '../data/sample.js';
 import { fetchChapters, fetchSeriesWorks } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { markRead, getReadingPos, getChapterPos, saveReadingPos } from '../lib/reading.js';
+import { sanitizeWorkSkin, chapterUsesSkin, neutralizeRemoteImages } from '../lib/workskin.js';
 
 export const READER_FONTS = [
   { value: 'serif', label: 'Serif', css: 'var(--font-serif)' },
@@ -157,6 +158,13 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
     '--r-para': (settings.leading * 0.62).toFixed(2) + 'em',
   };
 
+  // AO3 work-skin (chat bubbles / texting UI). Sanitized: scoped to .ws-skin,
+  // prose-typography rules dropped, remote resources stripped. Applied only when
+  // the user keeps "Author styling" on AND the chapter actually has classed blocks.
+  const skinCss = useMemo(() => sanitizeWorkSkin(work.workSkin, '.ws-skin'), [work.workSkin]);
+  const useSkin = settings.authorStyling !== false && !!skinCss
+    && hasReal && !!(curChapter && curChapter.content) && chapterUsesSkin(curChapter.content);
+
   return (
     <div className="reader" data-reader-theme={settings.theme}>
       <div className="reader-scroll" ref={scrollRef} onScroll={onScroll}
@@ -172,7 +180,10 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
             <ChapterSkeleton />
           ) : hasReal ? (
             curChapter && curChapter.content
-              ? <div className="chapter-body" dangerouslySetInnerHTML={{ __html: curChapter.content }} />
+              ? <>
+                  {useSkin && <style dangerouslySetInnerHTML={{ __html: skinCss }} />}
+                  <div className={`chapter-body${useSkin ? ' ws-skin' : ''}`} dangerouslySetInnerHTML={{ __html: neutralizeRemoteImages(curChapter.content) }} />
+                </>
               : <p style={{ color: 'var(--reader-text-dim)' }}>This chapter hasn’t been downloaded yet.</p>
           ) : demo ? (
             <>
@@ -284,6 +295,18 @@ function ReaderSettingsSheet({ open, onClose, settings, setSettings }) {
       <SheetStepperRow label="Text size" value={settings.size + 'px'} onMinus={() => set('size', Math.max(14, settings.size - 1))} onPlus={() => set('size', Math.min(28, settings.size + 1))} />
       <SheetStepperRow label="Line height" value={settings.leading.toFixed(2)} onMinus={() => set('leading', Math.max(1.3, +(settings.leading - 0.05).toFixed(2)))} onPlus={() => set('leading', Math.min(2.2, +(settings.leading + 0.05).toFixed(2)))} />
       <SheetStepperRow label="Margins" value={settings.margin + 'px'} onMinus={() => set('margin', Math.max(12, settings.margin - 4))} onPlus={() => set('margin', Math.min(56, settings.margin + 4))} />
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 2px 6px' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--reader-ui)' }}>Author block styling</div>
+          <div style={{ fontSize: 11.5, color: 'var(--reader-text-dim)', marginTop: 2 }}>Chat &amp; texting blocks as the author styled them. Prose always uses your settings above.</div>
+        </div>
+        <button aria-pressed={settings.authorStyling !== false} onClick={() => set('authorStyling', settings.authorStyling === false)}
+          style={{ flex: 'none', width: 50, height: 30, borderRadius: 999, border: 'none', cursor: 'pointer', position: 'relative',
+            background: settings.authorStyling !== false ? 'var(--reader-accent, #9353d3)' : 'var(--reader-border, rgba(128,128,128,.35))', transition: 'background .15s' }}>
+          <span style={{ position: 'absolute', top: 3, left: settings.authorStyling !== false ? 23 : 3, width: 24, height: 24, borderRadius: '50%', background: '#fff', transition: 'left .15s' }} />
+        </button>
+      </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '14px 2px 8px' }}>
         <Icon icon="solar:sun-2-linear" size={20} color="var(--reader-text-dim)" />

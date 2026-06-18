@@ -294,6 +294,10 @@ def upsert_work(
         payload["ao3_series_name"] = meta.series_name
     if getattr(meta, "series_index", None) is not None:
         payload["ao3_series_index"] = meta.series_index
+    # Work-skin CSS (chat/texting styling) — only written when captured, so a
+    # search-sourced or unloaded upsert (work_skin == "") never wipes one we have.
+    if getattr(meta, "work_skin", ""):
+        payload["work_skin"] = meta.work_skin
     # `follow` is not a manual toggle. Every still-updating work is followed by
     # default so the refresh pass re-checks it for new chapters on each sync;
     # complete works are unfollowed (nothing left to fetch). Derived from status

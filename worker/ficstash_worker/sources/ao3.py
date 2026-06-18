@@ -14,6 +14,7 @@ Store the session, never the password.
 
 from __future__ import annotations
 
+import base64
 import html
 import math
 import re
@@ -21,6 +22,8 @@ import time
 from datetime import datetime, timezone
 
 import AO3
+import requests
+from bs4 import BeautifulSoup
 
 from .base import (
     DOWNLOAD,
@@ -326,7 +329,7 @@ class AO3Source(Source):
             n=chapter_n,
             title=getattr(ch, "title", "") or "",
             words=int(getattr(ch, "words", 0) or 0),
-            html=_chapter_html(ch),
+            html=_inline_chapter_images(_chapter_html(ch)),
         )
 
     def _load_work(self, source_work_id: str, with_chapters: bool = False) -> "AO3.Work":
@@ -609,6 +612,28 @@ def _soup_of(work) -> "object | None":
     return getattr(work, "_soup", None)
 
 
+def _work_skin(work) -> str:
+    """The work's AO3 'work skin' CSS (chat/texting/social styling), or "".
+
+    AO3 emits the skin as a <style> block whose rules are scoped to #workskin. We
+    grab that block verbatim; the app sanitizes + re-scopes it at render. Only the
+    full work page carries it — search blurbs don't, so those return "".
+    """
+    soup = _soup_of(work)
+    if soup is None:
+        return ""
+    try:
+        for style in soup.find_all("style"):
+            css = style.get_text() or ""
+            if "#workskin" in css:
+                css = css.strip()
+                # Guard against a runaway skin bloating every row.
+                return css[:20000] if len(css) > 20000 else css
+    except Exception:  # noqa: BLE001
+        return ""
+    return ""
+
+
 def _soup_text(soup, selector: str) -> str:
     if soup is None:
         return ""
@@ -700,6 +725,88 @@ def _chapter_html(ch) -> str:
         return ""
     paras = [p.strip() for p in raw.replace("\r", "").split("\n")]
     return "".join(f"<p>{html.escape(p)}</p>" for p in paras if p)
+
+
+# ---- inline images so chat / social-media fics work offline ----------------
+# AO3 doesn't host images; image-post fics hotlink them (imgur, …). We download
+# each at capture and inline it as a data: URI, so the reader shows it offline
+# with no phone-home AND it survives the host's inevitable linkrot — matching
+# FicStash's frozen-copy ethos. Oversized / failed / too-many fall back to a
+# placeholder the app styles. (The app also neutralizes any remote <img> at
+# render as a belt-and-suspenders, so a missed one never hotlinks.)
+MAX_IMG_BYTES = 2_500_000   # skip a single image larger than this
+MAX_IMG_TOTAL = 9_000_000   # cap total inlined bytes per chapter
+MAX_IMG_COUNT = 50          # and total inlined images per chapter
+
+
+def _download_image(url: str):
+    """Fetch a remote image → (content_type, bytes), or None on any problem.
+
+    Images live on third-party hosts, not AO3, so this is a plain short-timeout
+    request — AO3's rate limiting doesn't apply to it.
+    """
+    try:
+        resp = requests.get(
+            url,
+            timeout=20,
+            headers={"User-Agent": "FicStash/1.0 (+https://github.com/eirthae/ficstash; offline reader)"},
+        )
+        if resp.status_code != 200:
+            return None
+        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if not ctype.startswith("image/"):
+            return None
+        return ctype, resp.content
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _img_placeholder(soup, img) -> None:
+    alt = (img.get("alt") or "").strip() or "image"
+    span = soup.new_tag("span")
+    span["class"] = "fs-img-missing"
+    span.string = f"\U0001F4F7 {alt}"
+    img.replace_with(span)
+
+
+def _inline_chapter_images(html_text: str, download=_download_image) -> str:
+    """Rewrite a chapter's <img> tags: remote ones become inline data: URIs (so
+    they render offline), with oversized / failed / over-cap ones placeholdered.
+    Already-inline data: images and the no-image common case pass straight through.
+    """
+    if not html_text or "<img" not in html_text.lower():
+        return html_text or ""
+    soup = BeautifulSoup(html_text, "html.parser")
+    total = 0
+    count = 0
+    for img in soup.find_all("img"):
+        src = (img.get("src") or "").strip()
+        if src.startswith("data:"):
+            continue
+        if not re.match(r"https?://", src, re.I):
+            _img_placeholder(soup, img)
+            continue
+        if count >= MAX_IMG_COUNT:
+            _img_placeholder(soup, img)
+            continue
+        try:
+            got = download(src)
+        except Exception:  # noqa: BLE001
+            got = None
+        if not got:
+            _img_placeholder(soup, img)
+            continue
+        ctype, data = got
+        if len(data) > MAX_IMG_BYTES or (total + len(data)) > MAX_IMG_TOTAL:
+            _img_placeholder(soup, img)
+            continue
+        img["src"] = f"data:{ctype};base64,{base64.b64encode(data).decode('ascii')}"
+        for attr in ("srcset", "loading", "referrerpolicy"):
+            if img.has_attr(attr):
+                del img[attr]
+        total += len(data)
+        count += 1
+    return str(soup)
 
 
 def _status(work: "AO3.Work") -> str:
@@ -803,6 +910,7 @@ def _work_to_meta(source: str, source_work_id: str, work: "AO3.Work") -> WorkMet
         url=f"https://archiveofourown.org/works/{source_work_id}",
         series_id=series_id,
         series_name=series_name,
+        work_skin=_work_skin(work),
     )
 
 

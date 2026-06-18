@@ -17,33 +17,33 @@ export function LibraryCard({ work, onOpen, onDelete }) {
       <div className="meta">
         <div className="story-title" style={{ marginBottom: 2, paddingRight: onDelete ? 30 : 0 }}>{work.customTitle || work.title}</div>
         <div className="story-sub" style={{ marginBottom: 7 }}>by {work.author}</div>
-        <div className="chiprow" style={{ marginBottom: 8 }}>
+        <div className="chiprow" style={{ marginBottom: 8, alignItems: 'center' }}>
           {work.frozen ? <FrozenBadge /> : <StatusBadge status={work.status} updated={work.updated} />}
+          {work.words ? <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>· {fmtWords(work.words)}</span> : null}
           <OriginBadges bookmarked={work.bookmarked} subscribed={work.subscribed} />
         </div>
         <div className="summary" style={{ flex: 1 }}>{work.summary}</div>
-        {((work.tags && work.tags.length) || work.words) ? (
-          <div className="chiprow" style={{ marginTop: 8, gap: 6, alignItems: 'center' }}>
-            {(work.tags || []).slice(0, 3).map((t, i) => (
+        {(work.tags && work.tags.length) ? (
+          <div className="chiprow" style={{ marginTop: 8, gap: 6 }}>
+            {work.tags.slice(0, 3).map((t, i) => (
               <TagChip key={i} t={typeof t === 'string' ? t : t.t} k={typeof t === 'string' ? undefined : t.k} />
             ))}
-            {work.words ? <span style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>{fmtWords(work.words)}</span> : null}
           </div>
         ) : null}
-        <div style={{ marginTop: 9 }}>
-          {work.offline === false ? (
-            <div className="metarow" style={{ color: 'var(--text-tertiary)' }}><Icon icon="solar:clock-circle-linear" size={14} /><span>Downloads on next sync</span></div>
-          ) : work.progress >= 1 ? (
-            <div className="metarow"><Icon icon="solar:check-circle-bold" size={14} color="var(--success)" /><span>Finished</span></div>
-          ) : work.progress > 0 ? (
-            <>
-              <div className="progress" style={{ marginBottom: 5 }}><i style={{ width: `${work.progress * 100}%` }}></i></div>
-              <div className="metarow"><span>Chapter {work.lastChapter} of {work.chaptersTotal}</span><span>·</span><span>{Math.round(work.progress * 100)}%</span></div>
-            </>
-          ) : (
-            <div className="metarow" style={{ color: 'var(--accent)' }}><Icon icon="solar:book-bold" size={14} /><span>{work.unread ? 'Not started' : 'New — start reading'}</span></div>
-          )}
-        </div>
+        {(work.offline === false || work.progress >= 1 || work.progress > 0) && (
+          <div style={{ marginTop: 9 }}>
+            {work.offline === false ? (
+              <div className="metarow" style={{ color: 'var(--text-tertiary)' }}><Icon icon="solar:clock-circle-linear" size={14} /><span>Downloads on next sync</span></div>
+            ) : work.progress >= 1 ? (
+              <div className="metarow"><Icon icon="solar:check-circle-bold" size={14} color="var(--success)" /><span>Finished</span></div>
+            ) : (
+              <>
+                <div className="progress" style={{ marginBottom: 5 }}><i style={{ width: `${work.progress * 100}%` }}></i></div>
+                <div className="metarow"><span>Chapter {work.lastChapter} of {work.chaptersTotal}</span><span>·</span><span>{Math.round(work.progress * 100)}%</span></div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

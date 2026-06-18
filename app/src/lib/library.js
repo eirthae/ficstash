@@ -1,4 +1,5 @@
 import { supabase, hasSupabase } from './supabase.js';
+import { DEMO_CHAPTERS } from '../data/sample.js';
 
 // Map a Supabase `works` row (snake_case) to the shape the UI expects.
 function mapWork(row) {
@@ -35,6 +36,7 @@ function mapWork(row) {
     frozen: row.frozen,
     frozenDate: row.frozen_date,
     restricted: !!row.restricted, // AO3 members-only work the guest worker can't fetch
+    workSkin: row.work_skin || '', // AO3 work-skin CSS (chat/texting styling), sanitized at render
     unread: row.unread,
     offline: row.offline,
     bookmarked: row.bookmarked,
@@ -172,7 +174,7 @@ export async function fetchOfflineStats() {
 }
 
 export async function fetchChapters(workId) {
-  if (!hasSupabase) return null;
+  if (!hasSupabase) return DEMO_CHAPTERS[workId] || null; // demo preview (e.g. the chatfic)
   const { data, error } = await supabase
     .from('chapters')
     .select('*')

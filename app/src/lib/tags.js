@@ -178,6 +178,36 @@ export async function deleteGroup(id) {
   if (error) throw error;
 }
 
+// Edit an existing tag group: replace its tags / excludes / status / match mode,
+// then RESET its discovery — drop the matches it found under the old rules and
+// null `last_checked` so the worker re-seeds the back-catalogue against the new
+// criteria on the next sync (a changed include/exclude set means old matches may
+// no longer fit). `source` is fixed (the tag vocabularies differ per source).
+export async function updateGroup(groupId, { label = '', tags, excludedTags = [], matchMode = 'all', status = 'all' }) {
+  if (!hasSupabase) throw new Error('Supabase not configured');
+  const cleanTags = (list) => (list || [])
+    .map((t) => ({ name: t.name, id: t.id ?? '', kind: t.kind || 'freeform' }))
+    .filter((t) => t.name);
+  const clean = cleanTags(tags);
+  if (!clean.length) throw new Error('A group needs at least one tag');
+  const { data, error } = await supabase
+    .from('tracked_groups')
+    .update({
+      label,
+      tags: clean,
+      excluded_tags: cleanTags(excludedTags),
+      match_mode: matchMode === 'any' ? 'any' : 'all',
+      status: ['ongoing', 'complete'].includes(status) ? status : 'all',
+      last_checked: null,
+    })
+    .eq('id', groupId)
+    .select()
+    .single();
+  if (error) throw error;
+  await supabase.from('tag_matches').delete().eq('group_id', groupId);
+  return mapGroup(data);
+}
+
 export async function fetchMatches(groupId) {
   if (!hasSupabase) return null;
   const { data, error } = await supabase
