@@ -734,8 +734,8 @@ def _chapter_html(ch) -> str:
 # FicStash's frozen-copy ethos. Oversized / failed / too-many fall back to a
 # placeholder the app styles. (The app also neutralizes any remote <img> at
 # render as a belt-and-suspenders, so a missed one never hotlinks.)
-MAX_IMG_BYTES = 2_500_000   # skip a single image larger than this
-MAX_IMG_TOTAL = 9_000_000   # cap total inlined bytes per chapter
+MAX_IMG_BYTES = 2_000_000   # skip a single image larger than this
+MAX_IMG_TOTAL = 4_000_000   # cap total inlined bytes per chapter (keeps DB writes small)
 MAX_IMG_COUNT = 50          # and total inlined images per chapter
 
 

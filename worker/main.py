@@ -236,7 +236,9 @@ def _handle_empty_ao3_link(db, rid, ao3, wid) -> bool:
         'queued' so the next sync retries it. Returns False.
     """
     if ao3.is_restricted(wid):
-        mark_request(db, rid, status="error", error="Restricted to AO3 members — open it on AO3.")
+        # Terminal: even the authenticated session can't read it (the account
+        # isn't a member / can't access). 'restricted' is excluded from retries.
+        mark_request(db, rid, status="restricted", error="Restricted to AO3 members — open it on AO3.")
         print("    restricted to AO3 members.")
         return True
     mark_request(db, rid, status="queued")
@@ -451,7 +453,9 @@ def main() -> None:
                 link_done += 1
                 print(f"    downloaded — {written} chapter(s) from {meta.source}.")
             except UnsupportedSite as exc:
-                mark_request(db, rid, status="error", error=f"Unsupported site: {exc}")
+                # Terminal: FanFicFare has no adapter for this site — retrying
+                # won't help. 'unsupported' is excluded from retries.
+                mark_request(db, rid, status="unsupported", error=f"Unsupported site: {exc}")
                 link_failed += 1
                 print(f"    unsupported site ({exc}).")
             except Exception as exc:  # noqa: BLE001

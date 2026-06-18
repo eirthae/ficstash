@@ -518,11 +518,17 @@ def reset_empty_offline(client: Client, source: str = "ao3") -> int:
 
 
 def fetch_requested_urls(client: Client) -> list[dict]:
-    """Return queued add-by-link requests (oldest first) the app submitted."""
+    """Return add-by-link requests to (re)try, oldest first.
+
+    Retries both freshly 'queued' links AND ones left in a retryable 'error' state
+    (transient hiccups, or works that were marked restricted by an earlier
+    LOGGED-OUT run and can now be fetched via the authenticated session). Terminal
+    states are excluded: 'done', 'restricted' (members-only even when logged in),
+    and 'unsupported' (FanFicFare can't read the site)."""
     resp = (
         client.table("requested_urls")
         .select("id,url")
-        .eq("status", "queued")
+        .in_("status", ["queued", "error"])
         .order("created_at", desc=False)
         .execute()
     )
@@ -576,7 +582,22 @@ def upsert_chapters(client: Client, work_id: str, chapters: list[Chapter]) -> in
     ]
     if not rows:
         return 0
-    client.table("chapters").upsert(rows, on_conflict="work_id,n").execute()
+    # Write in size-bounded batches so one big or image-heavy work doesn't exceed
+    # Postgres's statement timeout (the '57014 canceling statement' error). Each
+    # statement carries at most ~3 MB of chapter content (a single chapter bigger
+    # than that goes alone).
+    MAX_BATCH_BYTES = 3_000_000
+    batch: list[dict] = []
+    size = 0
+    for row in rows:
+        clen = len(row["content"] or "")
+        if batch and size + clen > MAX_BATCH_BYTES:
+            client.table("chapters").upsert(batch, on_conflict="work_id,n").execute()
+            batch, size = [], 0
+        batch.append(row)
+        size += clen
+    if batch:
+        client.table("chapters").upsert(batch, on_conflict="work_id,n").execute()
     return len(rows)
 
 

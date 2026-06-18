@@ -217,8 +217,13 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   const lastRead = getLastRead(); // re-read each render so it stays fresh after reading
   const shown = sortWorks(statusFiltered, sort, lastRead);
 
-  // Pending (still-downloading) link requests belong to the Stories shelf.
-  const pending = shelf === 'stories' ? pendingLinks : [];
+  // Pending link requests show on the shelf matching their source: AO3 links →
+  // Fics, Royal Road / Scribble Hub / other → Stories. (They were all dumped on
+  // Stories before, so AO3 links mid-download or errored looked mis-shelved.)
+  const pendingShelfOf = (url) => /archiveofourown\.org/i.test(url || '') ? 'fics' : 'stories';
+  const pending = (shelf === 'fics' || shelf === 'stories')
+    ? pendingLinks.filter((r) => pendingShelfOf(r.url) === shelf)
+    : [];
 
   // Books auto-group by series (manual/EPUB) or, failing that, by author — so
   // uploads that share a series or author cluster without any manual work.
@@ -396,17 +401,23 @@ function prettyUrl(url) {
 }
 
 function LinkRequestRow({ req, onRemove }) {
-  const failed = req.status === 'error';
-  const label = req.status === 'fetching' ? 'Downloading…' : failed ? 'Couldn’t download' : 'Queued for download';
-  const icon = failed ? 'solar:danger-triangle-bold' : req.status === 'fetching' ? 'solar:download-minimalistic-linear' : 'solar:clock-circle-linear';
-  const color = failed ? 'var(--danger, #f5455c)' : 'var(--text-tertiary)';
+  const st = req.status;
+  const terminal = st === 'restricted' || st === 'unsupported'; // can't be retried
+  const bad = st === 'error' || terminal;
+  const label = st === 'fetching' ? 'Downloading…'
+    : st === 'restricted' ? 'Restricted — read on AO3'
+    : st === 'unsupported' ? 'Unsupported site'
+    : st === 'error' ? 'Couldn’t download — will retry'
+    : 'Queued for download';
+  const icon = bad ? 'solar:danger-triangle-bold' : st === 'fetching' ? 'solar:download-minimalistic-linear' : 'solar:clock-circle-linear';
+  const color = bad ? 'var(--danger, #f5455c)' : 'var(--text-tertiary)';
   return (
     <div className="libcard" style={{ marginBottom: 13, position: 'relative' }}>
       <div className="meta">
         <div className="story-title" style={{ marginBottom: 2, paddingRight: 38 }}>{req.title || prettyUrl(req.url)}</div>
         <div className="story-sub" style={{ marginBottom: 7, wordBreak: 'break-all' }}>{prettyUrl(req.url)}</div>
         <div className="metarow" style={{ color }}><Icon icon={icon} size={14} /><span>{label}</span></div>
-        {failed && req.error && <div className="summary" style={{ marginTop: 6 }}>{req.error}</div>}
+        {bad && req.error && <div className="summary" style={{ marginTop: 6 }}>{req.error}</div>}
       </div>
       {onRemove && (
         <button className="iconbtn ghost" onClick={onRemove} aria-label="Remove" title="Remove"
