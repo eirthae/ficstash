@@ -69,12 +69,12 @@ export function SeriesScreen({ seriesId, seriesName, nav, onReload }) {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-          <button className="btn btn-primary" style={{ flex: 1, height: 50, fontSize: 14.5 }} disabled={busy} onClick={downloadAll}>
-            <Icon icon="solar:download-minimalistic-bold" size={19} /> Download all
+        <div style={{ display: 'flex', gap: 4, marginBottom: 16, marginLeft: -10 }}>
+          <button className={`btn btn-text ${queued ? 'is-done' : ''}`} style={{ flex: 'none', fontSize: 14.5 }} disabled={busy || queued} onClick={downloadAll}>
+            <Icon icon={queued ? 'solar:check-circle-bold' : busy ? 'solar:refresh-linear' : 'solar:download-minimalistic-bold'} size={19} /> {queued ? 'Downloading' : busy ? 'Queueing…' : 'Download all'}
           </button>
-          <button className="btn" style={{ flex: 1, height: 50, fontSize: 14.5, border: '1px solid var(--border)', color: following ? 'var(--accent)' : 'var(--text-secondary)' }} disabled={busy} onClick={toggleFollow}>
-            <Icon icon={following ? 'solar:bell-bold' : 'solar:bell-linear'} size={19} /> {following ? 'Following' : 'Follow'}
+          <button className={`btn btn-text ${following ? 'is-done' : ''}`} style={{ flex: 'none', fontSize: 14.5 }} disabled={busy} onClick={toggleFollow}>
+            <Icon icon={following ? 'solar:bell-bing-bold' : 'solar:bell-linear'} size={19} /> {following ? 'Following' : 'Follow'}
           </button>
         </div>
 

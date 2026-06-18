@@ -88,7 +88,7 @@ export async function fetchSavedWorks() {
     .from('works')
     .select('*')
     .eq('hidden', false)
-    .eq('origin', 'tag')
+    .in('origin', ['tag', 'link', 'upload']) // recently-added works, however added
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) throw error;
