@@ -13,7 +13,7 @@ so re-syncing a work preserves whatever progress the reader has made.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from supabase import Client, create_client
 
@@ -612,6 +612,30 @@ def mark_series_checked(
 def delete_series_follow(client: Client, series_id: str) -> None:
     """Drop a followed_series row (used after a one-shot 'download all')."""
     client.table("followed_series").delete().eq("series_id", series_id).execute()
+
+
+# ---- What's New retention (keep the feed to a recent window) ----------------
+def expire_chapter_updates(client: Client, *, older_than_days: int = 5) -> int:
+    """Delete 'new chapter' feed entries older than the window. Only removes the
+    What's New NOTICE — the chapter text stays in `chapters`, fully readable."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+    resp = client.table("chapter_updates").delete().lt("created_at", cutoff).execute()
+    return len(resp.data or [])
+
+
+def age_out_saved_matches(client: Client, *, older_than_days: int = 5) -> int:
+    """Age discovery-saved works out of the 'New works' feed after the window by
+    flipping origin 'tag' -> 'bookmark'. They leave What's New but stay in the
+    library (which lists works of any origin)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+    resp = (
+        client.table("works")
+        .update({"origin": "bookmark"})
+        .eq("origin", "tag")
+        .lt("created_at", cutoff)
+        .execute()
+    )
+    return len(resp.data or [])
 
 
 def set_work_series(

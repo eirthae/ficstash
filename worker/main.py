@@ -62,9 +62,11 @@ from ficstash_worker.util import is_phantom_link_error, status_matches
 from ficstash_worker.sources import TAG_SEARCH, get_source
 from ficstash_worker.sources.ao3 import RateLimitError
 from ficstash_worker.supabase_io import (
+    age_out_saved_matches,
     clear_series_requests,
     delete_request,
     delete_series_follow,
+    expire_chapter_updates,
     fetch_all_offline_works,
     fetch_followed_series,
     fetch_non_offline_works,
@@ -113,6 +115,9 @@ DEFAULT_REFLOW_MAX = None
 # new chapters. Unbounded by default (requests stay RATE_LIMIT_SECONDS apart and
 # only NEW chapters are fetched); set REFRESH_ONGOING_MAX to a number to re-cap.
 DEFAULT_REFRESH_ONGOING_MAX = None
+# How many days an item stays in What's New before it ages out (it remains in the
+# library either way). Override with WHATS_NEW_DAYS.
+DEFAULT_WHATS_NEW_DAYS = 5
 
 
 def check_env() -> None:
@@ -1008,6 +1013,20 @@ def main() -> None:
             # A one-shot "download all" drops out once everything's pulled.
             if not srow.get("follow") and not hit_cap:
                 delete_series_follow(db, sid)
+
+    # ---- What's New retention: keep the feed to the last N days -----------------
+    # Everything stays in the LIBRARY; this only declutters What's New. New-chapter
+    # notices are deleted; discovery-saves flip origin 'tag' -> 'bookmark' so they
+    # leave the "New works" feed but remain in the library.
+    print("\n== What's New retention ==")
+    try:
+        raw = os.environ.get("WHATS_NEW_DAYS", "").strip()
+        days = max(1, int(raw)) if raw.isdigit() else DEFAULT_WHATS_NEW_DAYS
+        n_ch = expire_chapter_updates(db, older_than_days=days)
+        n_sv = age_out_saved_matches(db, older_than_days=days)
+        print(f"Aged out {n_ch} chapter notice(s) + {n_sv} saved work(s) older than {days}d.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"What's New retention skipped ({type(exc).__name__}: {exc})")
 
     print("\nSync complete.")
 
