@@ -839,7 +839,20 @@ def main() -> None:
     # their formatting is restored. A capped batch per run keeps AO3 polite.
     print("\n== Reflow legacy plain-text chapters ==")
     reflow_max = _reflow_max()
-    reflow_ids = fetch_plaintext_chapter_works(db, limit=reflow_max)
+    # Opt-in (set REFLOW=1). This is a one-off cleanup that's effectively complete,
+    # and its detection query is a full scan of every chapter's `content` — which
+    # statement-timeouts (error 57014) on a large / image-rich library and was
+    # CRASHING the whole sync here, aborting the refresh + series + retention passes
+    # below. A full re-check (Pass 7) re-downloads chapters with HTML anyway, so
+    # this is rarely needed. Skipped by default; wrapped so it can never abort sync.
+    reflow_ids: list = []
+    if os.environ.get("REFLOW", "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            reflow_ids = fetch_plaintext_chapter_works(db, limit=reflow_max)
+        except Exception as exc:  # noqa: BLE001
+            print(f"    reflow scan skipped ({type(exc).__name__}: {exc})")
+    else:
+        print("    skipped (set REFLOW=1 to run; a full re-check covers it).")
     print(
         f"{len(reflow_ids)} work(s) have plain-text chapters to re-download "
         f"(max {reflow_max or 'no cap'})."
