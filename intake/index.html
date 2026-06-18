@@ -16,7 +16,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>FicStash Intake</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%237828c8' d='M12 3 3 8l9 5 9-5z'/%3E%3C/svg%3E" />
+  <link rel="icon" href="owl.png" />
   <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
   <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
@@ -195,13 +195,43 @@ async function uploadFile(file) {
   return parsed.title;
 }
 
-// Queue one link for the worker to fetch.
+// Recognise an AO3 series, or a single work on a supported site, from its URL.
+function parseRef(raw) {
+  const url = (raw || '').trim();
+  let m;
+  if ((m = url.match(/archiveofourown\.org\/series\/(\d+)/i))) return { kind: 'series', source: 'ao3', id: m[1] };
+  if ((m = url.match(/archiveofourown\.org\/(?:collections\/[^/]+\/)?works\/(\d+)/i))) return { kind: 'work', source: 'ao3', id: m[1] };
+  if ((m = url.match(/royalroad\.com\/fiction\/(\d+)/i))) return { kind: 'work', source: 'royalroad', id: m[1] };
+  if ((m = url.match(/scribblehub\.com\/series\/(\d+)/i))) return { kind: 'work', source: 'scribblehub', id: m[1] };
+  return { kind: 'unknown', id: null };
+}
+
+// Is this work already in the library (and not removed)? Returns the row or false.
+async function existsInLibrary(ref) {
+  if (!sb || !ref || ref.kind !== 'work' || !ref.id) return false;
+  const { data } = await sb.from('works').select('id,title')
+    .eq('source', ref.source).eq('source_work_id', String(ref.id)).eq('hidden', false).limit(1);
+  return data && data.length ? data[0] : false;
+}
+
+// Handle one pasted link. An AO3 series → queue the WHOLE series via
+// followed_series (the worker enumerates + downloads every work). A work already
+// in the library → skip (no duplicate). Otherwise queue it in requested_urls.
+// Returns { clean, kind: 'series' | 'dup' | 'queued' }.
 async function requestUrl(url) {
   const clean = (url || '').trim();
   if (!/^https?:\/\/\S+\.\S+/i.test(clean)) throw new Error('Not a full http(s) link');
+  const ref = parseRef(clean);
+  if (ref.kind === 'series') {
+    const { error } = await sb.from('followed_series')
+      .upsert({ series_id: String(ref.id), series_name: '', follow: true }, { onConflict: 'series_id' });
+    if (error) throw new Error(error.message || String(error));
+    return { clean, kind: 'series' };
+  }
+  if (await existsInLibrary(ref)) return { clean, kind: 'dup' };
   const { error } = await sb.from('requested_urls').insert({ url: clean });
   if (error) throw new Error(error.message || String(error));
-  return clean;
+  return { clean, kind: 'queued' };
 }
 
 // =========================================================================
@@ -244,8 +274,21 @@ function Segment({ value, onChange }) {
 
 function LinkRow({ item, onChange, onPasteBulk, onRemove, canRemove, autoFocus }) {
   const [focus, setFocus] = useState(false);
+  const [status, setStatus] = useState('idle'); // idle | checking | new | dup | series
   const ref = useRef(null);
   useEffect(() => { if (autoFocus && ref.current) ref.current.focus(); }, [autoFocus]);
+  // Live check (debounced): is this an AO3 series, or a work already in the
+  // library? So duplicates / series are obvious before you even hit Fetch.
+  useEffect(() => {
+    const v = item.value.trim();
+    if (!v || !/^https?:\/\//i.test(v)) { setStatus('idle'); return; }
+    const r = parseRef(v);
+    if (r.kind === 'series') { setStatus('series'); return; }
+    if (r.kind !== 'work' || !r.id) { setStatus('idle'); return; }
+    let alive = true; setStatus('checking');
+    const t = setTimeout(async () => { const ex = await existsInLibrary(r); if (alive) setStatus(ex ? 'dup' : 'new'); }, 450);
+    return () => { alive = false; clearTimeout(t); };
+  }, [item.value]);
   const valid = item.value.trim() === '' || /^(https?:\/\/|www\.)\S+\.\S+/i.test(item.value.trim());
   const accent = !valid ? 'var(--danger)' : focus ? 'var(--accent)' : 'var(--content3)';
   return (
@@ -255,7 +298,12 @@ function LinkRow({ item, onChange, onPasteBulk, onRemove, canRemove, autoFocus }
         <input ref={ref} value={item.value} onChange={e => onChange(item.id, e.target.value)} onPaste={e => onPasteBulk(e, item.id)}
           onFocus={() => setFocus(true)} onBlur={() => setFocus(false)} placeholder="https://paste-a-link-here.com"
           style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', minWidth: 0, fontSize: 15, color: 'var(--fg)' }} />
-        {item.value.trim() && valid && <Icon icon="solar:check-circle-bold" size={18} color="var(--success)" />}
+        {item.value.trim() && valid && (
+          status === 'series' ? <span title="AO3 series — fetches every work inside" style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 7px', borderRadius: 999, background: 'var(--accent-soft)', color: 'var(--accent)', whiteSpace: 'nowrap' }}>series</span>
+          : status === 'dup' ? <span title="Already in your library" style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 7px', borderRadius: 999, background: 'rgba(245,165,36,.18)', color: 'var(--warning)', whiteSpace: 'nowrap' }}>in library</span>
+          : status === 'checking' ? <span style={{ width: 16, height: 16, flex: 'none', borderRadius: '50%', border: '2px solid var(--content3)', borderTopColor: 'var(--accent)', animation: 'spin .7s linear infinite' }} />
+          : <Icon icon="solar:check-circle-bold" size={18} color="var(--success)" />
+        )}
         <button onClick={() => onRemove(item.id)} disabled={!canRemove} title="Remove" style={{
           width: 34, height: 34, flex: 'none', border: 'none', borderRadius: 9, cursor: canRemove ? 'pointer' : 'not-allowed',
           background: 'rgba(255,255,255,.08)', color: '#fff', opacity: canRemove ? 1 : 0.4,
@@ -385,6 +433,8 @@ function FetchBar({ count, noun, onFetch, busy }) {
 
 function Success({ kind, results, onReset }) {
   const okCount = results.filter(r => r.ok).length;
+  const queuedCount = results.filter(r => r.ok && (r.note === 'queued' || r.note === 'series')).length;
+  const dupCount = results.filter(r => r.ok && r.note === 'dup').length;
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, padding: '14px 0 4px', animation: 'fade .3s ease' }}>
       {okCount > 0 && <Confetti />}
@@ -395,7 +445,9 @@ function Success({ kind, results, onReset }) {
         <div style={{ fontSize: 23, fontWeight: 800, letterSpacing: '-.02em' }}>Off it goes!</div>
         <div style={{ fontSize: 15, color: 'var(--fg-2)', marginTop: 5 }}>
           {kind === 'links'
-            ? <><b style={{ color: 'var(--fg)' }}>{okCount}</b> link{okCount === 1 ? '' : 's'} queued - they download on the next sync.</>
+            ? <>{queuedCount > 0
+                ? <><b style={{ color: 'var(--fg)' }}>{queuedCount}</b> queued - they download on the next sync.</>
+                : 'Nothing new to queue.'}{dupCount > 0 ? ` ${dupCount} already in your library.` : ''}</>
             : <>Added <b style={{ color: 'var(--fg)' }}>{okCount}</b> book{okCount === 1 ? '' : 's'} to your library.</>}
         </div>
       </div>
@@ -404,8 +456,10 @@ function Success({ kind, results, onReset }) {
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 11, background: 'var(--content2)', fontSize: 13 }}>
             <Icon icon={r.ok ? (kind === 'links' ? 'solar:link-bold' : 'solar:book-2-bold') : 'solar:danger-triangle-bold'} size={17} color={r.ok ? 'var(--accent)' : 'var(--danger-light)'} />
             <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--fg-2)', fontFamily: kind === 'links' ? 'var(--font-mono)' : 'var(--font-sans)' }}>{r.name}</span>
-            {r.ok ? <Icon icon="solar:check-read-bold" size={16} color="var(--success)" />
-              : <span style={{ fontSize: 11, color: 'var(--danger-light)', whiteSpace: 'nowrap' }}>{r.msg}</span>}
+            {!r.ok ? <span style={{ fontSize: 11, color: 'var(--danger-light)', whiteSpace: 'nowrap' }}>{r.msg}</span>
+              : r.note === 'dup' ? <span style={{ fontSize: 11, color: 'var(--warning)', whiteSpace: 'nowrap' }}>already added</span>
+              : r.note === 'series' ? <span style={{ fontSize: 11, color: 'var(--accent)', whiteSpace: 'nowrap' }}>series · all works</span>
+              : <Icon icon="solar:check-read-bold" size={16} color="var(--success)" />}
           </div>
         ))}
       </div>
@@ -523,14 +577,15 @@ function App() {
     const results = [];
     for (const it of items) {
       try {
-        if (kind === 'links') { const url = await requestUrl(it); results.push({ name: url, ok: true }); }
+        if (kind === 'links') { const r = await requestUrl(it); results.push({ name: r.clean, ok: true, note: r.kind }); }
         else { const title = await uploadFile(it); results.push({ name: title, ok: true }); }
       } catch (e) {
         results.push({ name: kind === 'links' ? String(it) : it.name, ok: false, msg: (e && e.message) ? e.message.slice(0, 40) : 'failed' });
       }
     }
-    // Links: nudge the worker so they start downloading now (best-effort).
-    if (kind === 'links' && results.some(r => r.ok)) { try { await sb.functions.invoke('trigger-sync', { method: 'POST' }); } catch {} }
+    // Links: nudge the worker so newly queued links/series start downloading now
+    // (best-effort). Skip if everything was already in the library.
+    if (kind === 'links' && results.some(r => r.ok && r.note !== 'dup')) { try { await sb.functions.invoke('trigger-sync', { method: 'POST' }); } catch {} }
     setBusy(false);
     setDone({ kind, results });
   };
@@ -542,9 +597,8 @@ function App() {
 
       <header style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 26px', borderBottom: '1px solid var(--divider)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--grad)', color: '#fff', boxShadow: '0 8px 20px -8px rgba(120,40,200,.8)' }}>
-            <Icon icon="solar:inbox-in-bold" size={24} />
-          </div>
+          <img src="owl.png" alt="FicStash" width={40} height={40}
+            style={{ borderRadius: 12, display: 'block', boxShadow: '0 8px 20px -8px rgba(120,40,200,.8)' }} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.02em' }}>FicStash Intake</div>
             <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: -1 }}>bulk add to your library</div>
