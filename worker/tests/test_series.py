@@ -38,3 +38,9 @@ class SeriesParseTests(unittest.TestCase):
 
     def test_empty_on_junk(self):
         self.assertEqual(_parse_series_work_ids("<html>no series</html>"), [])
+
+    def test_count_is_total_works(self):
+        # The Series screen's "X of Y" uses len(series_works) as Y (the total),
+        # so the parser must surface every work in the index, not a subset.
+        self.assertEqual(len(_parse_series_work_ids(FIXTURE)), 2)
+        self.assertEqual(len(_parse_series_work_ids("<html>no series</html>")), 0)

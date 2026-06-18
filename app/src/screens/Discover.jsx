@@ -27,6 +27,19 @@ const TAXONOMY_BY_SOURCE = {
   scribblehub: [...withKind(SCRIBBLEHUB_GENRES, 'genre'), ...withKind(SCRIBBLEHUB_TAGS, 'tag')],
 };
 
+// The "Stories" shelf spans both non-AO3 fiction sites, so its global-exclude
+// vocabulary is Royal Road + Scribble Hub combined (deduped by name) — NOT the
+// Goodreads/AO3 list. Lets you exclude e.g. "Isekai" or "Portal Fantasy".
+const SITES_TAXONOMY = (() => {
+  const seen = new Set();
+  return [...TAXONOMY_BY_SOURCE.royalroad, ...TAXONOMY_BY_SOURCE.scribblehub].filter((g) => {
+    const k = (g.name || '').toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+})();
+
 // Whether a discovered work can be saved into the library. AO3 downloads
 // directly; Royal Road / Scribble Hub download server-side via the FanFicFare
 // link path. "Books" is notify-only — a commercial release can't be fetched, so
@@ -295,8 +308,11 @@ function DiscoveryFiltersSheet({ open, onClose, showToast, shelf = 'ao3' }) {
           {shelf === 'ao3'
             ? <TagPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded}
                 placeholder="Search AO3 tags to exclude…" accent="var(--danger, #f5455c)" />
-            : <SubjectPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded}
-                placeholder="Type a tag to exclude…" accent="var(--danger, #f5455c)" />}
+            : shelf === 'sites'
+              ? <GenrePicker genres={SITES_TAXONOMY} label="Royal Road + Scribble Hub"
+                  picked={excluded} onAdd={addExcluded} onRemove={removeExcluded} />
+              : <SubjectPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded}
+                  placeholder="Type a subject to exclude…" accent="var(--danger, #f5455c)" />}
 
           <button className="btn btn-lg btn-primary" style={{ width: '100%', marginTop: 18 }} disabled={saving} onClick={save}>
             {saving ? 'Saving…' : <><Icon icon="solar:check-circle-bold" size={18} /> Save filters</>}
@@ -708,6 +724,9 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
   };
 
   const list = items || [];
+  // Tags this group is already defined by — hidden from each card so the chips
+  // show OTHER tags (no repeating what you're browsing).
+  const groupTagNames = [tag.name, ...((tag.tags || []).map((t) => (typeof t === 'string' ? t : t.name)))].filter(Boolean);
   return (
     <div className="screen">
       <Appbar
@@ -736,6 +755,7 @@ export function TagResultsScreen({ tag, nav, onLeave }) {
               <SuggestionCard
                 key={w.id}
                 work={w}
+                excludeTags={groupTagNames}
                 onSave={isSavableSource(w.source) ? save : null}
                 saveState={saveStateOf(w)}
                 onLater={() => later(w)}

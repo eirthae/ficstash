@@ -13,12 +13,12 @@ export async function getSeriesFollow(seriesId) {
   if (!hasSupabase || !seriesId) return null;
   const { data, error } = await supabase
     .from('followed_series')
-    .select('id,series_id,series_name,follow,last_checked')
+    .select('id,series_id,series_name,follow,last_checked,work_count')
     .eq('series_id', String(seriesId))
     .limit(1);
   if (error || !data || !data.length) return null;
   const r = data[0];
-  return { id: r.id, seriesId: r.series_id, seriesName: r.series_name, follow: !!r.follow, lastChecked: r.last_checked };
+  return { id: r.id, seriesId: r.series_id, seriesName: r.series_name, follow: !!r.follow, lastChecked: r.last_checked, total: r.work_count ?? null };
 }
 
 // "Download all works in this series" — also follows it (follow=true), so new
@@ -32,6 +32,19 @@ export async function requestSeriesDownload(seriesId, seriesName = '') {
   if (error) return { ok: false, error: error.message || String(error) };
   triggerSync().catch(() => {});
   return { ok: true, follow: true };
+}
+
+// Delete a whole series from the library: hide every downloaded work that belongs
+// to it and stop following. Works are hidden (not hard-deleted), matching the
+// single-work remove flow — the app filters hidden works out and the worker skips
+// them. Also drops the followed_series row so it won't re-download.
+export async function deleteSeries(seriesId) {
+  if (!hasSupabase) return { ok: false, error: 'Connect your account first.' };
+  if (!seriesId) return { ok: false, error: 'No series id' };
+  const { error } = await supabase.from('works').update({ hidden: true }).eq('ao3_series_id', String(seriesId));
+  if (error) return { ok: false, error: error.message || String(error) };
+  await supabase.from('followed_series').delete().eq('series_id', String(seriesId));
+  return { ok: true };
 }
 
 // Turn "follow this series" on/off. Following also pulls the whole series (the

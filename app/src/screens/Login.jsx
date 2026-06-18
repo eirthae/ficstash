@@ -40,7 +40,7 @@ export function LoginScreen() {
         </div>
         <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 8 }}>Welcome back</div>
         <div style={{ textAlign: 'center', fontSize: 14, lineHeight: 1.55, color: 'var(--text-secondary)', maxWidth: 300, margin: '0 auto 26px' }}>
-          Sign in to your private FicStash. Your library is locked to your account — no one else can read it.
+          Sign in to continue.
         </div>
 
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

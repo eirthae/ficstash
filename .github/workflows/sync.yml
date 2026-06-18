@@ -56,6 +56,10 @@ jobs:
           # "Re-check ALL works" toggle on a manual run → full library revamp.
           FULL_REFRESH: ${{ inputs.full_refresh && '1' || '' }}
           SAVES_ONLY: ${{ inputs.saves_only && '1' || '' }}
-          # No AO3 login: the worker only reads AO3's public pages now. The
-          # AO3_USERNAME/AO3_PASSWORD secrets are no longer used and can be deleted.
+          # Optional AO3 login: when these secrets are set the worker logs in so it
+          # can fetch members-only / registered-users-only works (e.g. series works
+          # a guest can't get). If unset, it runs logged-out on public pages. The
+          # password is passed by name and never printed.
+          AO3_USERNAME: ${{ secrets.AO3_USERNAME }}
+          AO3_PASSWORD: ${{ secrets.AO3_PASSWORD }}
         run: python main.py

@@ -135,13 +135,16 @@ input,textarea { font-family:inherit; }
 .screen { position:absolute; inset:0; display:flex; flex-direction:column; overflow:hidden; background:var(--surface); }
 .scroll { flex:1; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; }
 
-/* screen push/pop transitions */
-.view-enter { animation:pushIn .32s cubic-bezier(.2,.8,.2,1); }
-.view-pop   { animation:popOut .26s cubic-bezier(.4,0,.2,1) forwards; }
-.view-back  { animation:popReveal .3s cubic-bezier(.2,.8,.2,1); }
-@keyframes pushIn { from { transform:translateX(28px); opacity:0; } to { transform:none; opacity:1; } }
-@keyframes popOut { to { transform:translateX(34px); opacity:0; } }
-@keyframes popReveal { from { transform:translateX(-28px); opacity:0; } to { transform:none; opacity:1; } }
+/* screen push/pop transitions — a card slides in from the right on push and the
+   leaving card slides back out to the right on pop, revealing the screen beneath
+   (which parallaxes gently from the left). The leaving screen stays mounted for
+   the animation so it never just vanishes (that instant disappear was the jump). */
+.view-enter  { animation:pushIn .3s cubic-bezier(.3,0,.3,1); box-shadow:-10px 0 28px rgba(0,0,0,.22); }
+.view-pop    { animation:popOut .3s cubic-bezier(.3,0,.3,1) forwards; box-shadow:-10px 0 28px rgba(0,0,0,.22); }
+.view-reveal { animation:reveal .3s cubic-bezier(.3,0,.3,1); }
+@keyframes pushIn { from { transform:translateX(100%); } to { transform:translateX(0); } }
+@keyframes popOut { from { transform:translateX(0); } to { transform:translateX(100%); } }
+@keyframes reveal { from { transform:translateX(-8%); } to { transform:translateX(0); } }
 .fade-enter { animation:fadeIn .28s ease; }
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 

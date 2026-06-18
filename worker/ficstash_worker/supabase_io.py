@@ -321,7 +321,7 @@ def fetch_tracked_groups(client: Client) -> list[dict]:
     resp = (
         client.table("tracked_groups")
         .select(
-            "id,label,tags,excluded_tags,match_mode,source,last_checked,created_at"
+            "id,label,tags,excluded_tags,match_mode,source,status,last_checked,created_at"
         )
         .execute()
     )
@@ -581,18 +581,27 @@ def fetch_followed_series(client: Client) -> list[dict]:
     """Rows in followed_series: series the user asked to download / follow."""
     resp = (
         client.table("followed_series")
-        .select("id,series_id,series_name,follow,last_checked,created_at")
+        .select("id,series_id,series_name,follow,last_checked,created_at,work_count")
         .order("created_at")
         .execute()
     )
     return list(resp.data or [])
 
 
-def mark_series_checked(client: Client, series_id: str, *, name: str | None = None) -> None:
-    """Stamp a followed series as just-enumerated (and refresh its name)."""
+def mark_series_checked(
+    client: Client, series_id: str, *, name: str | None = None, count: int | None = None
+) -> None:
+    """Stamp a followed series as just-enumerated (and refresh its name + total).
+
+    `count` is the series' TOTAL number of works as seen on AO3's index — stored
+    so the app can show "X of Y downloaded" (Y may exceed what we could fetch when
+    some works are registered-users-only).
+    """
     patch: dict = {"last_checked": datetime.now(timezone.utc).isoformat()}
     if name:
         patch["series_name"] = name
+    if count is not None:
+        patch["work_count"] = int(count)
     client.table("followed_series").update(patch).eq("series_id", series_id).execute()
 
 

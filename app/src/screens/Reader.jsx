@@ -180,13 +180,11 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
               {READER_PARAS.slice(0, 4).map((p, i) => <p key={'b' + i}>{p}</p>)}
             </>
           ) : (
-            <p style={{ color: 'var(--reader-text-dim)' }}>
-              This work hasn’t been downloaded yet — it’s queued for offline download, and the next sync will fetch the full text so you can read it here.
-            </p>
+            <p style={{ color: 'var(--reader-text-dim)' }}>Not downloaded yet — fetches on the next sync.</p>
           )}
 
           <div className="eoc" style={{ display: !hasReal && !demo ? 'none' : undefined }}>
-            <div className="star"><span className="ln"></span><Icon icon="solar:asterisk-linear" size={16} /><span className="ln"></span></div>
+            <div className="star"><span className="ln"></span><Icon icon="solar:star-linear" size={16} /><span className="ln"></span></div>
             {cur < total ? (
               <button className="nextbtn pressable" onClick={(e) => { e.stopPropagation(); goCh(cur + 1); }}>
                 Next chapter <Icon icon="solar:arrow-right-linear" size={18} />
