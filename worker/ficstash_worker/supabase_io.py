@@ -645,14 +645,16 @@ def expire_chapter_updates(client: Client, *, older_than_days: int = 5) -> int:
 
 
 def age_out_saved_matches(client: Client, *, older_than_days: int = 5) -> int:
-    """Age discovery-saved works out of the 'New works' feed after the window by
-    flipping origin 'tag' -> 'bookmark'. They leave What's New but stay in the
-    library (which lists works of any origin)."""
+    """Age recently-added works out of the 'New works' feed after the window by
+    flipping origin -> 'bookmark'. Covers every lane the user can add a work
+    through: 'tag' (saved from Discovery), 'link' (added by URL) and 'upload'
+    (imported file). They leave What's New but stay in the library (which lists
+    works of any origin)."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
     resp = (
         client.table("works")
         .update({"origin": "bookmark"})
-        .eq("origin", "tag")
+        .in_("origin", ["tag", "link", "upload"])
         .lt("created_at", cutoff)
         .execute()
     )
