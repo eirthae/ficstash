@@ -124,6 +124,25 @@ def check_env() -> None:
     print("Environment OK — all required secrets present.")
 
 
+def _maybe_login_ao3(ao3) -> None:
+    """Log in to AO3 when AO3_USERNAME + AO3_PASSWORD are set, so members-only /
+    registered-users-only works the account can access become fetchable (e.g. the
+    series works a guest session can't download). Entirely optional: with no creds
+    the worker runs logged-out on AO3's public pages exactly as before. The
+    password is read from the env, used only to mint the session, and never stored
+    or printed. Politeness is unchanged (requests stay RATE_LIMIT_SECONDS apart)."""
+    user = os.environ.get("AO3_USERNAME", "").strip()
+    pw = os.environ.get("AO3_PASSWORD", "")
+    if not user or not pw:
+        print("AO3: running logged-out (no AO3_USERNAME/AO3_PASSWORD set).")
+        return
+    try:
+        name = ao3.authenticate(user, pw)
+        print(f"AO3: logged in as {name} — members-only works are fetchable.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"AO3: login failed ({type(exc).__name__}) — continuing logged-out.")
+
+
 def _with_backoff(fn, *, what: str, broad: bool = False):
     """Run fn(), retrying with growing waits.
 
@@ -278,6 +297,7 @@ def main() -> None:
     check_env()
 
     ao3 = get_source("ao3")
+    _maybe_login_ao3(ao3)
     db = make_client()
 
     # Only import works in languages the user can read; everything else is
@@ -940,8 +960,8 @@ def main() -> None:
                     got += 1
                 except Exception as exc:  # noqa: BLE001
                     print(f"    series work {wid} skipped ({type(exc).__name__}: {exc})")
-            mark_series_checked(db, sid, name=sname)
-            print(f"    series {sid} '{sname}': +{got} work(s){' (more next run)' if hit_cap else ''}.")
+            mark_series_checked(db, sid, name=sname, count=len(works))
+            print(f"    series {sid} '{sname}': +{got} work(s) of {len(works)} total{' (more next run)' if hit_cap else ''}.")
             # A one-shot "download all" drops out once everything's pulled.
             if not srow.get("follow") and not hit_cap:
                 delete_series_follow(db, sid)

@@ -3,6 +3,7 @@ import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
 import { Segmented } from '../components/ui.jsx';
 import { fetchOfflineStats } from '../lib/library.js';
+import logo from '../assets/logo.png';
 
 export function SettingsScreen({ appMode, setAppMode, onSignOut, canSignOut, nav }) {
   const [storage, setStorage] = useState(undefined); // undefined=loading, null=unavailable
@@ -27,7 +28,7 @@ export function SettingsScreen({ appMode, setAppMode, onSignOut, canSignOut, nav
         </SetSection>
 
         {canSignOut && (
-          <SetSection label="Account" note="Your library is private and locked to this account. Signing out clears this device; sign back in any time.">
+          <SetSection label="Account">
             <button className="set-row pressable" style={{ width: '100%', textAlign: 'left' }} onClick={onSignOut}>
               <div className="set-ic" style={{ background: 'var(--danger-soft, rgba(243,18,96,.12))', color: 'var(--danger, #f31260)' }}><Icon icon="solar:logout-3-bold" size={18} /></div>
               <div className="set-tx"><div className="set-h">Sign out</div><div className="set-d">Lock this device</div></div>
@@ -36,7 +37,7 @@ export function SettingsScreen({ appMode, setAppMode, onSignOut, canSignOut, nav
           </SetSection>
         )}
 
-        <SetSection label="Appearance" note="Controls the whole app. Reader themes are separate — set them in the reader.">
+        <SetSection label="Appearance">
           <div className="set-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <div className="set-ic"><Icon icon="solar:pallete-2-bold" size={18} /></div>
@@ -54,7 +55,7 @@ export function SettingsScreen({ appMode, setAppMode, onSignOut, canSignOut, nav
           <div className="set-row">
             <div className="set-ic"><Icon icon="solar:database-linear" size={18} /></div>
             <div className="set-tx"><div className="set-h">Offline library</div><div className="set-d">{storageLine}</div></div>
-            <Icon icon="solar:wifi-router-minimalistic-linear" size={20} color="var(--text-tertiary)" />
+            <Icon icon="solar:wi-fi-router-minimalistic-linear" size={20} color="var(--text-tertiary)" />
           </div>
         </SetSection>
 
@@ -91,9 +92,8 @@ export function ConnectScreen({ nav }) {
     <div className="screen view-enter">
       <Appbar back={() => nav.pop()} title="How FicStash works" />
       <div className="scroll" style={{ padding: '8px 24px 28px' }}>
-        <div style={{ width: 72, height: 72, borderRadius: 20, background: 'linear-gradient(150deg,#7828c8,#006fee)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '14px auto 18px', boxShadow: 'var(--shadow-pop)' }}>
-          <Icon icon="solar:bookmark-opened-bold" size={36} color="#fff" />
-        </div>
+        <img src={logo} alt="FicStash" width={72} height={72}
+          style={{ display: 'block', borderRadius: 20, margin: '14px auto 18px', boxShadow: 'var(--shadow-pop)' }} />
         <div style={{ textAlign: 'center', fontSize: 21, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 8 }}>Your private, curated shelf</div>
         <div style={{ textAlign: 'center', fontSize: 14, lineHeight: 1.55, color: 'var(--text-secondary)', maxWidth: 300, margin: '0 auto 24px' }}>
           FicStash gathers stories from several sites into one offline library. You choose what comes in. It’s locked to your own private account — and no AO3 password is ever asked for or stored.

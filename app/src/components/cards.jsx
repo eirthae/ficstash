@@ -1,6 +1,7 @@
 import Icon from './Icon.jsx';
 import { Cover, FetchButton, StatusBadge, FrozenBadge, OriginBadges, TagChip, fmtWords } from './ui.jsx';
 import { COVER_PALETTES } from '../data/sample.js';
+import { pickCardTags } from '../lib/cardtags.js';
 
 // ---- Library list card (horizontal) --------------------------------------
 export function LibraryCard({ work, onOpen, onDelete }) {
@@ -21,6 +22,14 @@ export function LibraryCard({ work, onOpen, onDelete }) {
           <OriginBadges bookmarked={work.bookmarked} subscribed={work.subscribed} />
         </div>
         <div className="summary" style={{ flex: 1 }}>{work.summary}</div>
+        {((work.tags && work.tags.length) || work.words) ? (
+          <div className="chiprow" style={{ marginTop: 8, gap: 6, alignItems: 'center' }}>
+            {(work.tags || []).slice(0, 3).map((t, i) => (
+              <TagChip key={i} t={typeof t === 'string' ? t : t.t} k={typeof t === 'string' ? undefined : t.k} />
+            ))}
+            {work.words ? <span style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>{fmtWords(work.words)}</span> : null}
+          </div>
+        ) : null}
         <div style={{ marginTop: 9 }}>
           {work.offline === false ? (
             <div className="metarow" style={{ color: 'var(--text-tertiary)' }}><Icon icon="solar:clock-circle-linear" size={14} /><span>Downloads on next sync</span></div>
@@ -71,7 +80,7 @@ export function GridCard({ work, onOpen }) {
 
 // ---- Suggestion card (+ save / dismiss) -----------------------------------
 // saveState: 'idle' → 'queued' (worker will fetch on next sync) → 'saved' (in library)
-export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, cta = 'Open', onLater, laterIcon = 'solar:bookmark-linear', laterTitle = 'Save for later' }) {
+export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, cta = 'Open', onLater, laterIcon = 'solar:bookmark-linear', laterTitle = 'Save for later', excludeTags = [] }) {
   return (
     <div className="libcard fade-enter">
       <div className="meta">
@@ -86,7 +95,7 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
         </div>
         <div className="summary" style={{ margin: '7px 0' }}>{work.summary}</div>
         <div className="chiprow" style={{ marginBottom: 9 }}>
-          {work.tags.slice(0, 3).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
+          {pickCardTags(work.tags, excludeTags).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <div className="metarow"><StatusBadge status={work.status} /><span>·</span><span>{fmtWords(work.words)}</span></div>

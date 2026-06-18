@@ -249,15 +249,6 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
             </button>
           )}
 
-          {!suggestion && ongoing && !work.frozen && !work.restricted && (
-            <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--success-soft, rgba(23,201,100,.12))', marginBottom: 18 }}>
-              <Icon icon="solar:refresh-circle-bold" size={20} color="var(--success, #17c964)" style={{ flexShrink: 0, marginTop: 1 }} />
-              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-                <b style={{ color: 'var(--text-primary)' }}>Following — auto-updating.</b> This work is still ongoing, so FicStash checks it for new chapters on every sync (each night and whenever you tap Sync) and downloads them automatically. It stops on its own once the work is complete.
-              </div>
-            </div>
-          )}
-
           {work.frozen && (
             <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--info-soft)', marginBottom: 18 }}>
               <Icon icon="solar:shield-check-bold" size={20} color="var(--info)" style={{ flexShrink: 0, marginTop: 1 }} />
@@ -282,7 +273,6 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
               <TagChip key={i} t={t.t} k={t.k} onClick={() => setTagBuilder({ name: t.t, id: '', kind: t.k })} />
             ))}
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 22 }}>Tap a tag to follow it — refine with include/exclude, then track.</div>
 
           {canOpenAtSource && (
             <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 22 }}

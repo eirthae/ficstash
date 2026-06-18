@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
-import { StatusBadge, fmtWords, useToast, PullToRefresh } from '../components/ui.jsx';
+import { StatusBadge, fmtWords, useToast, PullToRefresh, TagChip } from '../components/ui.jsx';
 import { fetchNewChapters, markChapterUpdateSeen } from '../lib/tags.js';
 import { fetchSavedWorks, removeWork } from '../lib/library.js';
 import { triggerSync } from '../lib/sync.js';
@@ -12,17 +12,29 @@ const SAVED_TYPES = [{ id: 'all', label: 'All' }, { id: 'ao3', label: 'AO3' }, {
 // shared row: a new chapter on a followed work
 function ChapterUpdateRow({ u, onOpen }) {
   const fandom = (u.fandom || '').split('–')[0].split(' - ')[0].trim();
+  const w = u.work || {};
+  const total = w.chaptersTotal || w.chapters;
+  const named = u.chapter && u.chapter !== `Chapter ${u.chapterN}`;
+  const chapLabel = `Chapter ${u.chapterN}${total ? ` of ${total}` : ''}${named ? `: ${u.chapter}` : ''}`;
   return (
     <div className="update pressable" onClick={() => onOpen(u)}>
       {u.fresh && <span className="unew"></span>}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, paddingLeft: 4 }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span className="chip" style={{ background: 'var(--accent-soft)', color: 'var(--accent)', height: 20 }}>
             <Icon icon="solar:bookmark-bold" size={12} /> New chapter</span>
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginLeft: 'auto' }}>{u.time}</span>
         </div>
-        <div className="story-title" style={{ fontSize: 14.5 }}>{u.chapter}</div>
-        <div className="story-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.title}</div>
+        <div className="story-title" style={{ fontSize: 14.5 }}>{u.title}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 600 }}>New · {chapLabel}</div>
+        {w.summary && <div className="summary" style={{ WebkitLineClamp: 3 }}>{w.summary}</div>}
+        {(w.tags && w.tags.length) ? (
+          <div className="chiprow" style={{ marginTop: 1 }}>
+            {w.tags.slice(0, 3).map((t, i) => (
+              <TagChip key={i} t={typeof t === 'string' ? t : t.t} k={typeof t === 'string' ? undefined : t.k} />
+            ))}
+          </div>
+        ) : null}
         {fandom && <div className="metarow" style={{ fontSize: 11.5 }}><Icon icon="solar:book-2-linear" size={13} /> {fandom} · {fmtWords(u.words)}</div>}
         {u.fetched === false ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>
@@ -135,11 +147,6 @@ export function WhatsNewScreen({ chapters, nav }) {
         </button>
       </div>
       <PullToRefresh className="scroll fade-enter" key={tab} onRefresh={doSync} style={{ padding: '0 20px 24px' }}>
-        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Icon icon={tab === 'chapters' ? 'solar:download-minimalistic-linear' : 'solar:bookmark-bold'} size={14} />
-          {tab === 'chapters' ? 'On works you follow — downloaded automatically.' : 'Works you saved from Discovery — downloaded and ready to read.'}
-        </div>
-
         {tab === 'saved' && savedList.length > 0 && (
           <div className="seg statusseg" style={{ marginBottom: 14 }}>
             {SAVED_TYPES.map((t) => (
@@ -152,9 +159,7 @@ export function WhatsNewScreen({ chapters, nav }) {
 
         {active.length === 0 && (
           <div style={{ padding: '28px 8px', textAlign: 'center', fontSize: 13, lineHeight: 1.55, color: 'var(--text-tertiary)' }}>
-            {tab === 'chapters'
-              ? 'No new chapters yet. When a sync pulls fresh chapters for your ongoing works, they show up here — already downloaded.'
-              : 'Nothing saved yet. Save a work from Discovery and it lands here once it’s downloaded.'}
+            {tab === 'chapters' ? 'No new chapters.' : 'Nothing saved yet.'}
           </div>
         )}
         {days(active).map(g => (

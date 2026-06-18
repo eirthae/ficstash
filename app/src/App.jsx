@@ -150,15 +150,32 @@ export default function App() {
   // ---- navigation stack --------------------------------------------------
   const [tab, setTab] = useState('library');
   const [stack, setStack] = useState([]);
-  const [navDir, setNavDir] = useState('fwd'); // last nav direction → screen transition (fwd: slide in from right, back: slide in from left)
+  const stackRef = useRef([]); stackRef.current = stack;
+  const [navDir, setNavDir] = useState('fwd'); // fwd: new screen slides in from the right
+  // The screen being popped stays mounted briefly so it can slide OUT to the right
+  // (revealing the screen beneath) instead of vanishing instantly — that instant
+  // disappear was the "jump" on swipe-back. `exiting` holds the leaving screen for
+  // the length of the animation, then clears.
+  const [exiting, setExiting] = useState(null);
+  const exitTimer = useRef(null);
+  const goBack = () => {
+    const s = stackRef.current;
+    if (!s.length) return false;
+    setNavDir('back');
+    setExiting({ item: s[s.length - 1], key: s.length });
+    setStack(s.slice(0, -1));
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+    exitTimer.current = setTimeout(() => setExiting(null), 300);
+    return true;
+  };
   const nav = useRef();
   nav.current = {
     push: (screen, props = {}) => { setNavDir('fwd'); setStack(s => [...s, { screen, props }]); try { history.pushState({ fs: 1 }, ''); } catch (e) {} },
-    pop: () => { setNavDir('back'); setStack(s => s.slice(0, -1)); },
+    pop: () => { goBack(); },
     reset: (tabId) => { setStack([]); setTab(tabId); },
   };
   useEffect(() => {
-    const onPop = () => { setNavDir('back'); setStack(s => (s.length ? s.slice(0, -1) : s)); };
+    const onPop = () => { goBack(); };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -171,9 +188,9 @@ export default function App() {
   navState.current = { stack, tab };
   useEffect(() => {
     const handle = CapApp.addListener('backButton', () => {
-      const { stack, tab } = navState.current;
-      if (stack.length) { setNavDir('back'); setStack(s => s.slice(0, -1)); }
-      else if (tab !== 'library') switchTab('library');
+      const { tab } = navState.current;
+      if (goBack()) return;
+      if (tab !== 'library') switchTab('library');
       else CapApp.exitApp();
     });
     return () => { handle.then(h => h.remove()).catch(() => {}); };
@@ -218,14 +235,14 @@ export default function App() {
     if (tab === 'discover') return <DiscoverScreen nav={n} />;
     if (tab === 'settings') return <SettingsScreen appMode={appMode} setAppMode={setAppMode} onSignOut={signOut} canSignOut={hasSupabase && !!session} nav={n} />;
   };
-  const renderTop = () => {
-    const n = nav.current, p = top.props || {};
-    if (top.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} onReload={p.onReload} nav={n} />;
-    if (top.screen === 'series') return <SeriesScreen seriesId={p.seriesId} seriesName={p.seriesName} onReload={p.onReload} nav={n} />;
-    if (top.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={updateReaderSettings} nav={n} />;
-    if (top.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
-    if (top.screen === 'later') return <LaterScreen onLeave={p.onLeave} nav={n} />;
-    if (top.screen === 'connect') return <ConnectScreen nav={n} />;
+  const renderScreen = (item) => {
+    const n = nav.current, p = item.props || {};
+    if (item.screen === 'detail') return <StoryDetailScreen work={p.work} suggestion={p.suggestion} onSaved={p.onSaved} onRemoved={p.onRemoved} onReload={p.onReload} nav={n} />;
+    if (item.screen === 'series') return <SeriesScreen seriesId={p.seriesId} seriesName={p.seriesName} onReload={p.onReload} nav={n} />;
+    if (item.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={updateReaderSettings} nav={n} />;
+    if (item.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} nav={n} />;
+    if (item.screen === 'later') return <LaterScreen onLeave={p.onLeave} nav={n} />;
+    if (item.screen === 'connect') return <ConnectScreen nav={n} />;
     return null;
   };
 
@@ -233,7 +250,19 @@ export default function App() {
     <div className="app-root" data-mode={resolvedMode}>
       <div className="viewport">
         {renderTab()}
-        {top && <div className={`screen ${navDir === 'back' ? 'view-back' : 'view-enter'}`} key={stack.length} style={{ zIndex: 30 }}>{renderTop()}</div>}
+        {/* Every stack screen stays mounted (lower ones sit behind the opaque top
+            one), so going back reveals the previous screen with its scroll + state
+            intact instead of remounting and jumping to the top. Only the topmost
+            animates in; the just-popped screen slides out via the `exiting` layer. */}
+        {stack.map((item, i) => {
+          const isTop = i === stack.length - 1;
+          return (
+            <div key={i} className={`screen ${isTop ? (navDir === 'back' ? 'view-reveal' : 'view-enter') : ''}`} style={{ zIndex: 30 + i }}>
+              {renderScreen(item)}
+            </div>
+          );
+        })}
+        {exiting && <div className="screen view-pop" key={`exit-${exiting.key}`} style={{ zIndex: 30 + stack.length + 1 }}>{renderScreen(exiting.item)}</div>}
       </div>
       {showNav && <BottomNav active={tab} onTab={(id) => { setAddOpen(false); switchTab(id); }} onAdd={() => setAddOpen(o => !o)} addActive={addOpen} />}
       {showNav && <AddMenu open={addOpen} onClose={() => setAddOpen(false)} onChanged={onLibraryChanged} />}
