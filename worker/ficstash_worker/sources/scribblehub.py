@@ -28,6 +28,7 @@ the caller's backoff handles, and a skipped run just means matches arrive next s
 from __future__ import annotations
 
 import html as _html
+import os
 import re
 import time
 
@@ -47,18 +48,26 @@ _HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 _TIMEOUT = 25
-_DESC_LIMIT = 12   # only fetch a real blurb for the first N finder results
+_DESC_LIMIT = int(os.environ.get("SH_DESC_LIMIT", "40") or 40)  # fetch a real blurb for the first N finder results (was 12 — too low, later cards came through blank); env-tunable
 _DESC_PAUSE = 0.4  # polite gap between per-series detail fetches
 
 
 def parse_description(html_text: str) -> str:
-    """A Scribble Hub series blurb from its /series page.
+    """A Scribble Hub series synopsis from its /series page.
 
-    The Series Finder cards carry no synopsis, but each series page exposes one
-    for SEO in the `og:description` social-share meta tag. Pure/regex-based so it
+    Prefer the FULL synopsis in the page's description block (`wi_fic_desc`):
+    many works leave the `og:description` social-share meta empty or truncated,
+    which is why some came through with no (or a clipped) description. Fall back
+    to og:description only when the block isn't present. Pure/regex-based so it
     unit-tests without network.
     """
-    for tag in re.findall(r"<meta\b[^>]*>", html_text or ""):
+    text = html_text or ""
+    m = re.search(r'<div[^>]*\bwi_fic_desc\b[^>]*>(.*?)</div>', text, re.S | re.I)
+    if m:
+        body = _html.unescape(_strip_html(m.group(1))).strip()
+        if body:
+            return body
+    for tag in re.findall(r"<meta\b[^>]*>", text):
         if 'property="og:description"' in tag:
             cm = re.search(r'content="([^"]*)"', tag)
             if cm and cm.group(1).strip():
