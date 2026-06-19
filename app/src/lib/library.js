@@ -27,7 +27,7 @@ function mapWork(row) {
     tags: Array.isArray(row.tags) ? row.tags : [],
     words: row.words,
     chapters: row.chapters,
-    chaptersTotal: row.chapters_total ?? row.chapters,
+    chaptersTotal: row.chapters_total ?? null, // null = AO3 "/?" unknown end; never fall back to the chapter count (reads as complete)
     status: row.status,
     updated: row.updated_label,
     progress: row.progress,

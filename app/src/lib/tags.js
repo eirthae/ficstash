@@ -389,7 +389,7 @@ export async function fetchNewChapters() {
           id: w.id, source: w.source, sourceWorkId: w.source_work_id, sourceUrl: w.source_url || '',
           title: w.title, author: w.author, fandom: w.fandom, summary: w.summary,
           tags: Array.isArray(w.tags) ? w.tags : [], words: w.words, chapters: w.chapters,
-          chaptersTotal: w.chapters_total ?? w.chapters, status: w.status, palette: w.palette,
+          chaptersTotal: w.chapters_total ?? null, status: w.status, palette: w.palette,
           offline: w.offline, lastChapter: w.last_chapter, progress: w.progress, origin: w.origin,
         },
       };

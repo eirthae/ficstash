@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
 import { StatusBadge, fmtWords, useToast, PullToRefresh, TagChip } from '../components/ui.jsx';
+import { totalLabel } from '../components/cards.jsx';
 import { fetchNewChapters, markChapterUpdateSeen } from '../lib/tags.js';
 import { fetchSavedWorks, removeWork } from '../lib/library.js';
 import { triggerSync } from '../lib/sync.js';
@@ -13,9 +14,9 @@ const SAVED_TYPES = [{ id: 'all', label: 'All' }, { id: 'ao3', label: 'AO3' }, {
 function ChapterUpdateRow({ u, onOpen }) {
   const fandom = (u.fandom || '').split('–')[0].split(' - ')[0].trim();
   const w = u.work || {};
-  const total = w.chaptersTotal || w.chapters;
+  const total = totalLabel(w); // a number, or "?" when AO3 hasn't declared an end
   const named = u.chapter && u.chapter !== `Chapter ${u.chapterN}`;
-  const chapLabel = `Chapter ${u.chapterN}${total ? ` of ${total}` : ''}${named ? `: ${u.chapter}` : ''}`;
+  const chapLabel = `Chapter ${u.chapterN} of ${total}${named ? `: ${u.chapter}` : ''}`;
   return (
     <div className="update pressable" onClick={() => onOpen(u)}>
       {u.fresh && <span className="unew"></span>}

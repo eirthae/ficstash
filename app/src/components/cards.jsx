@@ -3,6 +3,15 @@ import { Cover, FetchButton, StatusBadge, FrozenBadge, OriginBadges, TagChip, fm
 import { COVER_PALETTES } from '../data/sample.js';
 import { pickCardTags } from '../lib/cardtags.js';
 
+// The chapter total to SHOW. AO3 ongoing works are usually "13/?" (no declared
+// end), and we must not render that as "13/13" — it reads as complete. We only
+// trust a number when the work is actually complete, or the author declared MORE
+// chapters than are posted yet (e.g. 32/45). Otherwise the end is unknown → "?".
+export function totalLabel(work) {
+  if (work.status === 'complete') return work.chaptersTotal || work.chapters || '?';
+  return (work.chaptersTotal && work.chaptersTotal > (work.chapters || 0)) ? work.chaptersTotal : '?';
+}
+
 // ---- Library list card (horizontal) --------------------------------------
 export function LibraryCard({ work, onOpen, onDelete }) {
   return (
@@ -34,12 +43,14 @@ export function LibraryCard({ work, onOpen, onDelete }) {
           <div style={{ marginTop: 9 }}>
             {work.offline === false ? (
               <div className="metarow" style={{ color: 'var(--text-tertiary)' }}><Icon icon="solar:clock-circle-linear" size={14} /><span>Downloads on next sync</span></div>
-            ) : work.progress >= 1 ? (
+            ) : (work.progress >= 1 && work.status === 'complete') ? (
               <div className="metarow"><Icon icon="solar:check-circle-bold" size={14} color="var(--success)" /><span>Finished</span></div>
+            ) : work.progress >= 1 ? (
+              <div className="metarow" style={{ color: 'var(--accent)' }}><Icon icon="solar:bookmark-bold" size={14} /><span>Caught up · Ch {work.lastChapter} of {totalLabel(work)}</span></div>
             ) : (
               <>
                 <div className="progress" style={{ marginBottom: 5 }}><i style={{ width: `${work.progress * 100}%` }}></i></div>
-                <div className="metarow"><span>Chapter {work.lastChapter} of {work.chaptersTotal}</span><span>·</span><span>{Math.round(work.progress * 100)}%</span></div>
+                <div className="metarow"><span>Chapter {work.lastChapter} of {totalLabel(work)}</span><span>·</span><span>{Math.round(work.progress * 100)}%</span></div>
               </>
             )}
           </div>
@@ -68,7 +79,7 @@ export function GridCard({ work, onOpen }) {
             </span>
           ) : (
             <span style={{ color: work.status === 'complete' ? 'var(--success)' : 'var(--warning)', fontWeight: 600 }}>
-              {work.progress >= 1 ? 'Finished' : work.progress > 0 ? `Ch ${work.lastChapter}/${work.chaptersTotal}` : work.status === 'complete' ? 'Complete' : 'Ongoing'}
+              {work.progress >= 1 ? (work.status === 'complete' ? 'Finished' : 'Caught up') : work.progress > 0 ? `Ch ${work.lastChapter}/${totalLabel(work)}` : work.status === 'complete' ? 'Complete' : 'Ongoing'}
             </span>
           )}
           <span>{fmtWords(work.words)}</span>
