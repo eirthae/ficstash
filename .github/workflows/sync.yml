@@ -15,6 +15,10 @@ on:
         description: "Fast path: fetch only requested links + saves, then stop (real-time Save)"
         type: boolean
         default: false
+      reseed_tags:
+        description: "Re-fetch ALL discover tags all-time (refresh metadata e.g. descriptions; keeps saved/seen/dismissed)"
+        type: boolean
+        default: false
   schedule:
     # Daily at 03:00 Japan time (JST = UTC+9), i.e. 18:00 UTC. Moved earlier from
     # 04:00 to give the (now all-time first-run) tag fetch more overnight headroom.
@@ -56,6 +60,9 @@ jobs:
           # "Re-check ALL works" toggle on a manual run → full library revamp.
           FULL_REFRESH: ${{ inputs.full_refresh && '1' || '' }}
           SAVES_ONLY: ${{ inputs.saves_only && '1' || '' }}
+          # One-shot: re-fetch every discover tag all-time so existing matches get
+          # refreshed metadata (e.g. backfilled descriptions). Keeps saved/seen flags.
+          RESEED_TAGS: ${{ inputs.reseed_tags && '1' || '' }}
           # How long works/new chapters live in What's New (days). Defaults to 1
           # (24h); change the repo variable WHATS_NEW_DAYS in Settings → Variables
           # to re-tune (e.g. 3 or 5) with no code change. Library keeps everything.

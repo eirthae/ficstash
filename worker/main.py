@@ -282,6 +282,15 @@ def _saves_only() -> bool:
     return os.environ.get("SAVES_ONLY", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _reseed_tags() -> bool:
+    """One-shot: re-run discovery ALL-TIME for every tracked group (ignore each
+    group's last_checked) so existing matches get refreshed metadata — e.g. a
+    backfilled Scribble Hub description — via the upsert. Safe: upsert_tag_matches
+    leaves seen/saved/dismissed/later untouched, so nothing you've acted on is
+    lost. Triggered by the manual run's 're-fetch discover tags' toggle."""
+    return os.environ.get("RESEED_TAGS", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _full_refresh_max() -> int | None:
     """Cap for a full refresh (None = every work; the run may need to repeat for
     a very large library since there's no resume cursor)."""
@@ -643,16 +652,20 @@ def main() -> None:
             return True  # never drop on missing data
         return lang in discovery_langs
 
+    reseed = _reseed_tags()  # one-shot: force all-time for every group this run
+    if reseed:
+        print("  RESEED_TAGS set → re-fetching ALL discover tags all-time (refreshes metadata; keeps your saved/seen/dismissed).")
     for g in groups:
         # First run (never checked) SEEDS the tag's whole back-catalogue: since
         # stays None → AO3 searches all-time, so a freshly tracked tag surfaces
         # its existing works (capped/paginated in search_group), not just ones
         # posted after you added it. Every run after that is incremental — only
         # works new since the previous sync. Both manual and auto syncs stamp
-        # last_checked, so the window always advances.
+        # last_checked, so the window always advances. RESEED_TAGS forces all-time
+        # for one run so existing matches get refreshed metadata via the upsert.
         last_checked = _parse_ts(g.get("last_checked"))
-        since = last_checked  # None on first run → all-time seed
-        anchor = "last sync" if last_checked else "first run / all-time seed"
+        since = None if reseed else last_checked  # None on first run / reseed → all-time
+        anchor = "reseed / all-time" if reseed else ("last sync" if last_checked else "first run / all-time seed")
         window = since.isoformat() if since else "all-time"
         source_id = g.get("source") or "ao3"
         print(f"  window: works since {window} ({anchor}) · source {source_id}")
