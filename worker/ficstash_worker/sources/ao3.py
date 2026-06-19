@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import html
 import math
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -37,6 +38,15 @@ from .base import (
 )
 
 RATE_LIMIT_SECONDS = 5
+
+# How deep a freshly-tracked tag's all-time seed goes (and any reseed). AO3 lists
+# ~20 works per search page; the seed walks pages (spaced by RATE_LIMIT_SECONDS)
+# until a page is empty/short or this many works is reached. Raised from 120 so a
+# popular tag's back-catalogue isn't truncated to the first page or two.
+# Env-tunable. Incremental runs (a tag's later syncs) stop early on their own —
+# few new works — so a higher cap costs nothing there; it only deepens seeds.
+TAG_SEED_LIMIT = int(os.environ.get("TAG_SEED_LIMIT", "300") or 300)
+TAG_SEED_PAGES = int(os.environ.get("TAG_SEED_PAGES", "16") or 16)
 
 # Mirror app/src/data/sample.js COVER_PALETTES length and hashStr() so the
 # worker assigns the same cover palette index the app would compute for a seed.
@@ -397,10 +407,10 @@ class AO3Source(Source):
         self,
         tags: list[str],
         match_mode: str = "all",
-        limit: int = 120,
+        limit: int = TAG_SEED_LIMIT,
         excluded_tags: list[str] | None = None,
         since: datetime | None = None,
-        max_pages: int = 8,
+        max_pages: int = TAG_SEED_PAGES,
         completed: bool | None = None,
     ) -> list[WorkMeta]:
         """Find recent works matching a tracked tag group, via AO3's own search.
@@ -519,7 +529,7 @@ class AO3Source(Source):
         limit: int,
         excluded_tags: str = "",
         revised_at: str = "",
-        max_pages: int = 8,
+        max_pages: int = TAG_SEED_PAGES,
         completed: bool | None = None,
     ):
         s = self._require_session()
