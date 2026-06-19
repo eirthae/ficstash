@@ -56,6 +56,10 @@ jobs:
           # "Re-check ALL works" toggle on a manual run → full library revamp.
           FULL_REFRESH: ${{ inputs.full_refresh && '1' || '' }}
           SAVES_ONLY: ${{ inputs.saves_only && '1' || '' }}
+          # How long works/new chapters live in What's New (days). Defaults to 1
+          # (24h); change the repo variable WHATS_NEW_DAYS in Settings → Variables
+          # to re-tune (e.g. 3 or 5) with no code change. Library keeps everything.
+          WHATS_NEW_DAYS: ${{ vars.WHATS_NEW_DAYS || '1' }}
           # Optional AO3 login: when these secrets are set the worker logs in so it
           # can fetch members-only / registered-users-only works (e.g. series works
           # a guest can't get). If unset, it runs logged-out on public pages. The
