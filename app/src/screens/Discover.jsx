@@ -8,7 +8,7 @@ import {
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches,
 } from '../lib/tags.js';
-import { kickSave, triggerSync } from '../lib/sync.js';
+import { kickSave, watchSync } from '../lib/sync.js';
 import { LANGUAGES } from '../lib/languages.js';
 import { fetchDiscoveryPrefs, updateDiscoveryPrefs } from '../lib/discovery.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
@@ -67,9 +67,10 @@ export function DiscoverScreen({ nav }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // Pull-to-refresh: kick a sync, then reload the tracked groups so new match
-  // counts show as soon as the worker lands them.
-  const doSync = useCallback(async () => { try { await triggerSync(); } finally { load(); } }, [load]);
+  // Pull-to-refresh: run the quick saves-only sync (downloads any pending links/
+  // saves), held to completion so the spinner stays until it's done, then reload
+  // the tracked groups. New tag-match discovery runs on the nightly schedule.
+  const doSync = useCallback(async () => { try { await watchSync({ savesOnly: true }); } finally { load(); } }, [load]);
 
   const all = groups || [];
   // Language groups get their own section; keep them out of the tag grid.

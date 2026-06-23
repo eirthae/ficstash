@@ -13,9 +13,10 @@ export async function requestUrl(url) {
   }
   const { error } = await supabase.from('requested_urls').insert({ url: clean });
   if (error) return { ok: false, error: error.message || String(error) };
-  // Fire the worker so the download starts now. Fire-and-forget: a failure here
-  // just means it waits for the next scheduled sync, so don't surface it.
-  triggerSync().catch(() => {});
+  // Kick the FAST saves-only lane so the download starts now in its own workflow
+  // (instead of the slow, failure-prone full sweep). Fire-and-forget: a failure
+  // here just means it waits for the next scheduled sync, so don't surface it.
+  triggerSync({ savesOnly: true }).catch(() => {});
   return { ok: true };
 }
 

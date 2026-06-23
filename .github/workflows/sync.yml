@@ -35,6 +35,11 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Safety net: a healthy run finishes in a few minutes (saves-only) to under an
+    # hour (a heavy nightly full sweep). Cap it so a run wedged by AO3 throttling /
+    # a hung request fails fast instead of hanging up to GitHub's 6-hour default
+    # (which showed up as 40–100-minute "failures" and a 59-minute cancel).
+    timeout-minutes: 75
     defaults:
       run:
         working-directory: worker

@@ -3,7 +3,7 @@ import { Appbar } from '../components/chrome.jsx';
 import { EmptyState, useToast, Sheet, PullToRefresh } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { LibraryCard } from '../components/cards.jsx';
-import { triggerSync } from '../lib/sync.js';
+import { watchSync } from '../lib/sync.js';
 import { fetchPendingLinks, removeRequest } from '../lib/links.js';
 import { removeWork } from '../lib/library.js';
 import { getLastRead } from '../lib/reading.js';
@@ -136,11 +136,19 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   const doSync = async () => {
     if (syncing) return;
     setSyncing(true);
-    showToast('Starting sync…');
-    const res = await triggerSync();
+    showToast('Syncing…', 'solar:refresh-circle-bold');
+    // Quick saves-only run, watched to completion so the icon keeps spinning until
+    // the worker actually finishes (not a fire-and-forget "started"). Heavy tag
+    // discovery + backfill run on the nightly schedule.
+    const res = await watchSync({
+      savesOnly: true,
+      onPhase: (p) => { if (p === 'fetching') showToast('Fetching…', 'solar:refresh-circle-bold'); },
+    });
     setSyncing(false);
-    onReload?.();
-    showToast(res.ok ? 'Sync started — new works arrive shortly.' : (res.error || 'Sync failed.'));
+    onReload?.(); reloadLinks();
+    if (res.timedOut) showToast('Still working in the background — pull to refresh shortly.');
+    else if (res.ok) showToast('Synced — you’re up to date.');
+    else showToast('Sync hit a snag — it’ll retry automatically.', 'solar:danger-triangle-bold');
   };
   const syncAction = { icon: syncing ? 'solar:refresh-circle-bold' : 'solar:refresh-circle-linear', onClick: doSync };
 
