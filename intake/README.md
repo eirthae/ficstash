@@ -13,8 +13,9 @@ the public anon key alone can't read or write anything. Bookmark it, or "Install
 ## What it does
 - **Links** — one box per link; paste a whole list and it splits into rows.
   "Fetch" queues them in `requested_urls`; the worker downloads on its next run.
-- **Files** — pick/drag multiple **EPUB**/**TXT**; parsed in the browser (incl.
-  series metadata) and inserted as offline works → appear in the app's Books
+- **Files** — pick/drag multiple **EPUB**/**PDF**/**TXT**; parsed in the browser
+  (EPUB incl. series metadata; PDF text-layer only — scanned/image PDFs have no
+  text to extract) and inserted as offline works → appear in the app's Books
   shelf, auto-grouped.
 
 ## Hosting notes

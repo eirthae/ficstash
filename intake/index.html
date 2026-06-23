@@ -23,6 +23,7 @@
   <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
   <style>
     :root {
       --surface:#0c0c0e; --content1:#19191c; --content2:#252529; --content3:#34343a;
@@ -88,13 +89,21 @@ function Icon({ icon, size = 18, color, style }) {
 }
 
 // ===== file helpers (ported from the app's EPUB/TXT upload parser) ========
-const ACCEPT = ['epub', 'txt'];
+const ACCEPT = ['epub', 'pdf', 'txt'];
 const extOf = (n) => (n.split('.').pop() || '').toLowerCase();
 const fmtSize = (b) => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
 const FILE_META = {
   epub: { icon: 'solar:book-2-bold', tint: '147,83,211', label: 'EPUB' },
+  pdf:  { icon: 'solar:file-text-bold', tint: '243,18,96', label: 'PDF' },
   txt:  { icon: 'solar:document-text-bold', tint: '0,111,238', label: 'TXT' },
 };
+
+// pdf.js runs its parser in a Web Worker; point it at the matching CDN build
+// once. Loaded via the <script> tag in <head> (global `pdfjsLib`).
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js';
+}
 const countWords = (html) => (String(html).replace(/<[^>]+>/g, ' ').match(/\S+/g) || []).length;
 const titleFromFilename = (name) => name.replace(/\.[^.]+$/, '').replace(/[._]+/g, ' ').trim() || 'Untitled';
 
@@ -168,6 +177,86 @@ async function parseTxt(file) {
     chapters: [{ n: 1, title, content: html, words: countWords(html) }] };
 }
 
+// Extract a PDF's text in the browser with pdf.js and store it as a one-chapter
+// offline work — same shape as the TXT path. Text-layer only: a scanned PDF
+// (images, no embedded text) yields nothing and gets a clear error, since there
+// is no OCR here. Joins each page's lines into paragraphs, mends words split by
+// a line-wrap hyphen, and uses the PDF's own Title/Author metadata when present.
+async function parsePdf(file) {
+  const lib = window.pdfjsLib;
+  if (!lib) throw new Error('PDF reader didn’t load — check your connection and retry.');
+  let pdf;
+  try {
+    const data = new Uint8Array(await file.arrayBuffer());
+    pdf = await lib.getDocument({ data }).promise;
+  } catch (e) {
+    throw new Error('Could not open this PDF — it may be corrupt or password-protected.');
+  }
+  // PDFs store positioned glyphs, not paragraphs, so collect each line with its
+  // page + position (x = left edge, y = baseline) and recover paragraph breaks
+  // from layout below: a wider-than-usual vertical gap, or an indented first
+  // line — the two ways prose PDFs actually separate paragraphs.
+  const lines = []; // { text, x, y, page }
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    let text = '', x = null, y = null;
+    for (const it of tc.items) {
+      if (x === null) { x = it.transform[4]; y = it.transform[5]; }
+      text += it.str;
+      if (it.hasEOL) {
+        if (text.trim()) lines.push({ text: text.trim(), x, y, page: p });
+        text = ''; x = null; y = null;
+      }
+    }
+    if (text.trim()) lines.push({ text: text.trim(), x, y, page: p });
+  }
+  if (!lines.length) {
+    throw new Error('No readable text in this PDF — it may be scanned images (no text to extract).');
+  }
+  // Same-page line-to-line vertical drops, plus the left margin (see below).
+  const gaps = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].page === lines[i - 1].page) {
+      const g = lines[i - 1].y - lines[i].y;
+      if (g > 0) gaps.push(g);
+    }
+  }
+  // Base line spacing = a LOW percentile of the gaps, not the median: paragraph
+  // gaps are larger and, when paragraphs are short, would drag a median up so far
+  // that real paragraph breaks never clear the threshold. The 25th percentile
+  // tracks the tight intra-paragraph spacing instead.
+  gaps.sort((a, b) => a - b);
+  const lineGap = gaps.length ? gaps[Math.floor(gaps.length * 0.25)] : 0;
+  const margin = Math.min.apply(null, lines.map(l => l.x));
+  // Assemble paragraphs, mending words split by a line-wrap hyphen.
+  const paras = [];
+  let cur = '';
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    if (!cur) { cur = ln.text; continue; }
+    let brk = false;
+    const samePage = ln.page === lines[i - 1].page;
+    if (samePage && lineGap && (lines[i - 1].y - ln.y) > lineGap * 1.4) brk = true; // extra vertical space
+    if (!brk && ln.x > margin + 4) brk = true;                                       // indented first line
+    if (brk) { paras.push(cur); cur = ln.text; }
+    else if (/\w-$/.test(cur)) { cur = cur.slice(0, -1) + ln.text; }                  // exam-\nple → example
+    else { cur += ' ' + ln.text; }
+  }
+  if (cur) paras.push(cur);
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const html = paras.map(p => `<p>${esc(p)}</p>`).join('\n');
+  let docTitle = '', docAuthor = '';
+  try {
+    const md = await pdf.getMetadata();
+    docTitle = (md && md.info && md.info.Title || '').trim();
+    docAuthor = (md && md.info && md.info.Author || '').trim();
+  } catch (e) { /* metadata is optional */ }
+  const title = docTitle || titleFromFilename(file.name);
+  return { title, author: docAuthor, summary: '', series: '', seriesIndex: null,
+    chapters: [{ n: 1, title, content: html, words: countWords(html) }] };
+}
+
 // Parse + insert one file as a fully-offline uploaded work (matches the app).
 async function uploadFile(file) {
   // OneDrive / Google Drive "online-only" files hand over an empty placeholder
@@ -176,7 +265,9 @@ async function uploadFile(file) {
     throw new Error('Empty file — likely a cloud-only file. Make it available offline, then retry.');
   }
   const ext = extOf(file.name);
-  const parsed = ext === 'epub' ? await parseEpub(file) : await parseTxt(file);
+  const parsed = ext === 'epub' ? await parseEpub(file)
+    : ext === 'pdf' ? await parsePdf(file)
+    : await parseTxt(file);
   const totalWords = parsed.chapters.reduce((s, c) => s + (c.words || 0), 0);
   const now = new Date().toISOString();
   const workRow = {
@@ -369,7 +460,7 @@ function FilesPanel({ onFetch, busy }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
         <div>
           <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-.01em' }}>Bring your own files</div>
-          <div style={{ fontSize: 14, color: 'var(--fg-2)', marginTop: 3 }}>Drag a pile in, or pick them - EPUB &amp; TXT welcome.</div>
+          <div style={{ fontSize: 14, color: 'var(--fg-2)', marginTop: 3 }}>Drag a pile in, or pick them - EPUB, PDF &amp; TXT welcome.</div>
         </div>
         <span style={chipStyle('var(--blue)')}><Icon icon="solar:cloud-upload-bold" size={14} />{files.length} queued</span>
       </div>
@@ -388,7 +479,7 @@ function FilesPanel({ onFetch, busy }) {
             <span key={x} style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '.04em', padding: '3px 8px', borderRadius: 999, background: `rgba(${FILE_META[x].tint},.18)`, color: `rgb(${FILE_META[x].tint})`, textTransform: 'uppercase' }}>.{x}</span>
           ))}
         </div>
-        <input ref={inputRef} type="file" multiple accept=".epub,.txt" style={{ display: 'none' }} onChange={e => { add(e.target.files); e.target.value = ''; }} />
+        <input ref={inputRef} type="file" multiple accept=".epub,.pdf,.txt" style={{ display: 'none' }} onChange={e => { add(e.target.files); e.target.value = ''; }} />
       </div>
       {files.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto', paddingRight: 4 }}>
