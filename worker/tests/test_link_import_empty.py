@@ -40,14 +40,16 @@ class HandleEmptyAo3LinkTests(unittest.TestCase):
     def tearDown(self):
         main.mark_request = self._orig
 
-    def test_restricted_work_is_a_terminal_error(self):
+    def test_restricted_work_is_terminal(self):
         ao3 = FakeAO3(restricted=True)
         terminal = main._handle_empty_ao3_link(db=object(), rid="r1", ao3=ao3, wid="123")
         self.assertTrue(terminal)
         self.assertEqual(len(self.calls), 1)
         rid, fields = self.calls[0]
         self.assertEqual(rid, "r1")
-        self.assertEqual(fields.get("status"), "error")
+        # Terminal, members-only: marked 'restricted' (excluded from retries), not
+        # a generic 'error', so the app shows the "read on AO3" state.
+        self.assertEqual(fields.get("status"), "restricted")
         self.assertIn("AO3", fields.get("error", ""))
 
     def test_transient_empty_is_requeued_not_deleted(self):

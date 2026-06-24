@@ -170,8 +170,14 @@ class AO3Source(Source):
 
         Returns the logged-in username as an opaque token. The password is used
         only to mint the session and is never stored.
+
+        Set the `view_adult` cookie here too: a logged-in session does NOT get it
+        from _require_session() (that only runs for the guest path it creates), so
+        without this every Explicit/Mature work hit AO3's "proceed?" interstitial,
+        parsed as zero chapters, and left a saved work stuck "downloading" forever.
         """
         self._session = AO3.Session(username, password)
+        _enable_adult_view(self._session)
         return getattr(self._session, "username", username)
 
     def _require_session(self) -> "AO3.Session":
