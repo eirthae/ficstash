@@ -330,6 +330,68 @@ def _parse_ts(value) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def run_ao3_series_pass(db, ao3, space, backoff) -> None:
+    """Download works for followed / "download all" AO3 series (capped per run).
+
+    Runs in the FAST saves-only lane too — not just the nightly full sweep — so a
+    "Download all works" tap starts fetching now, like a Save does. Rows in
+    followed_series are "download all" (follow=false, one-shot) or "follow"
+    (follow=true, kept). Enumerates each series from AO3's public index, downloads
+    any work not already offline (tagging it with its series + part), and drops a
+    one-shot row once it's fully pulled.
+    """
+    print("\n== AO3 series ==")
+    followed = fetch_followed_series(db)
+    print(f"{len(followed)} followed/requested series.")
+    if not followed:
+        return
+    offline_ids = fetch_offline_ao3_ids(db)
+    series_cap = _series_max()
+    for srow in followed:
+        sid = (srow.get("series_id") or "").strip()
+        if not sid:
+            continue
+        sname = srow.get("series_name") or ""
+        try:
+            space()
+            works = backoff(lambda: ao3.series_works(sid), what=f"series {sid}", broad=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"    series {sid} skipped ({type(exc).__name__}: {exc})")
+            continue
+        got = 0
+        hit_cap = False
+        for index, (wid, _t) in enumerate(works, start=1):
+            if wid in offline_ids:
+                # Already downloaded — make sure it's tagged with this series.
+                try:
+                    set_work_series(db, wid, sid, sname, float(index))
+                except Exception:  # noqa: BLE001
+                    pass
+                continue
+            if got >= series_cap:
+                hit_cap = True
+                break
+            try:
+                meta, chapters = fetch_work_chapters(ao3, wid, space=space, backoff=backoff)
+                if not chapters:  # restricted/gated — skip, don't loop forever
+                    continue
+                meta.series_id = sid
+                meta.series_name = sname or meta.series_name
+                meta.series_index = float(index)
+                work_uuid = upsert_work(db, meta, origin="series")
+                upsert_chapters(db, work_uuid, chapters)
+                mark_flag(db, [wid], "offline")
+                offline_ids.add(wid)
+                got += 1
+            except Exception as exc:  # noqa: BLE001
+                print(f"    series work {wid} skipped ({type(exc).__name__}: {exc})")
+        mark_series_checked(db, sid, name=sname, count=len(works))
+        print(f"    series {sid} '{sname}': +{got} work(s) of {len(works)} total{' (more next run)' if hit_cap else ''}.")
+        # A one-shot "download all" drops out once everything's pulled.
+        if not srow.get("follow") and not hit_cap:
+            delete_series_follow(db, sid)
+
+
 def main() -> None:
     load_dotenv()  # picks up worker/.env locally; no-op in CI where vars are set
     check_env()
@@ -565,10 +627,17 @@ def main() -> None:
             print(f"    requested {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Requested saves: {saved_count} saved, {save_failed} failed.")
 
-    # Fast path: the app asked for a real-time Save — links + saves are done, so
-    # stop here instead of running the slow full sweep (repair/discovery/refresh).
+    # ---- AO3 series → 'follow' / 'download all' series works ----------------
+    # Part of the FAST lane: a "Download all works" tap should start fetching now,
+    # like a Save — so this runs before the saves-only early-return below (and
+    # therefore in saves-only runs too), not buried at the end of the full sweep.
+    run_ao3_series_pass(db, ao3, space, _with_backoff)
+
+    # Fast path: the app asked for a real-time Save — links, saves + series are
+    # done, so stop here instead of running the slow full sweep (repair/
+    # discovery/refresh/new-chapter checks), which the nightly schedule handles.
     if _saves_only():
-        print("\n== Saves-only run: skipping repair/discovery/refresh. Done. ==")
+        print("\n== Saves-only run: links, saves + series done; skipping discovery/refresh. ==")
         return
 
     # ---- Pass 3: repair works with blank metadata --------------------------
@@ -984,65 +1053,8 @@ def main() -> None:
             print(f"    refresh {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
     print(f"Refresh ongoing: {rc_updated} updated, {rc_same} unchanged, {rc_failed} failed.")
 
-    # ---- Pass 8: AO3 series → download all works + follow for new ones ------
-    # `followed_series` rows come from the app: "Download all works in this
-    # series" (follow=false, one-shot) and "Follow series" (follow=true, kept).
-    # We enumerate each series from AO3's public index and download any work not
-    # already offline (capped per run), tagging every work with its series + part
-    # so the library auto-groups it. One-shot rows are dropped once fully pulled.
-    print("\n== AO3 series ==")
-    followed = fetch_followed_series(db)
-    print(f"{len(followed)} followed/requested series.")
-    if followed:
-        offline_ids = fetch_offline_ao3_ids(db)
-        series_cap = _series_max()
-        for srow in followed:
-            sid = (srow.get("series_id") or "").strip()
-            if not sid:
-                continue
-            sname = srow.get("series_name") or ""
-            try:
-                space()
-                works = _with_backoff(
-                    lambda: ao3.series_works(sid), what=f"series {sid}", broad=True
-                )
-            except Exception as exc:  # noqa: BLE001
-                print(f"    series {sid} skipped ({type(exc).__name__}: {exc})")
-                continue
-            got = 0
-            hit_cap = False
-            for index, (wid, _t) in enumerate(works, start=1):
-                if wid in offline_ids:
-                    # Already downloaded — make sure it's tagged with this series.
-                    try:
-                        set_work_series(db, wid, sid, sname, float(index))
-                    except Exception:  # noqa: BLE001
-                        pass
-                    continue
-                if got >= series_cap:
-                    hit_cap = True
-                    break
-                try:
-                    meta, chapters = fetch_work_chapters(
-                        ao3, wid, space=space, backoff=_with_backoff
-                    )
-                    if not chapters:  # restricted/gated — skip, don't loop forever
-                        continue
-                    meta.series_id = sid
-                    meta.series_name = sname or meta.series_name
-                    meta.series_index = float(index)
-                    work_uuid = upsert_work(db, meta, origin="series")
-                    upsert_chapters(db, work_uuid, chapters)
-                    mark_flag(db, [wid], "offline")
-                    offline_ids.add(wid)
-                    got += 1
-                except Exception as exc:  # noqa: BLE001
-                    print(f"    series work {wid} skipped ({type(exc).__name__}: {exc})")
-            mark_series_checked(db, sid, name=sname, count=len(works))
-            print(f"    series {sid} '{sname}': +{got} work(s) of {len(works)} total{' (more next run)' if hit_cap else ''}.")
-            # A one-shot "download all" drops out once everything's pulled.
-            if not srow.get("follow") and not hit_cap:
-                delete_series_follow(db, sid)
+    # (AO3 series download now runs early — see run_ao3_series_pass, before the
+    # saves-only return — so it's part of the fast lane, not the full sweep tail.)
 
     # ---- What's New retention: keep the feed to the last N days -----------------
     # Everything stays in the LIBRARY; this only declutters What's New. New-chapter

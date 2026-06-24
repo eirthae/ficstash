@@ -57,7 +57,7 @@ export async function setSeriesFollow(seriesId, seriesName, follow) {
       .from('followed_series')
       .upsert({ series_id: String(seriesId), series_name: seriesName, follow: true }, { onConflict: 'series_id' });
     if (error) return { ok: false, error: error.message || String(error) };
-    triggerSync().catch(() => {});
+    triggerSync({ savesOnly: true }).catch(() => {}); // series runs in the fast lane now
     return { ok: true, follow: true };
   }
   // Unfollow: keep a one-shot download in flight if works are still pending, but

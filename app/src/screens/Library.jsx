@@ -133,24 +133,20 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
     else { showToast(res.error || 'Could not remove.', 'solar:danger-triangle-bold'); reloadLinks(); }
   };
 
+  // Pull-to-refresh runs the FAST lane only: download the works you saved from
+  // Discover + any series you asked to download — no new-chapter checks, no new
+  // discovery (those run on the nightly schedule). Watched to completion so the
+  // pull-to-refresh spinner holds until the worker actually finishes.
   const doSync = async () => {
     if (syncing) return;
     setSyncing(true);
-    showToast('Syncing…', 'solar:refresh-circle-bold');
-    // Quick saves-only run, watched to completion so the icon keeps spinning until
-    // the worker actually finishes (not a fire-and-forget "started"). Heavy tag
-    // discovery + backfill run on the nightly schedule.
-    const res = await watchSync({
-      savesOnly: true,
-      onPhase: (p) => { if (p === 'fetching') showToast('Fetching…', 'solar:refresh-circle-bold'); },
-    });
+    const res = await watchSync({ savesOnly: true });
     setSyncing(false);
     onReload?.(); reloadLinks();
-    if (res.timedOut) showToast('Still working in the background — pull to refresh shortly.');
-    else if (res.ok) showToast('Synced — you’re up to date.');
+    if (res.ok && !res.timedOut) showToast('Up to date — saved works fetched.');
+    else if (res.timedOut) showToast('Still fetching in the background — pull again shortly.');
     else showToast('Sync hit a snag — it’ll retry automatically.', 'solar:danger-triangle-bold');
   };
-  const syncAction = { icon: syncing ? 'solar:refresh-circle-bold' : 'solar:refresh-circle-linear', onClick: doSync };
 
   // "Remove from library" with a confirm step (no more accidental swipe deletes).
   const confirmDelete = async () => {
@@ -283,7 +279,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
 
   return (
     <div className="screen">
-      <Appbar large title="Library" actions={[syncAction]} />
+      <Appbar large title="Library" />
       {toast}
       <PullToRefresh onRefresh={doSync}>
         <div className="seg src-seg" style={{ margin: '0 20px 14px' }}>
