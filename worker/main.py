@@ -70,6 +70,7 @@ from ficstash_worker.supabase_io import (
     fetch_all_offline_works,
     fetch_followed_series,
     fetch_non_offline_works,
+    fetch_stale_offline_works,
     fetch_discovery_prefs,
     fetch_offline_ao3_ids,
     fetch_ongoing_offline_works,
@@ -301,6 +302,19 @@ def _full_refresh_max() -> int | None:
         return max(1, int(raw))
     except ValueError:
         return None
+
+
+def _repair_stale_max() -> int | None:
+    """Max stale 'downloaded-but-empty' works to re-fetch per fast-lane run."""
+    raw = os.environ.get("REPAIR_STALE_MAX", "").strip()
+    if not raw:
+        return 25
+    if raw.lower() in ("0", "all", "none"):
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 25
 
 
 def _series_max() -> int:
@@ -633,11 +647,68 @@ def main() -> None:
     # therefore in saves-only runs too), not buried at the end of the full sweep.
     run_ao3_series_pass(db, ao3, space, _with_backoff)
 
-    # Fast path: the app asked for a real-time Save — links, saves + series are
-    # done, so stop here instead of running the slow full sweep (repair/
-    # discovery/refresh/new-chapter checks), which the nightly schedule handles.
+    # ---- Repair stale "downloaded but empty" works -------------------------
+    # A saved work can get flagged offline before its chapter bodies actually land
+    # (a throttled / partial fetch), so the app shows it "ready to read" with
+    # nothing inside. Re-fetch those here — in the FAST lane — so a pull-to-refresh
+    # heals them; capped to stay quick. Anything still empty afterward is flipped
+    # back to offline=false so it stops lying and the nightly backfill retries it.
+    print("\n== Repair stale downloads ==")
+    rs_done = rs_failed = 0
+    try:
+        stale = fetch_stale_offline_works(db, limit=_repair_stale_max())
+        print(f"{len(stale)} stale 'downloaded-but-empty' work(s) to re-fetch.")
+        for w in stale:
+            src_id = w["source"]
+            wid = w["source_work_id"]
+            if wid in have_offline:
+                continue
+            try:
+                if src_id == "ao3":
+                    meta, chapters = fetch_work_chapters(ao3, wid, space=space, backoff=_with_backoff)
+                else:
+                    url = w.get("source_url") or ""
+                    if not url:
+                        try:
+                            url = get_source(src_id).work_url(wid)
+                        except Exception:  # noqa: BLE001
+                            url = ""
+                    if not url:
+                        rs_failed += 1
+                        continue
+                    linker = get_linker()
+                    space()
+                    meta, chap_list = linker.prepare(url)
+                    chapters = []
+                    for i, ch in enumerate(chap_list):
+                        space()
+                        chapters.append(linker.fetch_chapter(url, i, ch))
+                work_uuid = upsert_work(db, meta)  # keep origin
+                written = upsert_chapters(db, work_uuid, chapters)
+                if written:
+                    mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
+                    have_offline.add(wid)
+                    rs_done += 1
+                    print(f"    repaired {src_id}:{wid} — {written} chapter(s).")
+                else:
+                    rs_failed += 1
+                    print(f"    {src_id}:{wid} still empty — leaving for retry.")
+            except Exception as exc:  # noqa: BLE001
+                rs_failed += 1
+                print(f"    repair {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
+        if rs_failed:
+            # Flip any still-empty offline works back to offline=false (honest
+            # state), so they stop showing "ready to read" and get retried.
+            reset_empty_offline(db)
+    except Exception as exc:  # noqa: BLE001 — never let the repair crash the run
+        print(f"Repair stale skipped ({type(exc).__name__}: {exc})")
+    print(f"Repair stale: {rs_done} re-fetched, {rs_failed} still empty.")
+
+    # Fast path: the app asked for a real-time Save — links, saves, series + a
+    # stale-download repair are done, so stop here instead of running the slow
+    # full sweep (discovery/backfill/refresh), which the nightly schedule handles.
     if _saves_only():
-        print("\n== Saves-only run: links, saves + series done; skipping discovery/refresh. ==")
+        print("\n== Saves-only run: links, saves, series + repair done; skipping discovery/refresh. ==")
         return
 
     # ---- Pass 3: repair works with blank metadata --------------------------

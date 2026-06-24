@@ -598,7 +598,58 @@ def upsert_chapters(client: Client, work_id: str, chapters: list[Chapter]) -> in
         size += clen
     if batch:
         client.table("chapters").upsert(batch, on_conflict="work_id,n").execute()
-    return len(rows)
+    # Count only chapters that actually carry text. Callers gate "mark offline"
+    # on this, so a work whose bodies came back empty (a throttled / gated fetch)
+    # is NOT flagged downloaded — it would otherwise show "ready to read" with
+    # nothing inside and never get retried.
+    return sum(1 for r in rows if (r["content"] or "").strip())
+
+
+def fetch_stale_offline_works(
+    client: Client, limit: int | None = None
+) -> list[dict]:
+    """Works flagged offline=true but with NO fetched chapter text — marked
+    "downloaded" while actually empty (a failed / partial fetch). The app shows
+    these as "ready to read" though they hold nothing, so the fast lane re-fetches
+    them. Returns [{source, source_work_id, source_url}] across every source.
+    """
+    flagged = (
+        client.table("works")
+        .select("id,source,source_work_id,source_url")
+        .eq("offline", True)
+        .eq("hidden", False)
+        .execute()
+        .data
+        or []
+    )
+    if not flagged:
+        return []
+    ids = [w["id"] for w in flagged]
+    chunk = 100
+    have_text: set[str] = set()
+    for i in range(0, len(ids), chunk):
+        batch = ids[i : i + chunk]
+        rows = (
+            client.table("chapters")
+            .select("work_id")
+            .in_("work_id", batch)
+            .eq("fetched", True)
+            .execute()
+            .data
+            or []
+        )
+        for r in rows:
+            have_text.add(r["work_id"])
+    stale = [
+        {
+            "source": w.get("source") or "ao3",
+            "source_work_id": w.get("source_work_id"),
+            "source_url": w.get("source_url"),
+        }
+        for w in flagged
+        if w["id"] not in have_text and w.get("source_work_id")
+    ]
+    return stale[:limit] if limit else stale
 
 
 # ---- AO3 series (follow / download-all queue) ------------------------------
