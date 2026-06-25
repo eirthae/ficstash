@@ -85,6 +85,7 @@ from ficstash_worker.supabase_io import (
     mark_matches_saved,
     mark_request,
     mark_series_checked,
+    prune_chapter_updates,
     record_chapter_updates,
     reset_empty_offline,
     set_work_series,
@@ -119,6 +120,11 @@ DEFAULT_REFRESH_ONGOING_MAX = None
 # How many days an item stays in What's New before it ages out (it remains in the
 # library either way). Override with WHATS_NEW_DAYS.
 DEFAULT_WHATS_NEW_DAYS = 5
+# A "new chapter" notice is only surfaced for a genuine incremental update. A jump
+# larger than this (or any jump up from a zero/blank stored count) is a first
+# download or a corrected count — not real updates — so we store the chapters but
+# don't flood What's New with a work's whole backlog.
+NEW_CHAPTER_BURST = 5
 
 
 def check_env() -> None:
@@ -704,6 +710,18 @@ def main() -> None:
         print(f"Repair stale skipped ({type(exc).__name__}: {exc})")
     print(f"Repair stale: {rs_done} re-fetched, {rs_failed} still empty.")
 
+    # Tidy the What's New "new chapters" feed: drop notices for completed works
+    # and collapse any multi-chapter flood down to the newest per work (a corrected
+    # chapter count once made the refresh pass record a whole backlog as 'new').
+    # Cheap + DB-only, so it runs in the fast lane too — a pull-to-refresh cleans
+    # the feed without waiting for the nightly sweep.
+    try:
+        pruned = prune_chapter_updates(db)
+        if pruned:
+            print(f"Tidied What's New: removed {pruned} stale/excess chapter notice(s).")
+    except Exception as exc:  # noqa: BLE001 — feed tidy is best-effort
+        print(f"What's New tidy skipped ({type(exc).__name__}: {exc})")
+
     # Fast path: the app asked for a real-time Save — links, saves, series + a
     # stale-download repair are done, so stop here instead of running the slow
     # full sweep (discovery/backfill/refresh), which the nightly schedule handles.
@@ -1084,7 +1102,12 @@ def main() -> None:
                             )
                         )
                     written = upsert_chapters(db, work_uuid, new_chs)
-                    record_chapter_updates(db, work_uuid, "ao3", wid, new_chs)
+                    # Surface ONLY a genuine small update, and just the newest
+                    # chapter (What's New shows the latest, not a backlog). A jump
+                    # up from a zero/blank stored count, or a big leap, is a first
+                    # download / corrected count — store it, but don't flood.
+                    if stored > 0 and (new_total - stored) <= NEW_CHAPTER_BURST:
+                        record_chapter_updates(db, work_uuid, "ao3", wid, new_chs[-1:])
                     rc_updated += 1
                     print(f"    {wid}: +{written} new chapter(s) (now {new_total}).")
                 else:
@@ -1114,7 +1137,8 @@ def main() -> None:
                         space()
                         new_chs.append(refresh_linker.fetch_chapter(url, i, chap_list[i]))
                     written = upsert_chapters(db, work_uuid, new_chs)
-                    record_chapter_updates(db, work_uuid, meta.source, meta.source_work_id, new_chs)
+                    if stored > 0 and (new_total - stored) <= NEW_CHAPTER_BURST:
+                        record_chapter_updates(db, work_uuid, meta.source, meta.source_work_id, new_chs[-1:])
                     rc_updated += 1
                     print(f"    {src_id}:{wid}: +{written} new chapter(s) (now {new_total}).")
                 else:

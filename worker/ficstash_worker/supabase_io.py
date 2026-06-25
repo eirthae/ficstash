@@ -695,6 +695,56 @@ def expire_chapter_updates(client: Client, *, older_than_days: int = 5) -> int:
     return len(resp.data or [])
 
 
+def chapter_updates_to_prune(rows: list[dict], complete_ids: set) -> list:
+    """Pure: which chapter_updates ids to delete so the feed keeps only the newest
+    chapter notice per still-updating work. `rows` are [{id, work_id, chapter_n}];
+    `complete_ids` is the set of work ids that are complete. Drops every notice for
+    a completed work (the feed is for ongoing works) and collapses multiple notices
+    for one work down to its highest chapter_n. Unit-tested without a DB."""
+    newest: dict = {}
+    for r in rows:
+        wid = r.get("work_id")
+        n = int(r.get("chapter_n") or 0)
+        if wid is not None and n > newest.get(wid, -1):
+            newest[wid] = n
+    out = []
+    for r in rows:
+        wid = r.get("work_id")
+        n = int(r.get("chapter_n") or 0)
+        if wid in complete_ids or n != newest.get(wid):
+            out.append(r.get("id"))
+    return [i for i in out if i is not None]
+
+
+def prune_chapter_updates(client: Client) -> int:
+    """Keep the new-chapter feed to ONE notice (the newest chapter) per ONGOING
+    work. Drops notices for completed works (the feed is for still-updating works)
+    and collapses multi-chapter floods — a corrected chapter count once made the
+    refresh pass record a whole work's backlog as 'new'. DB-only; idempotent;
+    chapter text stays in `chapters`. Returns the number of notices removed."""
+    rows = (
+        client.table("chapter_updates").select("id,work_id,chapter_n").execute().data
+        or []
+    )
+    if not rows:
+        return 0
+    work_ids = list({r["work_id"] for r in rows if r.get("work_id")})
+    complete: set = set()
+    for i in range(0, len(work_ids), 100):
+        batch = work_ids[i : i + 100]
+        wr = (
+            client.table("works").select("id,status").in_("id", batch).execute().data
+            or []
+        )
+        for w in wr:
+            if (w.get("status") or "").strip().lower() == "complete":
+                complete.add(w["id"])
+    ids = chapter_updates_to_prune(rows, complete)
+    for i in range(0, len(ids), 100):
+        client.table("chapter_updates").delete().in_("id", ids[i : i + 100]).execute()
+    return len(ids)
+
+
 def age_out_saved_matches(client: Client, *, older_than_days: int = 5) -> int:
     """Age recently-added works out of the 'New works' feed after the window by
     flipping origin -> 'bookmark'. Covers every lane the user can add a work
