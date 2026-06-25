@@ -72,6 +72,17 @@ class FetchWorkChaptersTests(unittest.TestCase):
         self.assertTrue(any("metadata" in w for w in wrapped))
         self.assertTrue(any("chapter 1" in w for w in wrapped))
 
+    def test_full_work_source_does_not_space_per_chapter(self):
+        # AO3 returns every chapter in the one metadata request, so a source that
+        # advertises fetches_full_work must NOT sleep between chapter reads — only
+        # the single metadata pause. (Was 1 + N; this is what made saves crawl.)
+        src = FakeSource(20)
+        src.fetches_full_work = True
+        pauses = []
+        fetch_work_chapters(src, "1", space=lambda: pauses.append(1))
+        self.assertEqual(len(pauses), 1)
+        self.assertEqual(len(src.chapter_args), 20)  # still reads all chapters
+
     def test_meta_missing_chapter_count_is_treated_as_zero(self):
         src = FakeSource(None)  # chapters=None (defensive)
         _, chapters = fetch_work_chapters(src, "1")

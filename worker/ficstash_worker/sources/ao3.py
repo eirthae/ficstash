@@ -123,6 +123,13 @@ def _enable_adult_view(session) -> None:
 
 class AO3Source(Source):
     id = "ao3"
+    # AO3 returns the WHOLE work (every chapter's text) in the single metadata
+    # request (view_full_work=true); load_chapters() then splits that cached page
+    # with no further HTTP. So per-chapter fetches are free — callers must NOT
+    # space between them (that was sleeping 6s per chapter for zero requests,
+    # turning a 20-chapter save into ~2 min of pure waiting). The FanFicFare link
+    # path leaves this False, since it really does fetch each chapter separately.
+    fetches_full_work = True
     # AO3's public pages give us tag/language search, full downloads, ongoing-work
     # re-checks, and canonical links. No tag autocomplete yet (the app types tags
     # freehand and AO3's own search canonicalizes them).

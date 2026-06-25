@@ -33,9 +33,15 @@ def fetch_work_chapters(source, source_work_id, *, space=None, backoff=None):
                    what=f"metadata {source_work_id}")
 
     n_chapters = int(getattr(meta, "chapters", 0) or 0)
+    # AO3 already downloaded every chapter inside the metadata request (the whole
+    # work view), so reading each chapter is a free, cached parse — spacing between
+    # them just sleeps 6s per chapter for zero requests. Only space per chapter for
+    # sources that genuinely fetch each one separately (the FanFicFare link path).
+    space_per_chapter = not getattr(source, "fetches_full_work", False)
     chapters = []
     for n in range(1, n_chapters + 1):
-        space()
+        if space_per_chapter:
+            space()
         chapters.append(
             backoff(lambda n=n: source.fetch_chapter(source_work_id, n),
                     what=f"chapter {n} of {source_work_id}")

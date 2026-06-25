@@ -987,7 +987,9 @@ def main() -> None:
             work_uuid = upsert_work(db, meta)
             chapters = []
             for n in range(1, meta.chapters + 1):
-                space()
+                # AO3 already returned every chapter in the metadata fetch (whole-
+                # work view) — fetch_chapter is a free cached read, so no per-chapter
+                # spacing (it was sleeping 6s per chapter for zero requests).
                 chapters.append(
                     _with_backoff(
                         lambda n=n: ao3.fetch_chapter(wid, n),
@@ -1048,7 +1050,9 @@ def main() -> None:
             work_uuid = upsert_work(db, meta)
             chapters = []
             for n in range(1, meta.chapters + 1):
-                space()
+                # AO3 already returned every chapter in the metadata fetch (whole-
+                # work view) — fetch_chapter is a free cached read, so no per-chapter
+                # spacing (it was sleeping 6s per chapter for zero requests).
                 chapters.append(
                     _with_backoff(
                         lambda n=n: ao3.fetch_chapter(wid, n),
@@ -1102,7 +1106,8 @@ def main() -> None:
                 if new_total > stored:
                     new_chs = []
                     for n in range(stored + 1, new_total + 1):
-                        space()
+                        # AO3 whole-work view: chapters already in hand, no per-
+                        # chapter request → no spacing.
                         new_chs.append(
                             _with_backoff(
                                 lambda n=n: ao3.fetch_chapter(wid, n),
