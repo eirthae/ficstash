@@ -35,21 +35,21 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Safety net: a healthy run finishes in a few minutes (saves-only) to under an
-    # hour (a heavy nightly full sweep). Cap it so a run wedged by AO3 throttling /
-    # a hung request fails fast instead of hanging up to GitHub's 6-hour default
-    # (which showed up as 40–100-minute "failures" and a 59-minute cancel).
-    timeout-minutes: 75
+    # Safety net so a genuinely wedged run can't hang to GitHub's 6-hour default,
+    # but generous enough that a heavy nightly full sweep (discovery + backfill of
+    # a big library) always finishes — a too-tight cap was cancelling the sweep
+    # mid-discovery, leaving some tracked tags empty. A healthy run is now minutes.
+    timeout-minutes: 180
     defaults:
       run:
         working-directory: worker
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip

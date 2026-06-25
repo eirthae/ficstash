@@ -332,16 +332,50 @@ def fetch_tracked_groups(client: Client) -> list[dict]:
     return list(resp.data or [])
 
 
+def fetch_dismissed_work_ids(client: Client) -> set:
+    """source_work_ids the user dismissed in ANY tracked group. A dismissal is
+    global: a work that also matches another tracked tag shouldn't reappear there
+    once you've swiped it away once."""
+    resp = (
+        client.table("tag_matches").select("source_work_id").eq("dismissed", True).execute()
+    )
+    return {r["source_work_id"] for r in (resp.data or []) if r.get("source_work_id")}
+
+
+def propagate_dismissals(client: Client) -> int:
+    """Spread every dismissal across all tracked groups: a work dismissed in one
+    group is marked dismissed in its rows under every OTHER group too, so it stops
+    appearing in those tags' feeds. DB-only, idempotent. Returns rows newly hidden."""
+    ids = list(fetch_dismissed_work_ids(client))
+    if not ids:
+        return 0
+    total = 0
+    for i in range(0, len(ids), 200):
+        batch = ids[i : i + 200]
+        resp = (
+            client.table("tag_matches")
+            .update({"dismissed": True, "seen": True})
+            .in_("source_work_id", batch)
+            .eq("dismissed", False)
+            .execute()
+        )
+        total += len(resp.data or [])
+    return total
+
+
 def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> int:
     """Store discovered works for a tracked group.
 
-    Omits `seen`/`first_seen_at`/`dismissed`/`later` so a work already marked
-    seen stays seen, a dismissed work stays hidden, and one set aside for Later
-    stays there across re-runs; brand-new matches default to unseen ("fresh"),
-    not dismissed, and not in the Later stash.
+    Omits `seen`/`first_seen_at`/`later` so a work already marked seen stays seen
+    and one set aside for Later stays there across re-runs; brand-new matches
+    default to unseen ("fresh"). `dismissed` is GLOBAL: a work the user dismissed
+    under any tag is stamped dismissed here too (so it doesn't pop up via another
+    tracked tag), while works not dismissed anywhere keep their per-row state.
     """
-    rows = [
-        {
+    dismissed_ids = fetch_dismissed_work_ids(client)
+    rows = []
+    for m in metas:
+        row = {
             "group_id": group_id,
             "source": m.source,
             "source_work_id": m.source_work_id,
@@ -356,8 +390,9 @@ def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> 
             "source_updated": m.updated,
             "palette": palette_for(m.fandom or m.title),
         }
-        for m in metas
-    ]
+        if m.source_work_id in dismissed_ids:
+            row["dismissed"] = True
+        rows.append(row)
     if not rows:
         return 0
     client.table("tag_matches").upsert(

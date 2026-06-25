@@ -86,6 +86,7 @@ from ficstash_worker.supabase_io import (
     mark_not_offline,
     mark_request,
     mark_series_checked,
+    propagate_dismissals,
     prune_chapter_updates,
     record_chapter_updates,
     reset_empty_offline,
@@ -729,6 +730,15 @@ def main() -> None:
             print(f"Tidied What's New: removed {pruned} stale/excess chapter notice(s).")
     except Exception as exc:  # noqa: BLE001 — feed tidy is best-effort
         print(f"What's New tidy skipped ({type(exc).__name__}: {exc})")
+
+    # A dismissal is global: hide a dismissed work under every OTHER tracked tag
+    # too, so a work that matches several tags doesn't reappear once swiped away.
+    try:
+        spread = propagate_dismissals(db)
+        if spread:
+            print(f"Dismissals: hid {spread} cross-tag duplicate match(es).")
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        print(f"Dismissal propagation skipped ({type(exc).__name__}: {exc})")
 
     # Fast path: the app asked for a real-time Save — links, saves, series + a
     # stale-download repair are done, so stop here instead of running the slow

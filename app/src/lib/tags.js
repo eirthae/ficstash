@@ -273,10 +273,16 @@ export async function markMatchSeen(matchId) {
 // stays gone across reloads and worker re-runs.
 export async function dismissMatch(matchId) {
   if (!hasSupabase) return;
-  const { error } = await supabase
-    .from('tag_matches')
-    .update({ dismissed: true, seen: true })
-    .eq('id', matchId);
+  // A dismissal is GLOBAL: hide this work under every tracked tag, not just this
+  // one — a work that also matches another tag shouldn't reappear there once you
+  // swipe it away. Look up the work, then dismiss all its match rows. (The worker
+  // also propagates this each sync, so older duplicates get cleaned up too.)
+  const { data: row } = await supabase
+    .from('tag_matches').select('source,source_work_id').eq('id', matchId).maybeSingle();
+  const q = supabase.from('tag_matches').update({ dismissed: true, seen: true });
+  const { error } = row?.source_work_id
+    ? await q.eq('source', row.source).eq('source_work_id', row.source_work_id)
+    : await q.eq('id', matchId);
   if (error) throw error;
 }
 
