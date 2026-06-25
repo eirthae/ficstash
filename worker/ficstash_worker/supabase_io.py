@@ -559,6 +559,18 @@ def delete_request(client: Client, request_id: str) -> None:
     client.table("requested_urls").delete().eq("id", request_id).execute()
 
 
+def mark_not_offline(client: Client, source: str, source_work_id: str) -> None:
+    """Flag a work as NOT yet downloaded (offline=false) so the app shows it as
+    'downloading' instead of a blank 'ready to read'. Used when a fetch comes back
+    empty for a work that may already have a (ghost) row from a previous build —
+    harmless when no such row exists (the update matches nothing)."""
+    if not source_work_id:
+        return
+    client.table("works").update({"offline": False}).eq("source", source).eq(
+        "source_work_id", source_work_id
+    ).execute()
+
+
 def mark_request(client: Client, request_id: str, **fields) -> None:
     """Update a link request's progress (status/source/source_work_id/title/error)."""
     payload = {k: v for k, v in fields.items() if v is not None}

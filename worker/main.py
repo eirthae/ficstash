@@ -83,6 +83,7 @@ from ficstash_worker.supabase_io import (
     mark_flag,
     mark_group_checked,
     mark_matches_saved,
+    mark_not_offline,
     mark_request,
     mark_series_checked,
     prune_chapter_updates,
@@ -253,6 +254,17 @@ def _handle_empty_ao3_link(db, rid, ao3, wid) -> bool:
     return False
 
 
+def _has_chapter_text(chapters) -> bool:
+    """True if at least one fetched chapter actually carries body text.
+
+    A gated / throttled / restricted fetch yields chapters with empty bodies (or
+    none at all). We must NOT materialise a work from that: upsert_work would
+    create a titleless row with offline unset, which the app renders as a blank
+    "ready to read" ghost. Only create/flag a work once this is true.
+    """
+    return any((getattr(c, "html", "") or "").strip() for c in (chapters or []))
+
+
 def _reflow_max() -> int | None:
     raw = os.environ.get("REFLOW_MAX", "").strip()
     if not raw:
@@ -393,7 +405,7 @@ def run_ao3_series_pass(db, ao3, space, backoff) -> None:
                 break
             try:
                 meta, chapters = fetch_work_chapters(ao3, wid, space=space, backoff=backoff)
-                if not chapters:  # restricted/gated — skip, don't loop forever
+                if not _has_chapter_text(chapters):  # restricted/gated/empty — skip, no ghost
                     continue
                 meta.series_id = sid
                 meta.series_name = sname or meta.series_name
@@ -500,14 +512,15 @@ def main() -> None:
                     for i, ch in enumerate(chap_list):
                         space()
                         chapters.append(linker.fetch_chapter(url, i, ch))
-                if not chapters:
+                if not _has_chapter_text(chapters):
+                    # No text — do NOT materialise a blank work (that left a
+                    # titleless "ready to read" ghost). AO3's adult gate / a throttle
+                    # routinely parses as zero chapters, so for a REAL AO3 work (a
+                    # made-up id raises InvalidIdError, dropped below) this is usually
+                    # transient: members-only → terminal "read on AO3", otherwise
+                    # re-queue to retry. Un-flag any pre-existing ghost row first.
                     if ao3_id:
-                        # A REAL AO3 work (a made-up id raises InvalidIdError and is
-                        # dropped in the handler below) that returned no text. AO3's
-                        # adult / age gate routinely parses as zero chapters, so this
-                        # is usually transient — never silently delete it. Members-
-                        # only → terminal "read on AO3"; otherwise re-queue so the
-                        # next sync retries, exactly like the saves pass does.
+                        mark_not_offline(db, "ao3", wid)
                         if _handle_empty_ao3_link(db, rid, ao3, wid):
                             link_failed += 1
                         else:
@@ -521,17 +534,6 @@ def main() -> None:
                     continue
                 work_uuid = upsert_work(db, meta, origin="link")
                 written = upsert_chapters(db, work_uuid, chapters)
-                if not written:
-                    if ao3_id:
-                        if _handle_empty_ao3_link(db, rid, ao3, wid):
-                            link_failed += 1
-                        else:
-                            link_requeued += 1
-                        continue
-                    delete_request(db, rid)
-                    link_dropped += 1
-                    print("    empty — nothing written; dropped.")
-                    continue
                 mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
                 mark_request(
                     db,
@@ -589,22 +591,24 @@ def main() -> None:
                 meta, chapters = fetch_work_chapters(
                     ao3, wid, space=space, backoff=_with_backoff
                 )
-                work_uuid = upsert_work(db, meta, origin="tag")
-                written = upsert_chapters(db, work_uuid, chapters)
-                if not written:
-                    # No text fetched. If the work is restricted to logged-in AO3
-                    # members, a guest can never get it — flag it and stop the
-                    # endless retry so the app can show a "read on AO3" label.
-                    # Otherwise leave it wanted so a later run retries.
+                if not _has_chapter_text(chapters):
+                    # No text fetched — do NOT materialise the work (that left a
+                    # blank, titleless "ready to read" ghost). If it's restricted to
+                    # logged-in AO3 members, a guest can never get it — flag it and
+                    # stop the endless retry. Otherwise leave it wanted to retry, and
+                    # un-flag any pre-existing ghost row so it reads "downloading".
                     if ao3.is_restricted(wid):
                         mark_flag(db, [wid], "restricted")
                         mark_matches_saved(db, wid)
                         save_failed += 1
                         print(f"    requested {wid} — restricted to AO3 members; flagged (read on AO3).")
                         continue
+                    mark_not_offline(db, "ao3", wid)
                     save_failed += 1
                     print(f"    requested {wid} — no chapters fetched, will retry.")
                     continue
+                work_uuid = upsert_work(db, meta, origin="tag")
+                written = upsert_chapters(db, work_uuid, chapters)
                 mark_flag(db, [wid], "offline")
                 mark_matches_saved(db, wid)
                 processed.add(wid)
@@ -625,16 +629,18 @@ def main() -> None:
                 linker = get_linker()
                 space()
                 meta, chap_list = linker.prepare(url)
-                work_uuid = upsert_work(db, meta, origin="tag")
                 chapters = []
                 for i, ch in enumerate(chap_list):
                     space()
                     chapters.append(linker.fetch_chapter(url, i, ch))
-                written = upsert_chapters(db, work_uuid, chapters)
-                if not written:
+                if not _has_chapter_text(chapters):
+                    # Don't materialise a blank ghost; un-flag any existing one.
+                    mark_not_offline(db, src_id, wid)
                     save_failed += 1
                     print(f"    requested {src_id}:{wid} — no chapters, will retry.")
                     continue
+                work_uuid = upsert_work(db, meta, origin="tag")
+                written = upsert_chapters(db, work_uuid, chapters)
                 mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
                 mark_matches_saved(db, wid, source=src_id)
                 saved_count += 1
@@ -689,16 +695,18 @@ def main() -> None:
                     for i, ch in enumerate(chap_list):
                         space()
                         chapters.append(linker.fetch_chapter(url, i, ch))
-                work_uuid = upsert_work(db, meta)  # keep origin
-                written = upsert_chapters(db, work_uuid, chapters)
-                if written:
-                    mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
-                    have_offline.add(wid)
-                    rs_done += 1
-                    print(f"    repaired {src_id}:{wid} — {written} chapter(s).")
-                else:
+                if not _has_chapter_text(chapters):
+                    # Still empty — don't upsert blank meta over the work (it would
+                    # wipe its title); leave it for reset_empty_offline below.
                     rs_failed += 1
                     print(f"    {src_id}:{wid} still empty — leaving for retry.")
+                    continue
+                work_uuid = upsert_work(db, meta)  # keep origin
+                written = upsert_chapters(db, work_uuid, chapters)
+                mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
+                have_offline.add(wid)
+                rs_done += 1
+                print(f"    repaired {src_id}:{wid} — {written} chapter(s).")
             except Exception as exc:  # noqa: BLE001
                 rs_failed += 1
                 print(f"    repair {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
