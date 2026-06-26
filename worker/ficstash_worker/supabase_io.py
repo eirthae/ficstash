@@ -366,16 +366,19 @@ def propagate_dismissals(client: Client) -> int:
 def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> int:
     """Store discovered works for a tracked group.
 
-    Omits `seen`/`first_seen_at`/`later` so a work already marked seen stays seen
-    and one set aside for Later stays there across re-runs; brand-new matches
-    default to unseen ("fresh"). `dismissed` is GLOBAL: a work the user dismissed
-    under any tag is stamped dismissed here too (so it doesn't pop up via another
-    tracked tag), while works not dismissed anywhere keep their per-row state.
+    Omits `seen`/`first_seen_at`/`dismissed`/`later` so a work already marked seen
+    stays seen, a dismissed work stays hidden, and one set aside for Later stays
+    there across re-runs; brand-new matches default to unseen ("fresh"), not
+    dismissed, not in the Later stash.
+
+    Every row carries the SAME keys on purpose: PostgREST rejects a bulk upsert
+    whose objects don't all match ("All object keys must match"), so stamping
+    `dismissed` on only some rows silently dropped the WHOLE batch — and any tag
+    that overlapped a previously-dismissed work came back with 0 matches. Spreading
+    a dismissal across tags is handled separately by propagate_dismissals().
     """
-    dismissed_ids = fetch_dismissed_work_ids(client)
-    rows = []
-    for m in metas:
-        row = {
+    rows = [
+        {
             "group_id": group_id,
             "source": m.source,
             "source_work_id": m.source_work_id,
@@ -390,9 +393,8 @@ def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> 
             "source_updated": m.updated,
             "palette": palette_for(m.fandom or m.title),
         }
-        if m.source_work_id in dismissed_ids:
-            row["dismissed"] = True
-        rows.append(row)
+        for m in metas
+    ]
     if not rows:
         return 0
     client.table("tag_matches").upsert(
