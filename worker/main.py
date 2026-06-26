@@ -425,9 +425,33 @@ def run_ao3_series_pass(db, ao3, space, backoff) -> None:
             delete_series_follow(db, sid)
 
 
+_run_deadline: float | None = None
+
+
+def _start_run_clock() -> None:
+    """Start the per-run time budget. The heavy full-sweep passes (discovery,
+    backfill, reflow, refresh) check _within_budget() and stop starting new work
+    as the deadline nears — so a big library's unbounded backfill exits CLEANLY
+    and resumes next run, instead of being killed by the workflow timeout (which
+    showed up as a cancelled ~3h nightly). Tune with MAX_RUN_MINUTES; default 165,
+    comfortably under the 180-minute job timeout."""
+    global _run_deadline
+    raw = os.environ.get("MAX_RUN_MINUTES", "").strip()
+    try:
+        mins = max(5, int(raw)) if raw else 165
+    except ValueError:
+        mins = 165
+    _run_deadline = time.monotonic() + mins * 60
+
+
+def _within_budget() -> bool:
+    return _run_deadline is None or time.monotonic() < _run_deadline
+
+
 def main() -> None:
     load_dotenv()  # picks up worker/.env locally; no-op in CI where vars are set
     check_env()
+    _start_run_clock()
 
     ao3 = get_source("ao3")
     _maybe_login_ao3(ao3)
@@ -832,6 +856,9 @@ def main() -> None:
     if reseed:
         print("  RESEED_TAGS set → re-fetching ALL discover tags all-time (refreshes metadata; keeps your saved/seen/dismissed).")
     for g in groups:
+        if not _within_budget():
+            print("  time budget reached — stopping discovery; resumes next run.")
+            break
         # First run (never checked) SEEDS the tag's whole back-catalogue: since
         # stays None → AO3 searches all-time, so a freshly tracked tag surfaces
         # its existing works (capped/paginated in search_group), not just ones
@@ -986,6 +1013,9 @@ def main() -> None:
     print(f"{len(pending)} work(s) need offline copies (max {backfill_max or 'no cap'}).")
     bf_done = bf_failed = 0
     for row in pending:
+        if not _within_budget():
+            print("    time budget reached — stopping backfill; resumes next run.")
+            break
         wid = row["source_work_id"]
         if wid in have_offline:
             continue  # already downloaded in full this run
@@ -1050,6 +1080,9 @@ def main() -> None:
     )
     rf_done = rf_failed = 0
     for wid in reflow_ids:
+        if not _within_budget():
+            print("    time budget reached — stopping reflow; resumes next run.")
+            break
         if wid in have_offline:
             continue  # already re-downloaded with HTML this run
         try:
@@ -1102,6 +1135,9 @@ def main() -> None:
     rc_updated = rc_same = rc_failed = 0
     refresh_linker = None
     for row in ongoing:
+        if not _within_budget():
+            print("    time budget reached — stopping refresh; resumes next run.")
+            break
         src_id = row.get("source") or "ao3"
         wid = row.get("source_work_id") or ""
         stored = int(row.get("chapters") or 0)
