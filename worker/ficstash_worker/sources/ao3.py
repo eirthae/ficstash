@@ -121,6 +121,54 @@ def _enable_adult_view(session) -> None:
                 continue
 
 
+# Cloudflare error statuses AO3 throws at datacenter IPs (the GitHub Actions
+# runner). 525 ("SSL handshake failed") is the one we see constantly — AO3 525s
+# MOST requests from a datacenter IP and only intermittently lets one through.
+_CLOUDFLARE_5XX = (520, 521, 522, 523, 524, 525, 526, 527, 530)
+
+
+def _install_retry(session) -> None:
+    """Make the session's underlying requests adapter retry Cloudflare 5xx.
+
+    AO3 is behind Cloudflare, which returns 520–525 to datacenter IPs like this
+    worker's runner — often on most requests, succeeding only now and then. With a
+    single try, that error page parses as zero chapters, so a saved/queued work
+    comes back empty and gets re-queued forever (the "stuck in Queued for download"
+    bug). Retrying the request a few times at the HTTP layer (a 525 fails fast, so
+    it's cheap) catches one of the intermittent good responses. raise_on_status is
+    off so a STILL-bad response is handed back unchanged and the existing
+    empty/restricted handling decides what to do — we only add retries, we don't
+    change the outcome of a genuine miss. Mounted on whichever attribute actually
+    holds the requests.Session (same lookup as _enable_adult_view).
+    """
+    try:
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+    except Exception:  # noqa: BLE001  # pragma: no cover - deps always present
+        return
+    retry = Retry(
+        total=4,
+        connect=4,
+        read=4,
+        status=4,
+        status_forcelist=_CLOUDFLARE_5XX,
+        backoff_factor=0.8,  # 0, 0.8, 1.6, 3.2s — ~5.6s worst case per work
+        raise_on_status=False,
+        # Default allowed_methods already covers GET/HEAD (AO3 fetches are GET) and
+        # is named differently across urllib3 versions, so we leave it untouched.
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    for attr in ("session", "_session", "requests_session", "s"):
+        sess = getattr(session, attr, None)
+        if sess is not None and hasattr(sess, "mount"):
+            try:
+                sess.mount("https://", adapter)
+                sess.mount("http://", adapter)
+                return
+            except Exception:  # noqa: BLE001
+                continue
+
+
 class AO3Source(Source):
     id = "ao3"
     # AO3 returns the WHOLE work (every chapter's text) in the single metadata
@@ -185,6 +233,7 @@ class AO3Source(Source):
         """
         self._session = AO3.Session(username, password)
         _enable_adult_view(self._session)
+        _install_retry(self._session)
         return getattr(self._session, "username", username)
 
     def _require_session(self) -> "AO3.Session":
@@ -197,6 +246,7 @@ class AO3Source(Source):
             # account feature; until then this keeps every AO3 path working.
             self._session = AO3.GuestSession()
             _enable_adult_view(self._session)
+            _install_retry(self._session)
         return self._session
 
     # ---- series ------------------------------------------------------------
