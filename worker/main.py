@@ -697,15 +697,16 @@ def main() -> None:
     run_ao3_series_pass(db, ao3, space, _with_backoff)
 
     # ---- Repair stale "downloaded but empty" works -------------------------
-    # A saved work can get flagged offline before its chapter bodies actually land
-    # (a throttled / partial fetch), so the app shows it "ready to read" with
-    # nothing inside. Re-fetch those here — in the FAST lane — so a pull-to-refresh
-    # heals them; capped to stay quick. Anything still empty afterward is flipped
-    # back to offline=false so it stops lying and the nightly backfill retries it.
+    # Re-download OTHER works that got flagged offline before their chapter bodies
+    # landed. This is deliberately NOT part of a pull-to-refresh (saves-only): a
+    # pull should just fetch the works YOU saved and return fast — re-fetching up
+    # to 25 unrelated stale works here is what made the pull spinner hang for
+    # minutes. It runs only on the full nightly sweep; the nightly backfill also
+    # picks up anything left offline=false.
     print("\n== Repair stale downloads ==")
     rs_done = rs_failed = 0
     try:
-        stale = fetch_stale_offline_works(db, limit=_repair_stale_max())
+        stale = [] if _saves_only() else fetch_stale_offline_works(db, limit=_repair_stale_max())
         print(f"{len(stale)} stale 'downloaded-but-empty' work(s) to re-fetch.")
         for w in stale:
             src_id = w["source"]
