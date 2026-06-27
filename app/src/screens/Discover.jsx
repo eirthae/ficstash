@@ -392,6 +392,19 @@ function TagPicker({ picked, onAdd, onRemove, placeholder, accent }) {
           ))}
         </div>
       )}
+      {/* Always offer to add exactly what you typed — so a slow/empty AO3
+          autocomplete can never block you from adding a tag. AO3's own search
+          canonicalises it when the worker runs. Hidden only if it duplicates a
+          shown suggestion or an already-picked tag. */}
+      {term.trim().length >= 2
+        && !picked.some((p) => p.name.toLowerCase() === term.trim().toLowerCase())
+        && !results.some((r) => r.name.toLowerCase() === term.trim().toLowerCase()) && (
+        <button className="pressable" onClick={() => add({ name: term.trim(), id: '', kind: 'freeform' })}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', marginTop: 8, padding: '11px 14px', background: 'transparent', border: '1px dashed var(--border)', borderRadius: 12, color: 'var(--text-secondary)' }}>
+          <Icon icon="solar:add-circle-bold" size={18} color={accent || 'var(--accent)'} />
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Add “{term.trim()}”</span>
+        </button>
+      )}
     </div>
   );
 }

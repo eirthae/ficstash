@@ -38,11 +38,18 @@ Deno.serve(async (req: Request) => {
   if (term.length < 2) return json({ tags: [] });
 
   const target = `${AO3_AUTOCOMPLETE}?term=${encodeURIComponent(term)}`;
+  // Hard timeout so a slow / throttled AO3 can't leave the keystroke hanging for
+  // many seconds (the "I type and it does nothing for ages" symptom). On timeout
+  // or any error we return an EMPTY list with HTTP 200 — the app treats that as
+  // "no suggestions" and stays responsive, instead of throwing / spinning.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4500);
   try {
     const res = await fetch(target, {
       headers: { "User-Agent": "FicStash/1.0 (personal use)" },
+      signal: ctrl.signal,
     });
-    if (!res.ok) return json({ tags: [], error: `AO3 ${res.status}` }, 502);
+    if (!res.ok) return json({ tags: [], error: `AO3 ${res.status}` });
 
     // AO3 returns [{ id, name }, ...]; normalise to a small, stable shape.
     const raw = await res.json();
@@ -53,8 +60,16 @@ Deno.serve(async (req: Request) => {
       }))
       .filter((t) => t.name.length > 0)
       .slice(0, 15);
-    return json({ tags });
+    // Let the browser cache identical prefixes briefly — repeated keystrokes over
+    // the same term don't re-hit AO3.
+    return new Response(JSON.stringify({ tags }), {
+      status: 200,
+      headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "private, max-age=120" },
+    });
   } catch (e) {
-    return json({ tags: [], error: String(e) }, 502);
+    const msg = (e instanceof Error && e.name === "AbortError") ? "AO3 autocomplete timed out" : String(e);
+    return json({ tags: [], error: msg });
+  } finally {
+    clearTimeout(timer);
   }
 });
