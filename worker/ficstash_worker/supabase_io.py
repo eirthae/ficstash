@@ -303,7 +303,11 @@ def upsert_work(
     # complete works are unfollowed (nothing left to fetch). Derived from status
     # on every upsert, so it self-corrects as a work flips ongoing → complete.
     payload["follow"] = is_following(meta.status)
-    for key in ("offline", "bookmarked", "subscribed", "in_history"):
+    # `hidden` is included so an explicit re-save / re-add un-deletes a work the
+    # user had removed (passed hidden=False by the link + tag-save passes). It's
+    # written only when supplied, so automatic passes (backfill/refresh) never
+    # resurrect a deleted work.
+    for key in ("offline", "bookmarked", "subscribed", "in_history", "hidden"):
         if key in flags:
             payload[key] = bool(flags[key])
     if origin:

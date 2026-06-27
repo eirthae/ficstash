@@ -148,13 +148,25 @@ def _maybe_login_ao3(ao3) -> None:
     user = os.environ.get("AO3_USERNAME", "").strip()
     pw = os.environ.get("AO3_PASSWORD", "")
     if not user or not pw:
-        print("AO3: running logged-out (no AO3_USERNAME/AO3_PASSWORD set).")
+        print("AO3: running logged-out (no AO3_USERNAME/AO3_PASSWORD set) — "
+              "restricted / members-only works will be skipped.")
         return
-    try:
-        name = ao3.authenticate(user, pw)
-        print(f"AO3: logged in as {name} — members-only works are fetchable.")
-    except Exception as exc:  # noqa: BLE001
-        print(f"AO3: login failed ({type(exc).__name__}) — continuing logged-out.")
+    # Retry: AO3's login POST can hit a transient block/throttle from a CI IP.
+    for attempt in range(3):
+        try:
+            name = ao3.authenticate(user, pw)
+            print(f"AO3: logged in as {name} — members-only / adult works are fetchable.")
+            return
+        except Exception as exc:  # noqa: BLE001
+            print(f"AO3: login attempt {attempt + 1}/3 failed ({type(exc).__name__}: {exc}).")
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+    # Loud + actionable: if creds are set but login keeps failing, restricted works
+    # silently fall back to "skipped", which looks like the feature is broken.
+    print("AO3: *** LOGIN FAILED *** — running LOGGED-OUT, so restricted / members-only "
+          "works can't be fetched (they'll show 'restricted'). Check the AO3_USERNAME / "
+          "AO3_PASSWORD repo secrets are set and correct; AO3 may also be blocking "
+          "automated login from this CI IP (Cloudflare).")
 
 
 def _with_backoff(fn, *, what: str, broad: bool = False):
@@ -557,7 +569,7 @@ def main() -> None:
                     link_dropped += 1
                     print("    empty — no chapters; dropped.")
                     continue
-                work_uuid = upsert_work(db, meta, origin="link")
+                work_uuid = upsert_work(db, meta, origin="link", hidden=False)
                 written = upsert_chapters(db, work_uuid, chapters)
                 mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
                 mark_request(
@@ -632,7 +644,7 @@ def main() -> None:
                     save_failed += 1
                     print(f"    requested {wid} — no chapters fetched, will retry.")
                     continue
-                work_uuid = upsert_work(db, meta, origin="tag")
+                work_uuid = upsert_work(db, meta, origin="tag", hidden=False)
                 written = upsert_chapters(db, work_uuid, chapters)
                 mark_flag(db, [wid], "offline")
                 mark_matches_saved(db, wid)
@@ -664,7 +676,7 @@ def main() -> None:
                     save_failed += 1
                     print(f"    requested {src_id}:{wid} — no chapters, will retry.")
                     continue
-                work_uuid = upsert_work(db, meta, origin="tag")
+                work_uuid = upsert_work(db, meta, origin="tag", hidden=False)
                 written = upsert_chapters(db, work_uuid, chapters)
                 mark_flag(db, [meta.source_work_id], "offline", source=meta.source)
                 mark_matches_saved(db, wid, source=src_id)
