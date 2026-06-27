@@ -38,38 +38,50 @@ Deno.serve(async (req: Request) => {
   if (term.length < 2) return json({ tags: [] });
 
   const target = `${AO3_AUTOCOMPLETE}?term=${encodeURIComponent(term)}`;
-  // Hard timeout so a slow / throttled AO3 can't leave the keystroke hanging for
-  // many seconds (the "I type and it does nothing for ages" symptom). On timeout
-  // or any error we return an EMPTY list with HTTP 200 — the app treats that as
-  // "no suggestions" and stays responsive, instead of throwing / spinning.
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4500);
-  try {
-    const res = await fetch(target, {
-      headers: { "User-Agent": "FicStash/1.0 (personal use)" },
-      signal: ctrl.signal,
-    });
-    if (!res.ok) return json({ tags: [], error: `AO3 ${res.status}` });
-
-    // AO3 returns [{ id, name }, ...]; normalise to a small, stable shape.
-    const raw = await res.json();
-    const tags = (Array.isArray(raw) ? raw : [])
-      .map((t) => ({
-        name: (t?.name ?? t?.id ?? "").toString(),
-        id: (t?.id ?? "").toString(),
-      }))
-      .filter((t) => t.name.length > 0)
-      .slice(0, 15);
-    // Let the browser cache identical prefixes briefly — repeated keystrokes over
-    // the same term don't re-hit AO3.
-    return new Response(JSON.stringify({ tags }), {
-      status: 200,
-      headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "private, max-age=120" },
-    });
-  } catch (e) {
-    const msg = (e instanceof Error && e.name === "AbortError") ? "AO3 autocomplete timed out" : String(e);
-    return json({ tags: [], error: msg });
-  } finally {
-    clearTimeout(timer);
+  // AO3's autocomplete origin is flaky: it returns Cloudflare 525s on MOST
+  // requests and a good 200 only intermittently (verified — ~1 in 6). A browser
+  // works because it effectively retries; a single proxy request usually catches
+  // the 525, which is why suggestions "did nothing". So we RETRY here (fast, since
+  // a 525 fails quickly) within a total time budget, with browser-style headers,
+  // and take the first good response. On exhausting the budget we return an empty
+  // list with HTTP 200 so the app stays responsive (and its "Add what you typed"
+  // fallback still works).
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9",
+    "X-Requested-With": "XMLHttpRequest",
+    "Referer": "https://archiveofourown.org/works/new",
+  };
+  const deadline = Date.now() + 8000; // total budget across retries
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 25 && Date.now() < deadline; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    try {
+      const res = await fetch(target, { headers, signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        // AO3 returns [{ id, name }, ...]; normalise to a small, stable shape.
+        const raw = await res.json();
+        const tags = (Array.isArray(raw) ? raw : [])
+          .map((t) => ({
+            name: (t?.name ?? t?.id ?? "").toString(),
+            id: (t?.id ?? "").toString(),
+          }))
+          .filter((t) => t.name.length > 0)
+          .slice(0, 15);
+        return new Response(JSON.stringify({ tags }), {
+          status: 200,
+          headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "private, max-age=120" },
+        });
+      }
+      lastStatus = res.status; // 525 etc → retry
+    } catch (_e) {
+      clearTimeout(timer); // abort/network → retry
+    }
+    await new Promise((r) => setTimeout(r, 120)); // brief pause between tries
   }
+  return json({ tags: [], error: `AO3 unreachable (last ${lastStatus || "n/a"})` });
 });
