@@ -511,6 +511,41 @@ def mark_matches_saved(
     ).eq("source_work_id", source_work_id).execute()
 
 
+def _work_ids_with_fetched_text(client: Client, work_ids: list) -> set:
+    """The subset of `work_ids` that have at least one fetched (non-empty) chapter.
+
+    Pages through the chapters query. This MATTERS: each fetched chapter is its own
+    row repeating its work_id, so a 100-work batch can have thousands of rows —
+    far past PostgREST's default 1000-row response cap. A single un-paged query
+    silently truncated, dropped work_ids past the cap, and made fully-downloaded
+    works look "empty" (so they got re-downloaded every run). We page with
+    .range() until a short page comes back, so the set is complete.
+    """
+    have: set = set()
+    page = 1000
+    chunk = 100
+    for i in range(0, len(work_ids), chunk):
+        batch = work_ids[i : i + chunk]
+        start = 0
+        while True:
+            rows = (
+                client.table("chapters")
+                .select("work_id")
+                .in_("work_id", batch)
+                .eq("fetched", True)
+                .range(start, start + page - 1)
+                .execute()
+                .data
+                or []
+            )
+            for r in rows:
+                have.add(r["work_id"])
+            if len(rows) < page:
+                break
+            start += page
+    return have
+
+
 def reset_empty_offline(client: Client, source: str = "ao3") -> int:
     """Clear the offline flag on works that have no readable chapter text.
 
@@ -536,20 +571,7 @@ def reset_empty_offline(client: Client, source: str = "ao3") -> int:
     flagged_ids = [w["id"] for w in flagged]
 
     chunk = 100
-    have_text: set[str] = set()
-    for i in range(0, len(flagged_ids), chunk):
-        batch = flagged_ids[i : i + chunk]
-        rows = (
-            client.table("chapters")
-            .select("work_id")
-            .in_("work_id", batch)
-            .eq("fetched", True)
-            .execute()
-            .data
-            or []
-        )
-        for r in rows:
-            have_text.add(r["work_id"])
+    have_text = _work_ids_with_fetched_text(client, flagged_ids)
 
     empty_ids = [wid for wid in flagged_ids if wid not in have_text]
     for i in range(0, len(empty_ids), chunk):
@@ -678,21 +700,7 @@ def fetch_stale_offline_works(
     if not flagged:
         return []
     ids = [w["id"] for w in flagged]
-    chunk = 100
-    have_text: set[str] = set()
-    for i in range(0, len(ids), chunk):
-        batch = ids[i : i + chunk]
-        rows = (
-            client.table("chapters")
-            .select("work_id")
-            .in_("work_id", batch)
-            .eq("fetched", True)
-            .execute()
-            .data
-            or []
-        )
-        for r in rows:
-            have_text.add(r["work_id"])
+    have_text = _work_ids_with_fetched_text(client, ids)
     stale = [
         {
             "source": w.get("source") or "ao3",
