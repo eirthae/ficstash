@@ -1,5 +1,6 @@
 import { supabase, hasSupabase } from './supabase.js';
 import { hashStr, COVER_PALETTES } from '../data/sample.js';
+import { fetchJson } from './fetch.js';
 
 // ============================================================================
 // Tracked tag groups — the one part of the app that writes to Supabase.
@@ -408,15 +409,21 @@ export async function markChapterUpdateSeen(id) {
   if (error) throw error;
 }
 
-// Live AO3 tag suggestions via the tag-autocomplete edge function.
+// Live AO3 tag suggestions — call AO3's autocomplete JSON directly from the
+// device (native HTTP), like BookStash. No Supabase proxy. On failure returns []
+// and the picker's "Add what you typed" fallback still lets you track any tag.
 export async function autocompleteTags(term) {
-  const t = (term || '').trim();
-  if (!hasSupabase || t.length < 2) return [];
-  const { data, error } = await supabase.functions.invoke('tag-autocomplete', {
-    body: { term: t },
-  });
-  if (error) throw error;
-  return (data?.tags || [])
-    .map((x) => ({ name: x.name, id: x.id ?? '', kind: x.kind || 'freeform' }))
-    .filter((x) => x.name);
+  const q = (term || '').trim();
+  if (q.length < 2) return [];
+  try {
+    const url = `https://archiveofourown.org/autocomplete/tag?term=${encodeURIComponent(q)}`;
+    const r = await fetchJson(url);
+    if (!r || r.status < 200 || r.status >= 300 || !Array.isArray(r.data)) return [];
+    return r.data
+      .map((d) => (typeof d === 'string' ? d : ((d && (d.name ?? d.id)) || '')))
+      .filter(Boolean)
+      .map((n) => ({ name: n, id: '', kind: 'freeform' }));
+  } catch (e) {
+    return [];
+  }
 }
