@@ -3,7 +3,7 @@ import { Appbar } from '../components/chrome.jsx';
 import { EmptyState, useToast, Sheet, PullToRefresh } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { LibraryCard } from '../components/cards.jsx';
-import { watchSync } from '../lib/sync.js';
+import { syncNow } from '../lib/sync.js';
 import { fetchPendingLinks, removeRequest } from '../lib/links.js';
 import { removeWork } from '../lib/library.js';
 import { getLastRead } from '../lib/reading.js';
@@ -140,11 +140,10 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   const doSync = async () => {
     if (syncing) return;
     setSyncing(true);
-    const res = await watchSync({ savesOnly: true });
+    const res = await syncNow();
     setSyncing(false);
     onReload?.(); reloadLinks();
-    if (res.ok && !res.timedOut) showToast('Up to date — saved works fetched.');
-    else if (res.timedOut) showToast('Still fetching in the background — pull again shortly.');
+    if (res && res.ok) showToast('Up to date — discovery + saves fetched.');
     else showToast('Sync hit a snag — it’ll retry automatically.', 'solar:danger-triangle-bold');
   };
 

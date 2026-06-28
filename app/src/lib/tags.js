@@ -1,6 +1,7 @@
 import { supabase, hasSupabase } from './supabase.js';
 import { hashStr, COVER_PALETTES } from '../data/sample.js';
 import { fetchJson } from './fetch.js';
+import { discoverGroup, saveMatchNow } from './ondevice.js';
 
 // ============================================================================
 // Tracked tag groups — the one part of the app that writes to Supabase.
@@ -68,14 +69,21 @@ function mapMatch(row) {
   };
 }
 
-// "Save to library" = ask the worker to fetch this work offline on its next run.
+// "Save to library" = download the work NOW, on-device (residential IP), and
+// store it in Supabase. We still set wanted=true first so the worker remains a
+// fallback (and handles non-AO3 sources) if the on-device fetch misses.
 export async function requestSave(matchId) {
   if (!hasSupabase) return;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('tag_matches')
     .update({ wanted: true, seen: true })
-    .eq('id', matchId);
+    .eq('id', matchId)
+    .select('source, source_work_id')
+    .single();
   if (error) throw error;
+  if (data && data.source === 'ao3' && data.source_work_id) {
+    saveMatchNow(data.source_work_id).catch(() => {}); // fire-and-forget
+  }
 }
 
 export async function fetchTrackedGroups() {
@@ -129,6 +137,9 @@ export async function createGroup({ label = '', tags, excludedTags = [], matchMo
     .select()
     .single();
   if (error) throw error;
+  // Discover its matches now, on-device, so the new tile opens populated (the
+  // BookStash "instant results" feel). Best-effort — never fail group creation.
+  try { await discoverGroup(data); } catch (e) { /* discovery is best-effort */ }
   return mapGroup(data);
 }
 
@@ -149,6 +160,7 @@ export async function createLanguageGroup({ code, name, label = '' }) {
     .select()
     .single();
   if (error) throw error;
+  try { await discoverGroup(data); } catch (e) { /* discovery is best-effort */ }
   return mapGroup(data);
 }
 
@@ -206,6 +218,8 @@ export async function updateGroup(groupId, { label = '', tags, excludedTags = []
     .single();
   if (error) throw error;
   await supabase.from('tag_matches').delete().eq('group_id', groupId);
+  // Re-discover against the new criteria, on-device, so the tile refills now.
+  try { await discoverGroup(data); } catch (e) { /* discovery is best-effort */ }
   return mapGroup(data);
 }
 

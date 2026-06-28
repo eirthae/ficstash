@@ -12,36 +12,14 @@ import { fetchHtml, fetchJson } from '../fetch.js';
 //   autocompleteTag                  → the tag picker's live suggestions
 // Adapted from sister app BookStash (docs/tag-discovery-and-fetch.md).
 
-export const AO3_HOST = 'archiveofourown.org';
-
-export function isAo3Url(url) {
-  return /(^|[/.@])archiveofourown\.org/i.test(String(url || ''));
-}
-
-// Work id from any AO3 work URL (incl. /collections/x/works/123, /chapters/...).
-export function workIdFromUrl(url) {
-  const m = String(url || '').match(/\/works\/(\d+)/);
-  return m ? m[1] : '';
-}
-
-// The "entire work on one page" URL with the adult-content gate pre-consented,
-// so a single fetch returns every chapter (and age-gated works don't bounce).
-export function fullWorkUrl(id) {
-  return `https://${AO3_HOST}/works/${id}?view_full_work=true&view_adult=true`;
-}
-
-export function workUrl(id) {
-  return `https://${AO3_HOST}/works/${id}`;
-}
-
-// "5/12" → ongoing, "12/12" → complete, "3/?" → ongoing. AO3's chapters stat.
-export function parseChapterStat(text) {
-  const m = String(text || '').replace(/,/g, '').match(/(\d+)\s*\/\s*(\d+|\?)/);
-  if (!m) return { chapters: 0, total: null, status: 'ongoing' };
-  const have = parseInt(m[1], 10);
-  const total = m[2] === '?' ? null : parseInt(m[2], 10);
-  return { chapters: have, total, status: total != null && have >= total ? 'complete' : 'ongoing' };
-}
+// Pure URL / id / stat helpers live in ao3-util.js (node-testable, no native HTTP
+// import); re-export them so existing importers keep getting them from './ao3.js'.
+export {
+  AO3_HOST, isAo3Url, workIdFromUrl, fullWorkUrl, workUrl, parseChapterStat, searchUrl,
+} from './ao3-util.js';
+import {
+  AO3_HOST, workIdFromUrl, fullWorkUrl, workUrl, parseChapterStat, searchUrl, languageSearchUrl,
+} from './ao3-util.js';
 
 const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 const wordCount = (s) => (String(s || '').trim().match(/\S+/g) || []).length;
@@ -191,15 +169,8 @@ export async function seriesWorks(seriesId, maxPages = 10) {
 // ---- tag search (Discover / tag tracking) ----------------------------------
 // AO3's works search ANDs the tags in `other_tag_names` and subtracts
 // `excluded_tag_names`, newest-first. We read the public results page and parse
-// each work blurb — the on-device version of the worker's search_group.
-export function searchUrl(include, exclude = [], page = 1) {
-  const p = new URLSearchParams();
-  p.set('work_search[other_tag_names]', (include || []).join(','));
-  if ((exclude || []).length) p.set('work_search[excluded_tag_names]', exclude.join(','));
-  p.set('work_search[sort_column]', 'created_at');
-  if (page > 1) p.set('page', String(page));
-  return `https://${AO3_HOST}/works/search?${p.toString()}`;
-}
+// each work blurb — the on-device version of the worker's search_group. The URL
+// builders (searchUrl / languageSearchUrl) live in ao3-util.js.
 
 // Pure parser: an AO3 works-search/listing page → [{ source, sourceId, title,
 // author, fandom, summary, tags[], language, words, status, chaptersTotal, url }].
@@ -252,12 +223,8 @@ export async function searchTags(include, exclude = [], page = 1) {
 // Browse a whole AO3 language (newest first) — for "Browse by language" groups.
 export async function searchLanguage(code, page = 1) {
   if (!code) return [];
-  const p = new URLSearchParams();
-  p.set('work_search[language_id]', String(code));
-  p.set('work_search[sort_column]', 'created_at');
-  if (page > 1) p.set('page', String(page));
   try {
-    const r = await fetchHtml(`https://${AO3_HOST}/works/search?${p.toString()}`);
+    const r = await fetchHtml(languageSearchUrl(code, page));
     if (!r || r.status !== 200) return [];
     return parseSearchResults(r.html);
   } catch (e) {

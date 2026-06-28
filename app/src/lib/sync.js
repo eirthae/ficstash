@@ -1,4 +1,14 @@
 import { supabase, hasSupabase } from './supabase.js';
+import { runSync } from './ondevice.js';
+
+// The PRIMARY sync now: run AO3 discovery + downloads ON-DEVICE (residential IP,
+// which AO3 answers), writing straight to Supabase. This is what pull-to-refresh
+// calls instead of the old worker round-trip — no GitHub Actions dispatch, no 525.
+// The worker still runs on its schedule for non-AO3 sources + ongoing refresh.
+// Never throws (runSync catches); returns { ok, newMatches, saved }.
+export async function syncNow({ onProgress } = {}) {
+  return runSync({ onProgress });
+}
 
 // Ask the worker to run now (via the trigger-sync edge function → GitHub).
 // Returns { ok, error? }. When Supabase isn't configured this is a no-op.

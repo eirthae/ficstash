@@ -1,6 +1,8 @@
 import { supabase, hasSupabase } from './supabase.js';
 import { triggerSync } from './sync.js';
 import { parseWorkRef } from './urlref.js';
+import { processAo3Links } from './ondevice.js';
+import { isAo3Url } from './sources/ao3.js';
 
 // Add a work by pasting its URL. The app can't fetch a site directly (it only
 // talks to Supabase), so this queues the URL and kicks the worker, which
@@ -13,9 +15,10 @@ export async function requestUrl(url) {
   }
   const { error } = await supabase.from('requested_urls').insert({ url: clean });
   if (error) return { ok: false, error: error.message || String(error) };
-  // Kick the FAST saves-only lane so the download starts now in its own workflow
-  // (instead of the slow, failure-prone full sweep). Fire-and-forget: a failure
-  // here just means it waits for the next scheduled sync, so don't surface it.
+  // AO3 link → fetch it NOW on-device (residential IP, which AO3 answers), so the
+  // download lands without a worker round-trip. Non-AO3 (Royal Road, FFN, …) still
+  // needs FanFicFare, so also kick the worker's fast lane. Both fire-and-forget.
+  if (isAo3Url(clean)) processAo3Links().catch(() => {});
   triggerSync({ savesOnly: true }).catch(() => {});
   return { ok: true };
 }

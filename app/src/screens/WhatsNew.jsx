@@ -5,7 +5,7 @@ import { StatusBadge, fmtWords, useToast, PullToRefresh, TagChip } from '../comp
 import { totalLabel } from '../components/cards.jsx';
 import { fetchNewChapters, markChapterUpdateSeen } from '../lib/tags.js';
 import { fetchSavedWorks, removeWork } from '../lib/library.js';
-import { watchSync } from '../lib/sync.js';
+import { syncNow } from '../lib/sync.js';
 import { savedTypeOf } from '../lib/shelving.js';
 
 const SAVED_TYPES = [{ id: 'all', label: 'All' }, { id: 'ao3', label: 'AO3' }, { id: 'stories', label: 'Stories' }, { id: 'books', label: 'Books' }];
@@ -114,7 +114,7 @@ export function WhatsNewScreen({ chapters, nav }) {
 
   // Pull-to-refresh: run the quick saves-only sync, held to completion so the
   // spinner stays until it's done, then re-fetch both feeds.
-  const doSync = async () => { try { await watchSync({ savesOnly: true }); } finally { setBump((b) => b + 1); } };
+  const doSync = async () => { try { await syncNow(); } finally { setBump((b) => b + 1); } };
 
   const openChapter = (u) => {
     markChapterUpdateSeen(u.id).catch(() => {});
