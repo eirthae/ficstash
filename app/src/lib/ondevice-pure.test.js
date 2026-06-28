@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normGroup, matchRow, workRow, chapterRows, paletteFor } from './ondevice-pure.js';
+import {
+  normGroup, matchRow, workRow, chapterRows, paletteFor,
+  newChapters, chapterUpdateRows, seriesFetchPlan,
+} from './ondevice-pure.js';
 
 // ---- normGroup -------------------------------------------------------------
 test('normGroup handles a mapGroup() shape (camelCase)', () => {
@@ -111,4 +114,56 @@ test('paletteFor is a stable non-negative index', () => {
   const b = paletteFor('Hockey');
   assert.equal(a, b);
   assert.ok(a >= 0 && Number.isInteger(a));
+});
+
+// ---- newChapters (getting new chapters on an ongoing work) ------------------
+const work5of7 = {
+  chaptersData: Array.from({ length: 7 }, (_, i) => ({ n: i + 1, title: `Ch ${i + 1}`, words: 100, content: `<p>c${i + 1}</p>` })),
+};
+test('newChapters returns only chapters beyond the stored count', () => {
+  const fresh = newChapters(5, work5of7);
+  assert.deepEqual(fresh.map((c) => c.n), [6, 7]);
+});
+test('newChapters returns [] when nothing is new (caught up / shrunk)', () => {
+  assert.deepEqual(newChapters(7, work5of7), []);
+  assert.deepEqual(newChapters(9, work5of7), []);
+});
+test('newChapters treats a 0/blank stored count as "all are new"', () => {
+  assert.equal(newChapters(0, work5of7).length, 7);
+  assert.equal(newChapters(undefined, work5of7).length, 7);
+  assert.deepEqual(newChapters(2, { chaptersData: null }), []);
+});
+
+// ---- chapterUpdateRows (the New-chapters feed write) -----------------------
+test('chapterUpdateRows builds the chapter_updates shape from new chapters', () => {
+  const rows = chapterUpdateRows(
+    { id: 'w-uuid', source: 'ao3', source_work_id: '123' },
+    [{ n: 6, title: 'Six', words: 90 }, { n: 7, title: '', words: 0 }],
+  );
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0], { work_id: 'w-uuid', source: 'ao3', source_work_id: '123', chapter_n: 6, title: 'Six', words: 90 });
+  assert.equal(rows[1].title, 'Chapter 7'); // blank title defaulted
+});
+
+// ---- seriesFetchPlan (new work in a series + download all) -----------------
+const series = [
+  { id: '11', title: 'Part 1' }, { id: '12', title: 'Part 2' },
+  { id: '13', title: 'Part 3' }, { id: '14', title: 'Part 4' },
+];
+test('seriesFetchPlan: download-all from empty fetches every work, indexed in order', () => {
+  const plan = seriesFetchPlan(series, new Set());
+  assert.deepEqual(plan.toFetch.map((e) => [e.id, e.index]), [['11', 1], ['12', 2], ['13', 3], ['14', 4]]);
+  assert.equal(plan.have.length, 0);
+  assert.equal(plan.hitCap, false);
+});
+test('seriesFetchPlan: only the NEW work is fetched; owned ones are re-tagged with their index', () => {
+  const plan = seriesFetchPlan(series, new Set(['11', '12', '13']));
+  assert.deepEqual(plan.toFetch.map((e) => e.id), ['14']);
+  assert.equal(plan.toFetch[0].index, 4); // keeps its position in the series
+  assert.deepEqual(plan.have.map((e) => e.id), ['11', '12', '13']);
+});
+test('seriesFetchPlan caps the fetch count and flags hitCap', () => {
+  const plan = seriesFetchPlan(series, new Set(), 2);
+  assert.deepEqual(plan.toFetch.map((e) => e.id), ['11', '12']);
+  assert.equal(plan.hitCap, true);
 });

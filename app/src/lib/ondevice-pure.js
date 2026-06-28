@@ -89,3 +89,47 @@ export function chapterRows(workId, chaptersData) {
     fetched: !!(c.content && c.content.trim()),
   }));
 }
+
+// ---- refresh (new chapters on an ongoing work) -----------------------------
+
+// The chapters of a freshly re-fetched work that are NEW vs what we already have
+// stored (chapter n beyond the stored count). Drives "getting new chapters".
+export function newChapters(storedCount, parsedWork) {
+  const stored = Math.max(0, Number(storedCount) || 0);
+  const all = (parsedWork && parsedWork.chaptersData) || [];
+  return all.filter((c) => c && c.n > stored);
+}
+
+// New chapters → chapter_updates rows (the "New chapters" feed), worker shape.
+// `work` carries the stored work's id + source_work_id (the feed joins back to it).
+export function chapterUpdateRows(work, newChs) {
+  return (newChs || []).map((c) => ({
+    work_id: work.id,
+    source: work.source || 'ao3',
+    source_work_id: String(work.source_work_id ?? work.sourceWorkId ?? ''),
+    chapter_n: c.n,
+    title: c.title || `Chapter ${c.n}`,
+    words: c.words || 0,
+  }));
+}
+
+// ---- series (download-all / new works in a followed series) ----------------
+
+// Decide what to fetch for a series: given its works in order [{id,title}] and the
+// set of source_work_ids already in the library, split into what we already have
+// (re-tagged with their series index) and what to fetch (capped for politeness).
+// Drives both "download all works in series" and "a new work added to a series".
+export function seriesFetchPlan(seriesList, existingIds, cap = 12) {
+  const existing = existingIds instanceof Set ? existingIds : new Set(existingIds || []);
+  const have = [];
+  const toFetch = [];
+  let hitCap = false;
+  (seriesList || []).forEach((w, i) => {
+    if (!w || !w.id) return;
+    const entry = { id: String(w.id), index: i + 1, title: w.title || '' };
+    if (existing.has(entry.id)) { have.push(entry); return; }
+    if (toFetch.length >= cap) { hitCap = true; return; }
+    toFetch.push(entry);
+  });
+  return { toFetch, have, hitCap };
+}

@@ -1,7 +1,10 @@
 import { supabase, hasSupabase } from './supabase.js';
-import { searchTags, searchLanguage, fetchWork, isAo3Url, workIdFromUrl } from './sources/ao3.js';
+import { searchTags, searchLanguage, fetchWork, seriesWorks, isAo3Url, workIdFromUrl } from './sources/ao3.js';
 import { statusMatches, passesGlobalPrefs, excludedForShelf } from './shelving.js';
-import { normGroup, matchRow, workRow, chapterRows } from './ondevice-pure.js';
+import {
+  normGroup, matchRow, workRow, chapterRows,
+  newChapters, chapterUpdateRows, seriesFetchPlan,
+} from './ondevice-pure.js';
 
 // ============================================================================
 // On-device sync engine — FicStash's answer to "AO3 blocks our servers."
@@ -255,20 +258,140 @@ export async function processAo3Links({ onProgress } = {}) {
   return { done, failed };
 }
 
+// ---- refresh ongoing works → pull new chapters -----------------------------
+
+// Re-check each followed, ongoing AO3 work for new chapters on-device. For any
+// work that gained chapters: append the new ones, bump the work's counts/status,
+// and record each in the "New chapters" feed (chapter_updates). Capped per run for
+// politeness — the rest get picked up on the next pull.
+export async function refreshOngoing({ onProgress, cap = 30 } = {}) {
+  if (!hasSupabase) return { updated: 0, newChapters: 0 };
+  let works = [];
+  try {
+    const { data } = await supabase
+      .from('works')
+      .select('id, source_work_id, chapters, status')
+      .eq('source', 'ao3')
+      .eq('offline', true)
+      .eq('hidden', false)
+      .eq('follow', true)
+      .limit(cap);
+    works = data || [];
+  } catch (e) { works = []; }
+  let updated = 0, newCh = 0, i = 0;
+  for (const w of works) {
+    if (i) await sleep(SPACE_MS);
+    i += 1;
+    if (onProgress) onProgress({ done: i, total: works.length, title: w.source_work_id });
+    let parsed;
+    try { parsed = await fetchWork(w.source_work_id); } catch (e) { continue; }
+    if (!parsed || parsed.restricted) continue;
+    const fresh = newChapters(w.chapters || 0, parsed);
+    if (fresh.length) {
+      try {
+        await writeChapters(w.id, fresh);
+        await supabase.from('works').update({
+          chapters: parsed.chapters, words: parsed.words,
+          chapters_total: parsed.chaptersTotal ?? null,
+          status: parsed.status, follow: parsed.status !== 'complete',
+        }).eq('id', w.id);
+        const rows = chapterUpdateRows({ id: w.id, source: 'ao3', source_work_id: w.source_work_id }, fresh);
+        if (rows.length) await supabase.from('chapter_updates').upsert(rows, { onConflict: 'work_id,chapter_n' });
+        updated += 1; newCh += fresh.length;
+      } catch (e) { /* non-fatal */ }
+    } else if (parsed.status === 'complete' && w.status !== 'complete') {
+      try { await supabase.from('works').update({ status: 'complete', follow: false, chapters_total: parsed.chapters }).eq('id', w.id); } catch (e) {}
+    }
+  }
+  return { updated, newChapters: newCh };
+}
+
+// ---- followed / download-all series → fetch their works --------------------
+
+// Every source_work_id already in the library (for the series plan).
+async function existingAo3Ids() {
+  try {
+    const { data } = await supabase.from('works').select('source_work_id').eq('source', 'ao3');
+    return new Set((data || []).map((r) => r.source_work_id).filter(Boolean));
+  } catch (e) { return new Set(); }
+}
+
+// Process every followed/queued series on-device: enumerate it on AO3, download
+// the works we don't have yet (capped), tag each with the series so the shelf
+// auto-groups it, and re-tag works we already have. A one-shot "Download all"
+// (follow=false) drops its queue row once everything's pulled.
+export async function processFollowedSeries({ onProgress } = {}) {
+  if (!hasSupabase) return { seriesAdded: 0 };
+  let series = [];
+  try {
+    const { data } = await supabase
+      .from('followed_series')
+      .select('id, series_id, series_name, follow')
+      .order('created_at', { ascending: true });
+    series = data || [];
+  } catch (e) { series = []; }
+  let added = 0, si = 0;
+  for (const s of series) {
+    if (si) await sleep(SPACE_MS);
+    si += 1;
+    if (onProgress) onProgress({ done: si, total: series.length, title: s.series_name || s.series_id });
+    let list = [];
+    try { list = await seriesWorks(s.series_id); } catch (e) { continue; }
+    if (!list.length) continue;
+    const plan = seriesFetchPlan(list, await existingAo3Ids(), 12);
+    // Re-tag works we already have with this series + their position.
+    for (const e of plan.have) {
+      try {
+        await supabase.from('works')
+          .update({ ao3_series_id: String(s.series_id), ao3_series_name: s.series_name || '', ao3_series_index: e.index })
+          .eq('source', 'ao3').eq('source_work_id', e.id);
+      } catch (_) { /* non-fatal */ }
+    }
+    for (const e of plan.toFetch) {
+      await sleep(SPACE_MS);
+      let parsed;
+      try { parsed = await fetchWork(e.id); } catch (err) { continue; }
+      if (!parsed || parsed.restricted) continue;
+      parsed.ao3SeriesId = String(s.series_id);
+      parsed.series = s.series_name || parsed.series;
+      parsed.seriesIndex = e.index;
+      try {
+        const { data, error } = await supabase
+          .from('works').upsert(workRow(parsed, 'tag'), { onConflict: 'source,source_work_id' })
+          .select('id').single();
+        if (error) continue;
+        await writeChapters(data.id, parsed.chaptersData);
+        added += 1;
+      } catch (err) { /* skip one work */ }
+    }
+    try { await supabase.from('followed_series').update({ last_checked: new Date().toISOString(), work_count: list.length }).eq('id', s.id); } catch (_) {}
+    // A one-shot download (not a follow) is done once everything's pulled.
+    if (!s.follow && !plan.hitCap) {
+      try { await supabase.from('followed_series').delete().eq('id', s.id); } catch (_) {}
+    }
+  }
+  return { seriesAdded: added };
+}
+
 // ---- the on-device pull-to-refresh -----------------------------------------
-// Discover across all tracked AO3 groups, then fetch any pending AO3 links and
-// wanted saves — all on the phone, written to Supabase. Returns a small summary.
+// The full on-device pass: discover across tracked AO3 groups, fetch pending AO3
+// links + wanted saves, pull followed series, and refresh ongoing works for new
+// chapters — all on the phone, written to Supabase. Returns a small summary.
 export async function runSync({ onProgress } = {}) {
   if (!hasSupabase) return { ok: false, error: 'Not connected' };
-  let newMatches = 0, saved = 0;
+  let newMatches = 0, saved = 0, seriesAdded = 0, newChaptersCount = 0;
   try {
     const d = await discoverAll({ onProgress });
     newMatches = d.newMatches;
     const links = await processAo3Links({ onProgress });
     const dl = await downloadWanted({ onProgress });
     saved = links.done + dl.saved;
+    const ser = await processFollowedSeries({ onProgress });
+    seriesAdded = ser.seriesAdded;
+    const ref = await refreshOngoing({ onProgress });
+    newChaptersCount = ref.newChapters;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
-  return { ok: true, newMatches, saved };
+  return { ok: true, newMatches, saved, seriesAdded, newChapters: newChaptersCount };
 }
