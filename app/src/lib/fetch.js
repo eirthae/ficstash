@@ -6,6 +6,10 @@ import { CapacitorHttp } from '@capacitor/core';
 // AO3 returns Cloudflare 525 to our server proxy's datacenter IP ~100% of the
 // time, but answers the device.
 const API_UA = 'FicStash/1.0 (+https://github.com/eirthae/ficstash; personal reading app)';
+// A normal desktop UA for AO3's full HTML pages (work / search / series). The
+// JSON autocomplete endpoint wants API_UA + Accept:*/* (above); HTML pages are
+// happy with a browser-ish UA and an HTML Accept.
+const HTML_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 
 // Move an inline ?query off the URL into CapacitorHttp's native `params` — the
 // Android layer percent-encodes a literal "?" and AO3 then 302s to /404.
@@ -42,6 +46,43 @@ export async function fetchJson(url, { attempts = 4 } = {}) {
       last = r;
     } catch (e) {
       last = { status: 0, data: null, url, raw: String(e && e.message || e) };
+    }
+    if (i < attempts - 1) await new Promise((res) => setTimeout(res, 150));
+  }
+  return last;
+}
+
+async function getHtmlOnce(url, accept) {
+  const { base, params } = splitQuery(url);
+  const res = await CapacitorHttp.get({
+    url: base,
+    ...(params ? { params } : {}),
+    headers: { 'User-Agent': HTML_UA, Accept: accept },
+    responseType: 'text',
+    // follow redirects (default) so a restricted work lands on its /users/login
+    // page — the caller reads res.url to detect that.
+  });
+  const data = res && res.data;
+  return {
+    status: res ? res.status : 0,
+    url: (res && res.url) || url, // final URL after redirects (restricted detection)
+    html: typeof data === 'string' ? data : (data == null ? '' : String(data)),
+  };
+}
+
+// Fetch an HTML page over native HTTP, retrying past AO3's intermittent 525s —
+// the on-device counterpart to fetchJson. Used for AO3 work pages, tag search and
+// series paging (the port of the worker's AO3 scraping). Returns {status,url,html}
+// — a non-2xx or empty body after all attempts comes back so the caller decides.
+export async function fetchHtml(url, { attempts = 4, accept = 'text/html,application/xhtml+xml' } = {}) {
+  let last = { status: 0, url, html: '' };
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const r = await getHtmlOnce(url, accept);
+      if (r.status >= 200 && r.status < 300 && r.html) return r;
+      last = r;
+    } catch (e) {
+      last = { status: 0, url, html: '' };
     }
     if (i < attempts - 1) await new Promise((res) => setTimeout(res, 150));
   }
