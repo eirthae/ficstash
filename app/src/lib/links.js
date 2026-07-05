@@ -18,8 +18,11 @@ export async function requestUrl(url) {
   // AO3 link → fetch it NOW on-device (residential IP, which AO3 answers), so the
   // download lands without a worker round-trip. Non-AO3 (Royal Road, FFN, …) still
   // needs FanFicFare, so also kick the worker's fast lane. Both fire-and-forget.
+  // AO3 → fetch on-device (residential IP). Non-AO3 (Royal Road, FFN, …) needs
+  // FanFicFare, so those go to the worker. Only ONE path fires, so we stop spamming
+  // the worker on every AO3 add (which was churning its runs into cancellations).
   if (isAo3Url(clean)) processAo3Links().catch(() => {});
-  triggerSync({ savesOnly: true }).catch(() => {});
+  else triggerSync({ savesOnly: true }).catch(() => {});
   return { ok: true };
 }
 

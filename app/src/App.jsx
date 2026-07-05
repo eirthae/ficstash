@@ -17,7 +17,7 @@ import { fetchWorks } from './lib/library.js';
 import { notifySavedAvailable, ensureNotifyPermission } from './lib/notify.js';
 import { supabase, hasSupabase } from './lib/supabase.js';
 
-const READER_DEFAULTS = { theme: 'dark', font: 'serif', size: 19, leading: 1.70, margin: 26, brightness: 1 };
+const READER_DEFAULTS = { theme: 'grey', font: 'georgia', size: 19, leading: 1.70, margin: 18, brightness: 1 };
 
 export default function App() {
   // ---- app color mode (whole chrome) -------------------------------------

@@ -7,6 +7,14 @@ export function fandomName(work) {
   return ((work && work.fandom) || 'Other').split('–')[0].split(' - ')[0].trim() || 'Other';
 }
 
+// Which group a fic sits under on the Fics shelf: the user's manual override
+// (customGroup) if they set one, else its fandom. This is how a reader consolidates
+// AO3's many fandom tags into one recognizable bucket (e.g. Batman + Superman → DCU).
+export function ficGroupName(work) {
+  const cg = ((work && work.customGroup) || '').trim();
+  return cg || fandomName(work);
+}
+
 // Lowercased tag texts of a work (tags are [{ t, k }] or strings), for search + filtering.
 export function workTagSet(work) {
   return (Array.isArray(work && work.tags) ? work.tags : [])
@@ -72,11 +80,11 @@ export function groupFics(works, sort = 'default', lastRead = {}) {
     if (!g) { g = { name, series: [], loose: [], items: [] }; byFandom.set(name, g); }
     return g;
   };
-  for (const w of looseAll) { const g = ensure(fandomName(w)); g.loose.push(w); g.items.push(w); }
+  for (const w of looseAll) { const g = ensure(ficGroupName(w)); g.loose.push(w); g.items.push(w); }
   for (const s of seriesByKey.values()) {
     s.items.sort((a, b) => (a.ao3SeriesIndex ?? 1e9) - (b.ao3SeriesIndex ?? 1e9) || (a.title || '').localeCompare(b.title || ''));
-    if (s.items.length < 2) { const w = s.items[0]; const g = ensure(fandomName(w)); g.loose.push(w); g.items.push(w); continue; }
-    const g = ensure(fandomName(s.items[0]));
+    if (s.items.length < 2) { const w = s.items[0]; const g = ensure(ficGroupName(w)); g.loose.push(w); g.items.push(w); continue; }
+    const g = ensure(ficGroupName(s.items[0]));
     g.series.push(s); g.items.push(...s.items);
   }
   const groups = [...byFandom.values()];

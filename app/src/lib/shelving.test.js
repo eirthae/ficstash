@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  fandomName, workTagSet, shelfOf, sortWorks, orderGroups, groupFics,
+  fandomName, ficGroupName, workTagSet, shelfOf, sortWorks, orderGroups, groupFics,
   filterWorks, savedTypeOf, statusMatches, seriesWorksFrom, savedWorksFrom,
   passesGlobalPrefs, discoveryShelfForSource, excludedForShelf,
 } from './shelving.js';
@@ -77,6 +77,26 @@ test('groupFics keeps fandom separation and collapses multi-work series', () => 
   // s2 is a single-work series → NOT a series card, stays loose
   assert.equal(naruto.series.length, 0);
   assert.deepEqual(naruto.loose.map((w) => w.id), ['w4']);
+});
+
+// ---- ficGroupName + manual fic grouping -----------------------------------
+test('ficGroupName uses the manual override, else the fandom', () => {
+  assert.equal(ficGroupName({ fandom: 'Batman - All Media Types', customGroup: 'DCU' }), 'DCU');
+  assert.equal(ficGroupName({ fandom: 'Superman – DC', customGroup: '   ' }), 'Superman'); // blank override → fandom
+  assert.equal(ficGroupName({ fandom: 'Naruto' }), 'Naruto');
+  assert.equal(ficGroupName({}), 'Other');
+});
+
+test('groupFics consolidates works into a manual group across different fandoms', () => {
+  const works = [
+    { id: 'a', fandom: 'Batman - All Media Types', customGroup: 'DCU', title: 'A' },
+    { id: 'b', fandom: 'Superman', customGroup: 'DCU', title: 'B' },
+    { id: 'c', fandom: 'Naruto', title: 'C' },
+  ];
+  const groups = groupFics(works, 'default');
+  assert.deepEqual(groups.map((g) => g.name).sort(), ['DCU', 'Naruto']);
+  const dcu = groups.find((g) => g.name === 'DCU');
+  assert.deepEqual(dcu.loose.map((w) => w.id).sort(), ['a', 'b']); // both, though different fandoms
 });
 
 // ---- filterWorks ----------------------------------------------------------

@@ -16,6 +16,7 @@ function mapWork(row) {
     customTitle: row.custom_title || '',  // user rename override (Books)
     seriesName: row.series_name || '',    // manual/auto series grouping (Books)
     seriesIndex: row.series_index,        // reading order within the series
+    customGroup: row.custom_group || '',  // manual Fics-shelf group (overrides fandom)
     externalUrl: row.external_url || '',  // user-set open-at-source link
     ao3SeriesId: row.ao3_series_id || '',     // AO3 series this work belongs to
     ao3SeriesName: row.ao3_series_name || '', // for auto-grouping the Fics shelf
@@ -147,11 +148,41 @@ export async function fetchSeriesNames() {
 // Only these columns are writable here; pass undefined to leave one unchanged.
 export async function updateWorkFields(workId, fields) {
   if (!hasSupabase) return;
-  const allowed = ['custom_title', 'series_name', 'series_index', 'external_url'];
+  const allowed = ['custom_title', 'series_name', 'series_index', 'external_url', 'custom_group'];
   const patch = {};
   for (const k of allowed) if (fields[k] !== undefined) patch[k] = fields[k];
   if (!Object.keys(patch).length) return;
   const { error } = await supabase.from('works').update(patch).eq('id', workId);
+  if (error) throw error;
+}
+
+// Distinct group names already in use on the Fics shelf — the user's own custom
+// groups PLUS the auto fandom names — so the "move to group" picker can autocomplete
+// an existing bucket instead of retyping (and typo-splitting) it.
+export async function fetchGroupNames() {
+  if (!hasSupabase) return [];
+  const { data, error } = await supabase
+    .from('works')
+    .select('fandom, custom_group')
+    .eq('source', 'ao3')
+    .eq('hidden', false);
+  if (error) return [];
+  const set = new Set();
+  for (const r of data || []) {
+    const cg = (r.custom_group || '').trim();
+    if (cg) set.add(cg);
+    const f = (r.fandom || '').split('–')[0].split(' - ')[0].trim();
+    if (f) set.add(f);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+// Move fics into a manual group (or clear it → back to fandom grouping). Bulk:
+// the Fics tab lets you multi-select works and drop them into one bucket at once.
+export async function setWorksGroup(workIds, group) {
+  if (!hasSupabase || !workIds || !workIds.length) return;
+  const value = (group || '').trim() || null; // blank → null = fall back to fandom
+  const { error } = await supabase.from('works').update({ custom_group: value }).in('id', workIds);
   if (error) throw error;
 }
 

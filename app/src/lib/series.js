@@ -1,5 +1,4 @@
 import { supabase, hasSupabase } from './supabase.js';
-import { triggerSync } from './sync.js';
 import { processFollowedSeries } from './ondevice.js';
 
 // AO3 series actions. Both "download all works in this series" and "follow
@@ -31,9 +30,9 @@ export async function requestSeriesDownload(seriesId, seriesName = '') {
     .from('followed_series')
     .upsert({ series_id: String(seriesId), series_name: seriesName, follow: true }, { onConflict: 'series_id' });
   if (error) return { ok: false, error: error.message || String(error) };
-  // Pull the series NOW, on-device (residential IP). Worker stays as a fallback.
+  // Pull the series NOW, on-device (residential IP) — series are AO3, so the worker
+  // isn't needed and its extra dispatch just churned runs into cancellations.
   processFollowedSeries().catch(() => {});
-  triggerSync().catch(() => {});
   return { ok: true, follow: true };
 }
 
@@ -60,8 +59,7 @@ export async function setSeriesFollow(seriesId, seriesName, follow) {
       .from('followed_series')
       .upsert({ series_id: String(seriesId), series_name: seriesName, follow: true }, { onConflict: 'series_id' });
     if (error) return { ok: false, error: error.message || String(error) };
-    processFollowedSeries().catch(() => {}); // pull on-device now
-    triggerSync({ savesOnly: true }).catch(() => {}); // worker fallback
+    processFollowedSeries().catch(() => {}); // pull on-device now (AO3 series)
     return { ok: true, follow: true };
   }
   // Unfollow: keep a one-shot download in flight if works are still pending, but

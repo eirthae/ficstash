@@ -2,6 +2,7 @@ import { supabase, hasSupabase } from './supabase.js';
 import { hashStr, COVER_PALETTES } from '../data/sample.js';
 import { fetchJson } from './fetch.js';
 import { discoverGroup, saveMatchNow } from './ondevice.js';
+import { kickSave } from './sync.js';
 
 // ============================================================================
 // Tracked tag groups — the one part of the app that writes to Supabase.
@@ -82,7 +83,9 @@ export async function requestSave(matchId) {
     .single();
   if (error) throw error;
   if (data && data.source === 'ao3' && data.source_work_id) {
-    saveMatchNow(data.source_work_id).catch(() => {}); // fire-and-forget
+    saveMatchNow(data.source_work_id).catch(() => {}); // on-device (residential IP)
+  } else {
+    kickSave().catch(() => {}); // non-AO3 (Royal Road, …) still needs the worker
   }
 }
 
