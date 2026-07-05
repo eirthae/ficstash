@@ -3,7 +3,7 @@ import Icon from '../components/Icon.jsx';
 import { StatusBadge, FrozenBadge, TagChip, fmtWords, useToast, Sheet } from '../components/ui.jsx';
 import { ChapterRow } from '../components/cards.jsx';
 import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
-import { fetchChapters, removeWork, updateWorkFields, fetchSeriesNames } from '../lib/library.js';
+import { fetchChapters, removeWork, updateWorkFields, fetchSeriesNames, fetchWorkById } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 import { refetchWork } from '../lib/ondevice.js';
@@ -12,7 +12,12 @@ import { TagGroupBuilder } from './Discover.jsx';
 import { getReadingPos } from '../lib/reading.js';
 import { workUrl, sourceLabel } from '../sources/index.js';
 
-export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onReload, nav }) {
+export function StoryDetailScreen({ work: workProp, suggestion, onSaved, onRemoved, onReload, nav }) {
+  // Hold `work` in state seeded from the prop, so a re-fetch can swap in the fresh
+  // copy (new workSkin / counts) — the reader we open then reads the updated work,
+  // not the stale object captured when this screen was pushed.
+  const [work, setWork] = useState(workProp);
+  useEffect(() => { setWork(workProp); }, [workProp && workProp.id]);
   const pal = COVER_PALETTES[work.palette] || COVER_PALETTES[0];
   const total = work.chaptersTotal || work.chapters || 1;
   const srcLabel = sourceLabel(work.source);
@@ -107,7 +112,12 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
     showToast('Re-fetching from AO3…');
     try {
       const r = await refetchWork(work.sourceWorkId);
-      if (r && r.ok) { showToast('Re-fetched — reopen to read the updated copy', 'solar:check-circle-bold'); onReload?.(); }
+      if (r && r.ok) {
+        const fresh = await fetchWorkById(work.id);
+        if (fresh) setWork(fresh); // reader now opens the updated copy
+        showToast('Re-fetched — open it to read the updated copy', 'solar:check-circle-bold');
+        onReload?.();
+      }
       else if (r && r.restricted) showToast('Members-only — can’t re-fetch', 'solar:danger-triangle-bold');
       else showToast('AO3 didn’t answer — try again', 'solar:danger-triangle-bold');
     } catch { showToast('Re-fetch failed — try again', 'solar:danger-triangle-bold'); }

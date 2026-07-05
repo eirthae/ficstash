@@ -68,6 +68,16 @@ export async function fetchWorks() {
   return (data || []).map(mapWork);
 }
 
+// Re-read a single work by id (fresh workSkin/counts/etc. after a re-fetch), so the
+// detail screen and the reader it opens use the updated copy — not the stale object
+// captured when the screen was first pushed.
+export async function fetchWorkById(id) {
+  if (!hasSupabase || !id) return null;
+  const { data, error } = await supabase.from('works').select('*').eq('id', id).maybeSingle();
+  if (error || !data) return null;
+  return mapWork(data);
+}
+
 // Day bucket for the What's New feeds (Today / Yesterday / This week + "Xh ago").
 function dayBucketLocal(iso) {
   if (!iso) return { day: 'This week', time: '' };
