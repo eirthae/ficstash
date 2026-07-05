@@ -1,4 +1,4 @@
-import { fetchHtml, fetchJson } from '../fetch.js';
+import { fetchHtml, fetchJson, fetchImageDataUri } from '../fetch.js';
 
 // On-device AO3 source — the JS port of the worker's ao3.py, run on the PHONE.
 // AO3 Cloudflare-525s our datacenter IPs (Supabase, the GitHub Actions worker) but
@@ -94,6 +94,15 @@ export function parseWork(html, id = '') {
     chapters.push({ n: 1, title, content: b.html, words: b.words });
   }
 
+  // The AO3 "work skin": the <style> block scoped to #workskin that turns classed
+  // divs into chat bubbles / texting UIs. Captured verbatim (capped); the reader
+  // sanitizes + applies it. Without this, chat/texting fics render as plain text.
+  let workSkin = '';
+  for (const st of doc.querySelectorAll('style')) {
+    const css = st.textContent || '';
+    if (css.includes('#workskin')) { workSkin = css.trim().slice(0, 20000); break; }
+  }
+
   return {
     source: 'ao3',
     sourceId: String(id || ''),
@@ -113,8 +122,39 @@ export function parseWork(html, id = '') {
     seriesIndex,
     ao3SeriesId,
     url: workUrl(id),
+    workSkin,
     chaptersData: chapters,
   };
+}
+
+// Inline a work's remote images as data: URIs so they render offline (the reader
+// swaps any remaining remote <img> for a placeholder — the "📷 image" the worker
+// avoided by inlining at capture). Fetched on-device (residential IP). Capped for
+// size/politeness; a failed/oversized image is left remote (→ placeholder), so
+// this only ever improves on the current behaviour. Mutates chaptersData.
+async function inlineChapterImages(parsed) {
+  const MAX_IMAGES = 40;
+  const MAX_TOTAL = 6_000_000; // ~4.4 MB decoded budget across the whole work
+  let count = 0, total = 0;
+  for (const ch of parsed.chaptersData || []) {
+    if (!ch || !ch.content || !/<img/i.test(ch.content) || count >= MAX_IMAGES) continue;
+    const doc = new DOMParser().parseFromString(ch.content, 'text/html');
+    let changed = false;
+    for (const img of doc.querySelectorAll('img')) {
+      if (count >= MAX_IMAGES) break;
+      const src = (img.getAttribute('src') || '').trim();
+      if (!src || /^data:/i.test(src) || !/^https?:\/\//i.test(src)) continue;
+      const uri = await fetchImageDataUri(src);
+      if (uri && (total + uri.length) <= MAX_TOTAL) {
+        img.setAttribute('src', uri);
+        img.removeAttribute('srcset');
+        img.removeAttribute('loading');
+        img.removeAttribute('referrerpolicy');
+        total += uri.length; count += 1; changed = true;
+      }
+    }
+    if (changed) ch.content = doc.body.innerHTML;
+  }
 }
 
 // Fetch + parse one AO3 work by id, on-device. Returns the parsed work (with
@@ -125,7 +165,9 @@ export async function fetchWork(id) {
   const r = await fetchHtml(fullWorkUrl(wid));
   if (/\/users\/login/i.test(r.url || '') && /restricted=true/i.test(r.url || '')) return { restricted: true };
   if (!r.html || r.status >= 400) throw new Error(`AO3 HTTP ${r.status || '?'}`);
-  return parseWork(r.html, wid);
+  const parsed = parseWork(r.html, wid);
+  if (!parsed.restricted) await inlineChapterImages(parsed); // remote imgs → data: URIs
+  return parsed;
 }
 
 // ---- series enumeration (Download all / Follow series) ----------------------

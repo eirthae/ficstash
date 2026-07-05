@@ -181,6 +181,14 @@ async function markMatchesSaved(sourceWorkId) {
   } catch (e) { /* non-fatal */ }
 }
 
+// Re-download an AO3 work already in the library, on-device, with the current
+// pipeline (captures the work skin + inlines images). For the per-work "Re-fetch"
+// action — fixes chat/texting/image works that were fetched by an older build.
+// origin:null so the upsert keeps the work's existing origin lane.
+export async function refetchWork(sourceWorkId) {
+  return downloadWork(sourceWorkId, { origin: null });
+}
+
 // Save a single AO3 match NOW (a tapped Save), on-device. On success the match
 // flips to saved and the work is in the library.
 export async function saveMatchNow(sourceWorkId) {

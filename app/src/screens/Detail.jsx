@@ -6,6 +6,7 @@ import { COVER_PALETTES, CHAPTERS } from '../data/sample.js';
 import { fetchChapters, removeWork, updateWorkFields, fetchSeriesNames } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
+import { refetchWork } from '../lib/ondevice.js';
 import { getSeriesFollow, requestSeriesDownload, setSeriesFollow } from '../lib/series.js';
 import { TagGroupBuilder } from './Discover.jsx';
 import { getReadingPos } from '../lib/reading.js';
@@ -94,6 +95,24 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
   // this story's source (AO3 tag → AO3 builder, Scribble Hub → SH, …), so the
   // user can add include/exclude tags and hit Follow. `tagBuilder` = tapped tag.
   const [tagBuilder, setTagBuilder] = useState(null);
+
+  // Re-fetch: re-download this work on-device with the current pipeline (captures
+  // the chat/texting work skin + inlines images), for works an older build rendered
+  // wrong. Lets the user fix specific works without re-syncing the whole library.
+  const [refetching, setRefetching] = useState(false);
+  const refetch = async () => {
+    setShowMenu(false);
+    if (refetching) return;
+    setRefetching(true);
+    showToast('Re-fetching from AO3…');
+    try {
+      const r = await refetchWork(work.sourceWorkId);
+      if (r && r.ok) { showToast('Re-fetched — reopen to read the updated copy', 'solar:check-circle-bold'); onReload?.(); }
+      else if (r && r.restricted) showToast('Members-only — can’t re-fetch', 'solar:danger-triangle-bold');
+      else showToast('AO3 didn’t answer — try again', 'solar:danger-triangle-bold');
+    } catch { showToast('Re-fetch failed — try again', 'solar:danger-triangle-bold'); }
+    finally { setRefetching(false); }
+  };
 
   const fetchCh = (ch) => {
     if (chState[ch.n] === 'done' || chState[ch.n] === 'busy') return;
@@ -327,6 +346,16 @@ export function StoryDetailScreen({ work, suggestion, onSaved, onRemoved, onRelo
             <div style={{ flex: 1 }}>
               <div className="set-h">Edit details</div>
               <div className="set-d">{isBook ? 'Rename, set a series & reading order, add a link.' : 'Rename or add a custom link.'}</div>
+            </div>
+          </button>
+        )}
+        {!suggestion && work.source === 'ao3' && (
+          <button className="set-group pressable" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 14, width: '100%', textAlign: 'left', marginBottom: 10 }}
+            onClick={refetch} disabled={refetching}>
+            <div className="set-ic"><Icon icon="solar:refresh-circle-linear" size={18} /></div>
+            <div style={{ flex: 1 }}>
+              <div className="set-h">{refetching ? 'Re-fetching…' : 'Re-fetch from AO3'}</div>
+              <div className="set-d">Re-download with the latest reader — fixes broken chat/texting or images.</div>
             </div>
           </button>
         )}

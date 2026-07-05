@@ -69,6 +69,7 @@ export function workRow(parsed, origin) {
     hidden: false,
   };
   if (origin) row.origin = origin;
+  if (parsed.workSkin) row.work_skin = parsed.workSkin; // chat/texting CSS (reader applies it)
   if (parsed.ao3SeriesId) {
     row.ao3_series_id = parsed.ao3SeriesId;
     row.ao3_series_name = parsed.series || '';

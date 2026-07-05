@@ -70,6 +70,37 @@ async function getHtmlOnce(url, accept) {
   };
 }
 
+// Fetch a remote image over native HTTP and return it as a `data:` URI (so the
+// reader can show it OFFLINE — the reader neutralizes any remaining remote <img>
+// to a placeholder). Native CapacitorHttp returns binary as a base64 string for
+// responseType 'blob'. Best-effort: any failure returns '' and the caller leaves
+// the image remote (→ placeholder), i.e. no worse than before.
+export async function fetchImageDataUri(url) {
+  try {
+    const { base, params } = splitQuery(url);
+    const res = await CapacitorHttp.get({
+      url: base,
+      ...(params ? { params } : {}),
+      headers: { 'User-Agent': HTML_UA, Accept: 'image/*,*/*' },
+      responseType: 'blob',
+    });
+    const b64 = typeof res.data === 'string' ? res.data : '';
+    if (!b64) return '';
+    const h = res.headers || {};
+    let ctype = (h['Content-Type'] || h['content-type'] || '').split(';')[0].trim();
+    if (!/^image\//i.test(ctype)) {
+      // Infer from a data-ish extension if the header was unhelpful.
+      if (/\.png(\?|$)/i.test(base)) ctype = 'image/png';
+      else if (/\.gif(\?|$)/i.test(base)) ctype = 'image/gif';
+      else if (/\.webp(\?|$)/i.test(base)) ctype = 'image/webp';
+      else ctype = 'image/jpeg';
+    }
+    return `data:${ctype};base64,${b64}`;
+  } catch (e) {
+    return '';
+  }
+}
+
 // Fetch an HTML page over native HTTP, retrying past AO3's intermittent 525s —
 // the on-device counterpart to fetchJson. Used for AO3 work pages, tag search and
 // series paging (the port of the worker's AO3 scraping). Returns {status,url,html}

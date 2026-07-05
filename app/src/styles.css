@@ -374,6 +374,10 @@ input,textarea { font-family:inherit; }
 .reader-article .chapter-body hr { border:none; border-top:1px solid var(--reader-border); margin:26px auto; width:60%; }
 .reader-article .chapter-body h1, .reader-article .chapter-body h2, .reader-article .chapter-body h3 { font-family:var(--font-serif); color:var(--reader-ui); line-height:1.25; margin:1.2em 0 .5em; }
 .reader-article .chapter-body img { max-width:100%; height:auto; }
+/* Chat/texting work-skins (phone screens, message bubbles) render edge-to-edge:
+   break out of the reader's text margin so the pseudo-phone spans the full column,
+   as it does on AO3. The skin's own padding keeps content off the screen edges. */
+.reader-article .chapter-body.ws-skin { margin-left:calc(-1 * var(--r-margin,18px)); margin-right:calc(-1 * var(--r-margin,18px)); }
 .reader-brightness { position:absolute; inset:0; background:#000; pointer-events:none; z-index:5; transition:opacity .2s; }
 
 /* end-of-chapter marker */
