@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import { EmptyState, useToast, Sheet, PullToRefresh } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
@@ -127,8 +127,17 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [moveOpen, setMoveOpen] = useState(false);
-  const toggleSelect = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // Toggle a set of work ids at once: a whole fandom (or series) if all its ids are
+  // already selected → deselect them, else select them; a single work is just [id].
+  const toggleIds = (ids) => setSelected(s => {
+    const n = new Set(s);
+    const all = ids.length > 0 && ids.every(id => n.has(id));
+    ids.forEach(id => (all ? n.delete(id) : n.add(id)));
+    return n;
+  });
   const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
+  // Long-press a fandom → enter select mode with that fandom's works already picked.
+  const startSelect = (ids) => { setSelectMode(true); setSelected(s => new Set([...s, ...ids])); };
 
   const reloadLinks = () => fetchPendingLinks().then(setPendingLinks).catch(() => {});
   useEffect(() => { reloadLinks(); }, [refreshKey]);
@@ -376,20 +385,12 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
         )}
 
         {shelf === 'fics' && useFandom && shown.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 20px 14px' }}>
-            {!selectMode ? (
-              <button className="linklike" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }} onClick={() => setSelectMode(true)}>
-                <Icon icon="solar:check-square-linear" size={15} style={{ verticalAlign: '-2px', marginRight: 4 }} />Select to group
-              </button>
-            ) : (
-              <>
-                <button className="linklike" style={{ fontSize: 12.5 }} onClick={exitSelect}>Cancel</button>
-                <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--text-secondary)' }}>{selected.size} selected</span>
-                <button className="btn" disabled={!selected.size} onClick={() => setMoveOpen(true)}
-                  style={{ padding: '7px 14px', fontSize: 13, background: 'var(--accent)', color: '#fff', opacity: selected.size ? 1 : 0.5 }}>
-                  Move to group
-                </button>
-              </>
+          <div style={{ display: 'flex', alignItems: 'center', margin: '0 20px 12px', minHeight: 22 }}>
+            <span style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>
+              {selectMode ? 'Tap a fandom to select all its works' : 'Long-press a fandom to group them'}
+            </span>
+            {selectMode && (
+              <button className="linklike" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }} onClick={exitSelect}>Done</button>
             )}
           </div>
         )}
@@ -413,7 +414,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
           <FicsSections groups={ficsGroups} open={open}
             openSeries={(s) => nav.push('series', { seriesId: s.seriesId, seriesName: s.name, onReload })}
             onDelete={setPendingDelete} collapsed={collapsed} toggle={toggleSection}
-            selectMode={selectMode} selected={selected} onToggleSelect={toggleSelect} />
+            selectMode={selectMode} selected={selected} toggleIds={toggleIds} startSelect={startSelect} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
             {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => setPendingDelete(w)} />)}
@@ -423,6 +424,19 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
 
       <FilterSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} pool={tagPool}
         inc={incTags} exc={excTags} setInc={setIncTags} setExc={setExcTags} />
+
+      {selectMode && selected.size > 0 && (
+        <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 60,
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '12px 20px calc(12px + env(safe-area-inset-bottom))',
+          background: 'var(--surface-elevated)', borderTop: '0.5px solid var(--border)' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{selected.size} selected</span>
+          <button className="btn" onClick={() => setMoveOpen(true)}
+            style={{ marginLeft: 'auto', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 14, fontWeight: 600 }}>
+            Move to group
+          </button>
+        </div>
+      )}
 
       <MoveToGroupSheet open={moveOpen} count={selected.size} onClose={() => setMoveOpen(false)} onApply={applyGroup} />
 
@@ -551,87 +565,121 @@ function SeriesSections({ groups, open, onDelete, collapsed, toggle }) {
   );
 }
 
-// Fics shelf: fandom sections, each with its series cards (clickable → series
-// page) above its loose works. Built by groupFics.
-// Move the selected fics into a group. Free-text name with autocomplete of groups
-// that already exist (the user's custom groups + fandom names), reusing the Books
-// series-picker pattern. "Clear group" removes the override → back to fandom.
+// Move the selected fics into a group. Free-text name with a TALL, in-flow list of
+// groups that already exist (the user's custom groups + fandom names) — no cramped
+// floating dropdown — and one "Move here" button. An empty name clears the override
+// (ungroup → back to fandom).
 function MoveToGroupSheet({ open, count, onClose, onApply }) {
   const [name, setName] = useState('');
   const [all, setAll] = useState([]);
   useEffect(() => { if (open) { setName(''); fetchGroupNames().then(setAll).catch(() => {}); } }, [open]);
   const q = name.trim().toLowerCase();
-  const matches = (q ? all.filter(s => s.toLowerCase().includes(q) && s.toLowerCase() !== q) : all).slice(0, 8);
+  const matches = (q ? all.filter(s => s.toLowerCase().includes(q) && s.toLowerCase() !== q) : all).slice(0, 30);
   return (
     <Sheet open={open} onClose={onClose} title={`Move ${count} fic${count === 1 ? '' : 's'} to a group`}>
-      <div style={{ position: 'relative', marginBottom: 16 }}>
-        <div className="searchfield" style={{ background: 'var(--surface-2)' }}>
-          <input placeholder="e.g. DCU" value={name} autoComplete="off" onChange={e => setName(e.target.value)} />
-        </div>
-        {matches.length > 0 && (
-          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 5, marginTop: 4,
-            background: 'var(--surface-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
-            boxShadow: 'var(--shadow-pop)', overflow: 'hidden', maxHeight: 232, overflowY: 'auto' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '7px 12px 4px' }}>Existing groups</div>
-            {matches.map(s => (
-              <button key={s} className="pressable" onClick={() => setName(s)}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                  padding: '9px 12px', background: 'transparent', borderTop: '1px solid var(--border)',
-                  fontSize: 13.5, color: 'var(--text-primary)' }}>
-                <Icon icon="solar:folder-linear" size={15} color="var(--text-tertiary)" />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s}</span>
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="searchfield" style={{ background: 'var(--surface-2)', marginBottom: 14 }}>
+        <input placeholder="e.g. DCU" value={name} autoComplete="off" onChange={e => setName(e.target.value)} />
       </div>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <button className="btn" style={{ flex: 1, background: 'var(--surface-2)' }} onClick={() => onApply('')}>Clear group</button>
-        <button className="btn" style={{ flex: 2, background: 'var(--accent)', color: '#fff', opacity: name.trim() ? 1 : 0.5 }}
-          disabled={!name.trim()} onClick={() => onApply(name)}>Move here</button>
+      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '0 0 6px' }}>
+        {matches.length ? 'Existing groups — tap to reuse' : (name.trim() ? 'New group — will be created' : 'Empty = ungroup (back to fandom)')}
       </div>
+      <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 264, overflowY: 'auto', marginBottom: 18 }}>
+        {matches.map(s => (
+          <button key={s} className="pressable" onClick={() => setName(s)}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
+              padding: '11px 4px', background: 'transparent', borderTop: '0.5px solid var(--border)',
+              fontSize: 14, color: 'var(--text-primary)' }}>
+            <Icon icon="solar:folder-linear" size={16} color="var(--text-tertiary)" />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s}</span>
+          </button>
+        ))}
+      </div>
+      <button className="btn" onClick={() => onApply(name)}
+        style={{ width: '100%', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 12, padding: 14, fontSize: 14.5, fontWeight: 600 }}>
+        Move here
+      </button>
     </Sheet>
   );
 }
 
-// A fic card in select mode: the whole card toggles selection (its own buttons are
-// disabled via pointer-events) with a ring + check overlay.
-function FicSelectCard({ work, selected, onToggle }) {
+// The selection circle in the fandom list while in select mode. state 'on' (all of
+// the target selected) / 'partial' (some) / 'off'. Stops propagation so tapping it
+// doesn't also collapse the section or open the work.
+function SelCircle({ state, onClick }) {
+  const icon = state === 'on' ? 'solar:check-circle-bold' : state === 'partial' ? 'solar:minus-circle-linear' : 'solar:circle-linear';
   return (
-    <div onClick={onToggle} className="pressable" style={{ position: 'relative', cursor: 'pointer' }}>
-      <div style={{ pointerEvents: 'none' }}>
-        <LibraryCard work={work} onOpen={() => {}} onDelete={() => {}} />
-      </div>
-      <div style={{ position: 'absolute', inset: 0, borderRadius: 'var(--radius-lg, 14px)', pointerEvents: 'none',
-        border: selected ? '2px solid var(--accent)' : '2px solid transparent',
-        background: selected ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'transparent' }} />
-      <div style={{ position: 'absolute', top: 10, right: 10, pointerEvents: 'none' }}>
-        <Icon icon={selected ? 'solar:check-circle-bold' : 'solar:circle-linear'} size={22}
-          color={selected ? 'var(--accent)' : 'var(--text-tertiary)'} />
-      </div>
-    </div>
+    <button aria-label={state === 'on' ? 'Deselect' : 'Select'} onClick={(e) => { e.stopPropagation(); onClick(); }}
+      style={{ flex: 'none', padding: 4, background: 'transparent', border: 'none', display: 'flex', cursor: 'pointer' }}>
+      <Icon icon={icon} size={24} color={state === 'off' ? 'var(--text-tertiary)' : 'var(--accent)'} />
+    </button>
   );
 }
 
-function FicsSections({ groups, open, openSeries, onDelete, collapsed, toggle, selectMode, selected, onToggleSelect }) {
+// Fandom section header. A short click toggles collapse; a long-press (≈450ms)
+// starts selection with that fandom picked. We suppress the click that fires after
+// a long-press so it doesn't also collapse the section.
+function FandomHeader({ name, count, isOpen, onToggle, onLongPress }) {
+  const timer = useRef(null);
+  const longFired = useRef(false);
+  const start = () => {
+    longFired.current = false;
+    timer.current = setTimeout(() => { longFired.current = true; onLongPress(); }, 450);
+  };
+  const cancel = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  const onClick = () => { if (longFired.current) { longFired.current = false; return; } onToggle(); };
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '0 20px 24px' }}>
+    <button className="fandom-head pressable" aria-expanded={isOpen} style={{ flex: 1 }}
+      onClick={onClick}
+      onTouchStart={start} onTouchEnd={cancel} onTouchMove={cancel}
+      onMouseDown={start} onMouseUp={cancel} onMouseLeave={cancel}
+      onContextMenu={(e) => e.preventDefault()}>
+      <Icon icon="solar:alt-arrow-down-linear" size={18}
+        style={{ transition: 'transform .18s', transform: isOpen ? 'none' : 'rotate(-90deg)' }} />
+      <span className="fandom-name">{name}</span>
+      <span className="fandom-count">{count}</span>
+    </button>
+  );
+}
+
+// Fics shelf: fandom sections, each with its series cards (→ series page) above its
+// loose works. Long-press a fandom to start selecting; in select mode a SelCircle on
+// the RIGHT of each fandom selects ALL its works (series included); series rows +
+// loose works get their own circle too.
+function FicsSections({ groups, open, openSeries, onDelete, collapsed, toggle, selectMode, selected, toggleIds, startSelect }) {
+  const stateOf = (ids) => {
+    if (!ids.length) return 'off';
+    const on = ids.reduce((n, id) => n + (selected.has(id) ? 1 : 0), 0);
+    return on === 0 ? 'off' : on === ids.length ? 'on' : 'partial';
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: `0 20px ${selectMode ? 88 : 24}px` }}>
       {groups.map(g => {
         const isOpen = !collapsed[g.name];
+        const gIds = g.items.map(w => w.id);
         return (
           <div key={g.name}>
-            <button className="fandom-head pressable" onClick={() => toggle(g.name)} aria-expanded={isOpen}>
-              <Icon icon="solar:alt-arrow-down-linear" size={18}
-                style={{ transition: 'transform .18s', transform: isOpen ? 'none' : 'rotate(-90deg)' }} />
-              <span className="fandom-name">{g.name}</span>
-              <span className="fandom-count">{g.items.length}</span>
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <FandomHeader name={g.name} count={g.items.length} isOpen={isOpen}
+                onToggle={() => toggle(g.name)} onLongPress={() => startSelect(gIds)} />
+              {selectMode && <SelCircle state={stateOf(gIds)} onClick={() => toggleIds(gIds)} />}
+            </div>
             {isOpen && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 13, paddingTop: 11 }}>
-                {g.series.map(s => <SeriesRow key={s.seriesId} series={s} onOpen={() => openSeries(s)} />)}
-                {g.loose.map(w => selectMode
-                  ? <FicSelectCard key={w.id} work={w} selected={selected.has(w.id)} onToggle={() => onToggleSelect(w.id)} />
-                  : <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => onDelete(w)} />)}
+                {g.series.map(s => {
+                  const sIds = s.items.map(w => w.id);
+                  return selectMode ? (
+                    <div key={s.seriesId} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}><SeriesRow series={s} onOpen={() => {}} /></div>
+                      <SelCircle state={stateOf(sIds)} onClick={() => toggleIds(sIds)} />
+                    </div>
+                  ) : <SeriesRow key={s.seriesId} series={s} onOpen={() => openSeries(s)} />;
+                })}
+                {g.loose.map(w => selectMode ? (
+                  <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ flex: 1, minWidth: 0, pointerEvents: 'none' }}><LibraryCard work={w} onOpen={() => {}} onDelete={() => {}} /></div>
+                    <SelCircle state={selected.has(w.id) ? 'on' : 'off'} onClick={() => toggleIds([w.id])} />
+                  </div>
+                ) : <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => onDelete(w)} />)}
               </div>
             )}
           </div>
