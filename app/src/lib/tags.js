@@ -75,17 +75,20 @@ function mapMatch(row) {
 // fallback (and handles non-AO3 sources) if the on-device fetch misses.
 export async function requestSave(matchId) {
   if (!hasSupabase) return;
+  // maybeSingle (not single): an update that matches no row must NOT throw — the
+  // old requestSave was a silent no-op there, and a throw would make a save fail
+  // silently ("not appearing"). null data → fall through to the worker kick.
   const { data, error } = await supabase
     .from('tag_matches')
     .update({ wanted: true, seen: true })
     .eq('id', matchId)
     .select('source, source_work_id')
-    .single();
+    .maybeSingle();
   if (error) throw error;
   if (data && data.source === 'ao3' && data.source_work_id) {
     saveMatchNow(data.source_work_id).catch(() => {}); // on-device (residential IP)
   } else {
-    kickSave().catch(() => {}); // non-AO3 (Royal Road, …) still needs the worker
+    kickSave().catch(() => {}); // non-AO3 (Royal Road, …) or unresolved → worker
   }
 }
 
