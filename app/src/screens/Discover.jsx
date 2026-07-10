@@ -720,6 +720,7 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
 // ---- Results: works the worker found for a tracked group -------------------
 export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   const [items, setItems] = useState(null); // null = loading
+  const [statusFilter, setStatusFilter] = useState('all'); // all | ongoing | complete — quick filter over the results
   const [titleExpanded, setTitleExpanded] = useState(false); // tap title to see full tag-group name
   const [toast, showToast] = useToast();
   const c = TAG_COLOR[tag.kind] || 'var(--accent)';
@@ -764,6 +765,11 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   };
 
   const list = items || [];
+  // Quick complete/ongoing filter over the loaded results (client-side — separate
+  // from the group's own status setting in its tag settings).
+  const shown = statusFilter === 'all' ? list
+    : statusFilter === 'complete' ? list.filter((w) => (w.status || '') === 'complete')
+      : list.filter((w) => (w.status || '') !== 'complete');
   // Tags this group is already defined by — hidden from each card so the chips
   // show OTHER tags (no repeating what you're browsing).
   const groupTagNames = [tag.name, ...((tag.tags || []).map((t) => (typeof t === 'string' ? t : t.name)))].filter(Boolean);
@@ -781,20 +787,35 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         titleExpanded={titleExpanded}
       />
       <div className="scroll" style={{ padding: '4px 20px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 16 }}>
           <span className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, height: 26 }}>
             <span className="swatch" style={{ background: c }}></span>{kindLabel}
           </span>
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>metadata only — nothing downloaded</span>
+          {list.length > 0 && (
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+              <button aria-label="Ongoing only" title="Ongoing only"
+                onClick={() => setStatusFilter((s) => (s === 'ongoing' ? 'all' : 'ongoing'))}
+                style={{ width: 34, height: 30, borderRadius: 8, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: statusFilter === 'ongoing' ? 'var(--accent-soft)' : 'transparent' }}>
+                <Icon icon="solar:clock-circle-linear" size={19} color={statusFilter === 'ongoing' ? 'var(--accent)' : 'var(--text-tertiary)'} />
+              </button>
+              <button aria-label="Complete only" title="Complete only"
+                onClick={() => setStatusFilter((s) => (s === 'complete' ? 'all' : 'complete'))}
+                style={{ width: 34, height: 30, borderRadius: 8, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: statusFilter === 'complete' ? 'var(--accent-soft)' : 'transparent' }}>
+                <Icon icon="solar:check-circle-linear" size={19} color={statusFilter === 'complete' ? 'var(--accent)' : 'var(--text-tertiary)'} />
+              </button>
+            </div>
+          )}
         </div>
 
         {items === null ? (
           <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Loading…</div>
         ) : list.length === 0 ? (
           <EmptyState icon="solar:inbox-line-linear" title="No matches yet" desc={`When the worker next checks ${srcLabel}, new works for this ${kindLabel} will appear here.`} />
+        ) : shown.length === 0 ? (
+          <EmptyState icon="solar:inbox-line-linear" title={`No ${statusFilter} works here`} desc="Tap the filter icon again to show all." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-            {list.map((w) => (
+            {shown.map((w) => (
               <SuggestionCard
                 key={w.id}
                 work={w}

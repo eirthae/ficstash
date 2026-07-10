@@ -13,12 +13,24 @@ const HTML_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 
 // Move an inline ?query off the URL into CapacitorHttp's native `params` — the
 // Android layer percent-encodes a literal "?" and AO3 then 302s to /404.
+//
+// We keep every key AND value PERCENT-ENCODED exactly as built, and the callers
+// pass shouldEncodeUrlParams:false so the native layer sends them verbatim. If we
+// instead decode here (URLSearchParams) and let CapacitorHttp re-encode, native
+// Android drops a literal "&" in a value — so an AO3 relationship tag like
+// "Shane Hollander & Carter Vaughn" collapsed to "Shane Hollander" and the search
+// returned unrelated works. Our URL builders already encodeURIComponent the values,
+// so verbatim pass-through is correct.
 function splitQuery(url) {
   const s = String(url);
   const qi = s.indexOf('?');
   if (qi < 0) return { base: s, params: null };
   const params = {};
-  for (const [k, v] of new URLSearchParams(s.slice(qi + 1))) params[k] = v;
+  for (const pair of s.slice(qi + 1).split('&')) {
+    if (!pair) continue;
+    const eq = pair.indexOf('=');
+    params[eq < 0 ? pair : pair.slice(0, eq)] = eq < 0 ? '' : pair.slice(eq + 1);
+  }
   return { base: s.slice(0, qi), params };
 }
 
@@ -26,7 +38,7 @@ async function getOnce(url) {
   const { base, params } = splitQuery(url);
   const res = await CapacitorHttp.get({
     url: base,
-    ...(params ? { params } : {}),
+    ...(params ? { params, shouldEncodeUrlParams: false } : {}),
     headers: { 'User-Agent': API_UA, Accept: '*/*' },
     responseType: 'text',
   });
@@ -56,7 +68,7 @@ async function getHtmlOnce(url, accept) {
   const { base, params } = splitQuery(url);
   const res = await CapacitorHttp.get({
     url: base,
-    ...(params ? { params } : {}),
+    ...(params ? { params, shouldEncodeUrlParams: false } : {}),
     headers: { 'User-Agent': HTML_UA, Accept: accept },
     responseType: 'text',
     // follow redirects (default) so a restricted work lands on its /users/login
@@ -80,7 +92,7 @@ export async function fetchImageDataUri(url) {
     const { base, params } = splitQuery(url);
     const res = await CapacitorHttp.get({
       url: base,
-      ...(params ? { params } : {}),
+      ...(params ? { params, shouldEncodeUrlParams: false } : {}),
       headers: { 'User-Agent': HTML_UA, Accept: 'image/*,*/*' },
       responseType: 'blob',
     });

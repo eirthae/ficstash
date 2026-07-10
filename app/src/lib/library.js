@@ -59,13 +59,26 @@ function mapChapter(row) {
 
 export async function fetchWorks() {
   if (!hasSupabase) return null; // signal: not configured → caller uses sample data
-  const { data, error } = await supabase
-    .from('works')
-    .select('*')
-    .eq('hidden', false)
-    .order('source_updated', { ascending: false, nullsFirst: false });
-  if (error) throw error;
-  return (data || []).map(mapWork);
+  // Page through ALL works — a single select is capped at PostgREST's 1000-row
+  // default, which silently hid works past the cap. On-device saves have a null
+  // source_updated so they sort LAST, making them the first to fall off the cap —
+  // "saved but not in the library" (readable from What's New, missing from the
+  // shelf). We .range() with a stable secondary sort (id) until a short page.
+  const rows = [];
+  const PAGE = 1000;
+  for (let start = 0; ; start += PAGE) {
+    const { data, error } = await supabase
+      .from('works')
+      .select('*')
+      .eq('hidden', false)
+      .order('source_updated', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: true })
+      .range(start, start + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return rows.map(mapWork);
 }
 
 // Re-read a single work by id (fresh workSkin/counts/etc. after a re-fetch), so the

@@ -99,9 +99,9 @@ function FilterSheet({ open, onClose, pool, inc, exc, setInc, setExc }) {
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
         {(inc.length > 0 || exc.length > 0) && (
-          <button className="btn btn-surface" style={{ flex: 1 }} onClick={() => { setInc([]); setExc([]); }}>Clear</button>
+          <button className="btn btn-md btn-surface" style={{ flex: 1 }} onClick={() => { setInc([]); setExc([]); }}>Clear</button>
         )}
-        <button className="btn btn-primary" style={{ flex: 1 }} onClick={onClose}>Done</button>
+        <button className="btn btn-md btn-primary" style={{ flex: 1 }} onClick={onClose}>Done</button>
       </div>
     </Sheet>
   );

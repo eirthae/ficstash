@@ -105,17 +105,24 @@ export async function fetchTrackedGroups() {
   // dismissed (hidden), saved (already in the library), and later (moved to the
   // Later stash) matches all drop out of the feed, so they don't count here —
   // otherwise a group reads "12 tracked" but opens to 2.
-  const { data: matches, error: mErr } = await supabase
-    .from('tag_matches')
-    .select('group_id,seen,dismissed,saved,later');
-  if (mErr) throw mErr;
-
+  // Page through ALL matches — a single select is capped at PostgREST's 1000-row
+  // default, so a big library silently under-counted every tile. We .range() until
+  // a short page comes back, so the per-group tally is complete.
   const counts = {};
-  for (const m of matches || []) {
-    if (m.dismissed || m.saved || m.later) continue;
-    const c = counts[m.group_id] || (counts[m.group_id] = { total: 0, fresh: 0 });
-    c.total += 1;
-    if (!m.seen) c.fresh += 1;
+  const PAGE = 1000;
+  for (let start = 0; ; start += PAGE) {
+    const { data: page, error: mErr } = await supabase
+      .from('tag_matches')
+      .select('group_id,seen,dismissed,saved,later')
+      .range(start, start + PAGE - 1);
+    if (mErr) throw mErr;
+    for (const m of page || []) {
+      if (m.dismissed || m.saved || m.later) continue;
+      const c = counts[m.group_id] || (counts[m.group_id] = { total: 0, fresh: 0 });
+      c.total += 1;
+      if (!m.seen) c.fresh += 1;
+    }
+    if (!page || page.length < PAGE) break;
   }
   return (groups || []).map((g) => mapGroup(g, counts[g.id]));
 }
