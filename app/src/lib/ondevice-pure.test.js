@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  normGroup, matchRow, workRow, chapterRows, paletteFor,
+  normGroup, matchRow, bookMatchRow, workRow, chapterRows, paletteFor,
   newChapters, chapterUpdateRows, seriesFetchPlan,
 } from './ondevice-pure.js';
 
@@ -32,6 +32,30 @@ test('normGroup splits out a language tag as langCode (not an include)', () => {
   const g = normGroup({ id: 'g3', tags: [{ name: 'Armenian', id: 'hy', kind: 'language' }] });
   assert.equal(g.langCode, 'hy');
   assert.deepEqual(g.include, []);
+});
+
+test('normGroup exposes slug ids for romance.io (includeIds/excludeIds)', () => {
+  const g = normGroup({
+    id: 'r1', source: 'romanceio',
+    tags: [{ name: 'enemies to lovers', id: 'from hate to love', kind: 'topic' }],
+    excluded_tags: [{ name: 'cheating', id: 'cheating', kind: 'topic' }],
+  });
+  assert.deepEqual(g.includeIds, ['from hate to love']);
+  assert.deepEqual(g.excludeIds, ['cheating']);
+});
+
+// ---- bookMatchRow ----------------------------------------------------------
+test('bookMatchRow builds a metadata-only romance.io match (series → fandom, steam/rating tags)', () => {
+  const row = bookMatchRow('grp', {
+    sourceWorkId: 'abc', title: 'The Long Game', author: 'Rachel Reid',
+    summary: 'hockey', series: 'Game Changers', rating: 4.6, steam: 'Explicit and plentiful',
+  });
+  assert.equal(row.source, 'romanceio');
+  assert.equal(row.source_work_id, 'abc');
+  assert.equal(row.fandom, 'Game Changers'); // series shown in the fandom slot
+  assert.equal(row.status, 'complete');
+  assert.equal(row.words, 0);
+  assert.deepEqual(row.tags, [{ t: '★ 4.6', k: 'freeform' }, { t: 'Explicit and plentiful', k: 'rating' }]);
 });
 
 // ---- matchRow --------------------------------------------------------------
