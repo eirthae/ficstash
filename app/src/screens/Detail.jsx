@@ -138,10 +138,10 @@ export function StoryDetailScreen({ work: workProp, suggestion, onSaved, onRemov
   // build leaves offline undefined, so those stay readable. Restricted AO3 works
   // (members-only) can never be fetched logged-out, so they're never readable.
   const readable = !suggestion && !work.restricted && work.offline !== false;
-  // A book discovery suggestion (Goodreads). FicStash can't download a published
-  // book, so "Save" here would be misleading — we point the reader to Goodreads
-  // and tell them to source the EPUB and upload it instead.
-  const isBookSuggestion = suggestion && work.source === 'books';
+  // A book discovery suggestion (Goodreads or romance.io). FicStash can't download
+  // a published book, so "Save" here would be misleading — we point the reader to
+  // the source and tell them to buy the EPUB and upload it instead.
+  const isBookSuggestion = suggestion && (work.source === 'books' || work.source === 'romanceio');
 
   const queueSave = async () => {
     if (saveState !== 'idle') return;
@@ -216,7 +216,7 @@ export function StoryDetailScreen({ work: workProp, suggestion, onSaved, onRemov
           <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
             {isBookSuggestion ? (
               <button className="btn btn-lg btn-primary btn-block" onClick={openAtSource} disabled={!canOpenAtSource}>
-                <Icon icon="solar:square-top-down-linear" size={20} /> Find on Goodreads
+                <Icon icon="solar:square-top-down-linear" size={20} /> Find on {srcLabel}
               </button>
             ) : (
               <>

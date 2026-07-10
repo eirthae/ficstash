@@ -13,19 +13,43 @@ import { LANGUAGES } from '../lib/languages.js';
 import { fetchDiscoveryPrefs, updateDiscoveryPrefs } from '../lib/discovery.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
 import { GOODREADS_TAGS } from '../data/goodreadsTags.js';
+import { ROMANCEIO_TREE } from '../data/romanceioTopics.js';
 import {
   ROYALROAD_GENRES, ROYALROAD_TAGS, SCRIBBLEHUB_GENRES, SCRIBBLEHUB_TAGS, sourceLabel,
 } from '../sources/index.js';
 
-// Combined genre + tag taxonomy per source, for the builder's picker. Genres
-// come first (kind:'genre'), then the larger tag list (kind:'tag'); each pick is
-// stored as {name, id:slug, kind} so the worker filters by the right native
-// mechanism (RR tagsAdd/Remove; SH Series Finder genre ids vs tag ids).
+// Every non-AO3 source's vocabulary shaped as the collapsible tree the builder's
+// TopicPicker renders: [{ cat, groups:[{ head, topics:[{ s:slug, n:name, k:kind }] }] }].
+// A pick is stored as {name, id:slug, kind} — Royal Road / Scribble Hub resolve the
+// slug to the site's native filter (RR tagsAdd/Remove; SH Series Finder ids); the
+// Goodreads worker slugifies the NAME (so slug == name there). romance.io ships its
+// own tree (with counts) in romanceioTopics.js.
+const taxTopics = (list, kind) => list.map((g) => ({ s: g.slug, n: g.name, k: kind }));
+// Flat {name,slug,kind} lists — still used by the global Discovery-filters sheet's
+// exclude pickers (that sheet stays a simple tag list, not the include/exclude tree).
 const withKind = (list, kind) => list.map((g) => ({ ...g, kind }));
 const TAXONOMY_BY_SOURCE = {
   royalroad: [...withKind(ROYALROAD_GENRES, 'genre'), ...withKind(ROYALROAD_TAGS, 'tag')],
   scribblehub: [...withKind(SCRIBBLEHUB_GENRES, 'genre'), ...withKind(SCRIBBLEHUB_TAGS, 'tag')],
 };
+const GOODREADS_TREE = [
+  { cat: 'READER TAGS', groups: [{ head: '', topics: GOODREADS_TAGS.map((s) => ({ s, n: s, k: 'subject' })) }] },
+];
+const TAXONOMY_TREE_BY_SOURCE = {
+  royalroad: [
+    { cat: 'GENRES', groups: [{ head: '', topics: taxTopics(ROYALROAD_GENRES, 'genre') }] },
+    { cat: 'TAGS', groups: [{ head: '', topics: taxTopics(ROYALROAD_TAGS, 'tag') }] },
+  ],
+  scribblehub: [
+    { cat: 'GENRES', groups: [{ head: '', topics: taxTopics(SCRIBBLEHUB_GENRES, 'genre') }] },
+    { cat: 'TAGS', groups: [{ head: '', topics: taxTopics(SCRIBBLEHUB_TAGS, 'tag') }] },
+  ],
+};
+// The picker tree for a builder source (AO3 has no fixed tree — it live-searches).
+const treeForSource = (source) =>
+  source === 'romanceio' ? ROMANCEIO_TREE
+  : source === 'books' ? GOODREADS_TREE
+  : TAXONOMY_TREE_BY_SOURCE[source] || [];
 
 // The "Stories" shelf spans both non-AO3 fiction sites, so its global-exclude
 // vocabulary is Royal Road + Scribble Hub combined (deduped by name) — NOT the
@@ -44,7 +68,7 @@ const SITES_TAXONOMY = (() => {
 // directly; Royal Road / Scribble Hub download server-side via the FanFicFare
 // link path. "Books" is notify-only — a commercial release can't be fetched, so
 // its cards just link out to Open Library and the user buys + uploads the EPUB.
-const isSavableSource = (src) => src !== 'books';
+const isSavableSource = (src) => src !== 'books' && src !== 'romanceio';
 
 // ============================================================================
 // Discover — track AO3 tags / tag groups and review the works they turn up.
@@ -81,7 +105,7 @@ export function DiscoverScreen({ nav }) {
   const shelfMatch = {
     ao3: (s) => (s || 'ao3') === 'ao3',
     sites: (s) => s === 'royalroad' || s === 'scribblehub',
-    books: (s) => s === 'books',
+    books: (s) => s === 'books' || s === 'romanceio',
   };
   const TAG_SHELVES = [
     { id: 'ao3', label: 'AO3' },
@@ -100,7 +124,7 @@ export function DiscoverScreen({ nav }) {
     // Jump to the shelf the new group lives on, so you land on the tag you just
     // created instead of staying on whatever shelf you opened the builder from.
     const s = g && g.source;
-    setTagShelf(s === 'royalroad' || s === 'scribblehub' ? 'sites' : s === 'books' ? 'books' : 'ao3');
+    setTagShelf(s === 'royalroad' || s === 'scribblehub' ? 'sites' : (s === 'books' || s === 'romanceio') ? 'books' : 'ao3');
     showToast(`Now tracking “${g.name}”`);
     load();
   };
@@ -185,7 +209,7 @@ export function DiscoverScreen({ nav }) {
 
       <TagGroupBuilder open={builderOpen} editGroup={editGroup}
         onClose={() => { setBuilderOpen(false); setEditGroup(null); }} onCreated={onCreated}
-        initialSource={{ ao3: 'ao3', sites: 'royalroad', books: 'books' }[tagShelf] || 'ao3'} />
+        initialSource={{ ao3: 'ao3', sites: 'royalroad', books: 'romanceio' }[tagShelf] || 'ao3'} />
       <AddLanguageSheet open={addLangOpen} onClose={() => setAddLangOpen(false)}
         followedCodes={followedLangCodes} onPick={followLanguage} />
       <DiscoveryFiltersSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} showToast={showToast} shelf={tagShelf} />
@@ -518,8 +542,118 @@ function SubjectPicker({ picked, onAdd, onRemove, placeholder = 'Search reader t
   );
 }
 
+// Compact match count (12513 → "12.5k", 425525 → "426k").
+const fmtCount = (c) => {
+  const n = Number(c) || 0;
+  if (n >= 100000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+};
+
+// The three-state icon for a romance.io topic row: unset (plus) → included (check)
+// → excluded (no-entry). Colours: accent for include, danger for exclude.
+function TopicStateIcon({ state }) {
+  if (state === 'in') return <Icon icon="solar:check-circle-bold" size={22} color="var(--accent)" />;
+  if (state === 'ex') return <Icon icon="solar:forbidden-circle-bold" size={22} color="var(--danger, #f5455c)" />;
+  return <Icon icon="solar:add-circle-linear" size={22} color="var(--text-tertiary)" />;
+}
+
+// A picked include/exclude chip in the romance.io picker summary.
+function TopicChip({ t, mode, onRemove }) {
+  const c = mode === 'in' ? 'var(--accent)' : 'var(--danger, #f5455c)';
+  const icon = mode === 'in' ? 'solar:check-circle-bold' : 'solar:forbidden-circle-bold';
+  return (
+    <span className="chip" style={{ background: `color-mix(in srgb, ${c} 15%, transparent)`, color: c, paddingRight: 6 }}>
+      <Icon icon={icon} size={14} color={c} /> {t.name}
+      <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t)} aria-label="Remove topic">
+        <Icon icon="solar:close-circle-bold" size={15} color={c} />
+      </button>
+    </span>
+  );
+}
+
+// Collapsible tree picker shared by every non-AO3 source (romance.io topics, Royal
+// Road / Scribble Hub genres+tags, Goodreads subjects). Categories collapse; a flat
+// search spans everything. Each row is ONE tap target that CYCLES include → exclude
+// → off, so a single control expresses both "must have" and "never show".
+// `included`/`excluded` are stored {name,id,kind}; rows match by key (id||name) so
+// slug-less vocabularies (Goodreads) work too. Counts render only when present.
+function TopicPicker({ tree, included, excluded, onCycle, onRemove, placeholder = 'Search all topics…' }) {
+  const [term, setTerm] = useState('');
+  const [openCats, setOpenCats] = useState(() => new Set());
+  const keyOf = (t) => String((t && (t.id || t.name)) || '').toLowerCase();
+  const incSet = new Set(included.map(keyOf));
+  const excSet = new Set(excluded.map(keyOf));
+  const stateOf = (s) => { const k = String(s).toLowerCase(); return incSet.has(k) ? 'in' : excSet.has(k) ? 'ex' : 'off'; };
+  const q = term.trim().toLowerCase();
+  const toggleCat = (name) => setOpenCats((s) => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n; });
+  const catSelected = (cat) => cat.groups.reduce((a, g) => a + g.topics.filter((t) => stateOf(t.s) !== 'off').length, 0);
+
+  const results = q
+    ? tree.flatMap((cat) => cat.groups.flatMap((g) => g.topics
+        .filter((t) => t.n.toLowerCase().includes(q) || t.s.toLowerCase().includes(q))
+        .map((t) => ({ ...t, cat: cat.cat })))).slice(0, 60)
+    : null;
+
+  const Row = (t, ctx) => (
+    <button key={t.s} className="pressable" onClick={() => onCycle(t)}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '10px 12px', background: 'transparent', borderBottom: '1px solid var(--border)' }}>
+      <TopicStateIcon state={stateOf(t.s)} />
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.n}</span>
+      {ctx && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>{ctx}</span>}
+      {t.c != null && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>{fmtCount(t.c)}</span>}
+    </button>
+  );
+
+  return (
+    <div>
+      {(included.length > 0 || excluded.length > 0) && (
+        <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          {included.map((t) => <TopicChip key={`i${t.id}`} t={t} mode="in" onRemove={onRemove} />)}
+          {excluded.map((t) => <TopicChip key={`e${t.id}`} t={t} mode="ex" onRemove={onRemove} />)}
+        </div>
+      )}
+      <SearchField placeholder={placeholder} value={term} onChange={setTerm} />
+      <div style={{ marginTop: 10 }}>
+        {results ? (
+          results.length === 0 ? (
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '6px 2px' }}>No topics match “{term}”.</div>
+          ) : (
+            <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+              {results.map((t) => Row(t, t.cat))}
+            </div>
+          )
+        ) : (
+          tree.map((cat) => {
+            const open = openCats.has(cat.cat);
+            const sel = catSelected(cat);
+            return (
+              <div key={cat.cat} style={{ border: '1px solid var(--border)', borderRadius: 12, marginBottom: 8, overflow: 'hidden' }}>
+                <button className="pressable" onClick={() => toggleCat(cat.cat)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '12px 14px', background: 'var(--surface-2)', border: 'none' }}>
+                  <Icon icon={open ? 'solar:alt-arrow-down-linear' : 'solar:alt-arrow-right-linear'} size={16} color="var(--text-tertiary)" />
+                  <span style={{ flex: 1, textAlign: 'left', fontWeight: 700, fontSize: 12.5, letterSpacing: '.04em' }}>{cat.cat}</span>
+                  {sel > 0 && (
+                    <span className="chip" style={{ height: 20, background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: 11, fontWeight: 700 }}>{sel}</span>
+                  )}
+                </button>
+                {open && cat.groups.map((g, gi) => (
+                  <div key={gi}>
+                    {g.head && <div className="section-label" style={{ padding: '9px 14px 3px', fontSize: 10.5 }}>{g.head}</div>}
+                    {g.topics.map((t) => Row(t))}
+                  </div>
+                ))}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---- Builder sheet: pick a source, pick tags/genres → save a group ----------
-const BUILDER_SOURCES = ['ao3', 'royalroad', 'scribblehub', 'books'];
+const BUILDER_SOURCES = ['ao3', 'royalroad', 'scribblehub', 'romanceio'];
 
 export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3', initialTags = [], editGroup = null }) {
   const [source, setSource] = useState(initialSource);
@@ -557,13 +691,31 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
   const changeSource = (s) => { setSource(s); setPicked([]); setExcluded([]); setMatchMode('all'); setStatus('all'); setErr(''); };
 
   const isAo3 = source === 'ao3';
-  const isBooks = source === 'books';
-  const noun = isAo3 ? 'tag' : isBooks ? 'subject' : 'genre';
+  const isBooks = source === 'books'; // legacy Goodreads groups (edit only)
+  const isRomance = source === 'romanceio';
+  const noun = isAo3 ? 'tag' : isRomance ? 'topic' : isBooks ? 'subject' : 'genre';
   const has = (list, t) => list.some((x) => x.name.toLowerCase() === t.name.toLowerCase());
   const addPicked = (t) => { setPicked((p) => (has(p, t) ? p : [...p, t])); setErr(''); };
   const removePicked = (name) => setPicked((p) => p.filter((x) => x.name !== name));
   const addExcluded = (t) => setExcluded((p) => (has(p, t) ? p : [...p, t]));
   const removeExcluded = (name) => setExcluded((p) => p.filter((x) => x.name !== name));
+
+  // Non-AO3 tree picker: one tap target cycles a topic off → include → exclude →
+  // off, so a single control drives both `picked` (include) and `excluded`. Chip ✕
+  // clears it. Rows/picks are matched by key (id||name) so slug-less Goodreads
+  // subjects work; the stored pick keeps the topic's own kind.
+  const keyOf = (t) => String((t && (t.id || t.name)) || '').toLowerCase();
+  const cycleTopic = (topic) => {
+    const kind = topic.k || (isRomance ? 'topic' : isBooks ? 'subject' : 'genre');
+    const t = { name: topic.n, id: topic.s, kind };
+    const k = String(topic.s).toLowerCase(); setErr('');
+    const inInc = picked.some((x) => keyOf(x) === k);
+    const inExc = excluded.some((x) => keyOf(x) === k);
+    if (!inInc && !inExc) setPicked((p) => [...p, t]);
+    else if (inInc) { setPicked((p) => p.filter((x) => keyOf(x) !== k)); setExcluded((e) => [...e, t]); }
+    else setExcluded((e) => e.filter((x) => keyOf(x) !== k));
+  };
+  const clearTopic = (item) => { const k = keyOf(item); setPicked((p) => p.filter((x) => keyOf(x) !== k)); setExcluded((e) => e.filter((x) => keyOf(x) !== k)); };
 
   const save = async () => {
     if (!picked.length) { setErr(`Add at least one ${noun} first.`); return; }
@@ -576,7 +728,7 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
         tags: picked,
         excludedTags: excluded,
         matchMode: isAo3 ? matchMode : 'all',
-        status: isBooks ? 'all' : status,
+        status: (isBooks || isRomance) ? 'all' : status,
       };
       const g = editing
         ? await updateGroup(editGroup.id, { ...payload, label: editGroup.label || '' })
@@ -605,30 +757,30 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
 
         <div>
           <div className="section-label" style={{ marginBottom: 8 }}>
-            {picked.length <= 1
-              ? `Track this ${noun}`
-              : isAo3
-                ? `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`
-                : isBooks
-                  ? 'Watch new releases in ALL of these subjects'
-                  : 'Track works with ALL of these genres & tags'}
+            {isAo3
+              ? (picked.length <= 1 ? 'Track this tag' : `Track works with ${matchMode === 'all' ? 'ALL' : 'ANY'} of these tags`)
+              : isRomance ? 'Pick topics'
+              : isBooks ? 'Pick subjects'
+              : 'Pick genres & tags'}
           </div>
           {isAo3 ? (
             <TagPicker picked={picked} onAdd={addPicked} onRemove={removePicked} placeholder="Search AO3 tags to include…" />
-          ) : isBooks ? (
-            <SubjectPicker picked={picked} onAdd={addPicked} onRemove={removePicked} />
           ) : (
-            <GenrePicker
-              genres={TAXONOMY_BY_SOURCE[source] || []}
-              label={sourceLabel(source)}
-              picked={picked}
-              onAdd={addPicked}
-              onRemove={removePicked}
+            <TopicPicker
+              tree={treeForSource(source)}
+              included={picked}
+              excluded={excluded}
+              onCycle={cycleTopic}
+              onRemove={clearTopic}
+              placeholder={isRomance ? 'Search all topics — enemies to lovers, mafia…'
+                : isBooks ? 'Search reader tags — romance, m/m, fantasy…'
+                : `Search ${sourceLabel(source)} genres & tags…`}
             />
           )}
-          {isBooks && (
-            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
-              Notify-only — FicStash can't download bought books. New releases show up to review, then you buy the EPUB and upload it.
+          {!isAo3 && (
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 9, lineHeight: 1.5 }}>
+              Tap once to <b style={{ color: 'var(--accent)' }}>include</b>, again to <b style={{ color: 'var(--danger, #f5455c)' }}>exclude</b>, once more to clear.
+              {(isBooks || isRomance) && ' Notify-only — these books can’t be downloaded; matches link out so you can buy the EPUB and upload it.'}
             </div>
           )}
         </div>
@@ -649,7 +801,7 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
           </div>
         )}
 
-        {!isBooks && (
+        {!isBooks && !isRomance && (
           <div>
             <div className="section-label" style={{ marginBottom: 8 }}>Status</div>
             <Segmented
@@ -671,33 +823,6 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
             <TagPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded} placeholder="Search AO3 tags to exclude…" accent="var(--danger, #f5455c)" />
             <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
               Works carrying any excluded tag are left out of your matches.
-            </div>
-          </div>
-        )}
-
-        {!isAo3 && !isBooks && (
-          <div>
-            <div className="section-label" style={{ marginBottom: 8 }}>Exclude genres &amp; tags <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
-            <GenrePicker
-              genres={TAXONOMY_BY_SOURCE[source] || []}
-              label={sourceLabel(source)}
-              picked={excluded}
-              onAdd={addExcluded}
-              onRemove={removeExcluded}
-            />
-            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
-              Works with any excluded genre or tag are left out of your matches.
-            </div>
-          </div>
-        )}
-
-        {isBooks && (
-          <div>
-            <div className="section-label" style={{ marginBottom: 8 }}>Exclude subjects <span style={{ fontWeight: 500, color: 'var(--text-tertiary)' }}>(optional)</span></div>
-            <SubjectPicker picked={excluded} onAdd={addExcluded} onRemove={removeExcluded}
-              placeholder="Subjects to exclude…" accent="var(--danger, #f5455c)" />
-            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
-              Books in any excluded subject are left out of your matches.
             </div>
           </div>
         )}

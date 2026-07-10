@@ -66,6 +66,17 @@ const SOURCES = {
     capabilities: new Set([CAP.TAG_SEARCH, CAP.WORK_URL]),
     workUrl: (id) => `https://www.goodreads.com/book/show/${id}`,
   },
+  // romance.io — book discovery by the site's own topic tree (steam level, tropes,
+  // hero/heroine, content warnings…), with native include AND exclude. Lives on the
+  // Books shelf. Notify-only like Goodreads: cards link out to romance.io/books/<id>
+  // (the id alone redirects to the full page) and the user buys + uploads the EPUB.
+  // Discovery runs ON-DEVICE (residential IP) → Supabase, like AO3.
+  romanceio: {
+    id: 'romanceio',
+    label: 'Romance.io',
+    capabilities: new Set([CAP.TAG_SEARCH, CAP.WORK_URL]),
+    workUrl: (id) => `https://www.romance.io/books/${id}`,
+  },
   // A user-uploaded file (EPUB/HTML/TXT). Fully offline, no site to link back to.
   upload: {
     id: 'upload',

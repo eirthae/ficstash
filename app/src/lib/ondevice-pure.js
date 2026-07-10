@@ -12,8 +12,10 @@ export function paletteFor(seed) {
 export function normGroup(g) {
   const tags = Array.isArray(g.tags) ? g.tags : [];
   const langTag = tags.find((t) => t && t.kind === 'language');
-  const include = tags.filter((t) => !t || t.kind !== 'language').map((t) => t && t.name).filter(Boolean);
-  const excluded = (g.excludedTags || g.excluded_tags || []).map((t) => (t && t.name) || '').filter(Boolean);
+  const nonLang = tags.filter((t) => !t || t.kind !== 'language');
+  const include = nonLang.map((t) => t && t.name).filter(Boolean);
+  const excludedTags = g.excludedTags || g.excluded_tags || [];
+  const excluded = excludedTags.map((t) => (t && t.name) || '').filter(Boolean);
   return {
     id: g.id,
     source: g.source || 'ao3',
@@ -23,6 +25,35 @@ export function normGroup(g) {
     langCode: langTag ? (langTag.id || langTag.name) : null,
     include,
     excluded,
+    // Slug forms (t.id) — romance.io topics carry their API slug in `id`, and the
+    // books endpoint filters by slug, not display name.
+    includeIds: nonLang.map((t) => t && t.id).filter(Boolean),
+    excludeIds: excludedTags.map((t) => t && t.id).filter(Boolean),
+  };
+}
+
+// A romance.io book (searchRomanceBooks shape) → a tag_matches row. Metadata-only:
+// no words/chapters, always "complete", series shown in the fandom slot, and the
+// steam + star rating surfaced as card tags. source 'romanceio' so the card links
+// out (workUrl → romance.io/books/<id>) instead of offering a download.
+export function bookMatchRow(groupId, m) {
+  const tags = [];
+  if (m.rating) tags.push({ t: `★ ${m.rating}`, k: 'freeform' });
+  if (m.steam) tags.push({ t: m.steam, k: 'rating' });
+  return {
+    group_id: groupId,
+    source: 'romanceio',
+    source_work_id: String(m.sourceWorkId),
+    title: m.title || 'Untitled',
+    author: m.author || '',
+    fandom: m.series || '',
+    summary: m.summary || '',
+    tags,
+    words: 0,
+    chapters: null,
+    status: 'complete',
+    source_updated: null,
+    palette: paletteFor(m.title || m.author),
   };
 }
 

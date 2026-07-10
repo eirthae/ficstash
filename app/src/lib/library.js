@@ -108,11 +108,17 @@ function dayBucketLocal(iso) {
 // you chose, now downloaded — not the raw discovery match stream.
 export async function fetchSavedWorks() {
   if (!hasSupabase) return null;
+  // Show only the last 24h of saves so the What's New "Saved" feed clears daily
+  // (matches the New-chapters WHATS_NEW_DAYS default of 1 day). This is a DISPLAY
+  // window only — the works stay in the library (fetchWorks) permanently; this
+  // never removes anything from your shelf.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from('works')
     .select('*')
     .eq('hidden', false)
     .in('origin', ['tag', 'link', 'upload']) // recently-added works, however added
+    .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) throw error;

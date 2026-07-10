@@ -1,8 +1,9 @@
 import { supabase, hasSupabase } from './supabase.js';
 import { searchTags, searchLanguage, fetchWork, seriesWorks, isAo3Url, workIdFromUrl } from './sources/ao3.js';
+import { searchRomanceBooks, slugsForNames } from './sources/romanceio.js';
 import { statusMatches, passesGlobalPrefs, excludedForShelf } from './shelving.js';
 import {
-  normGroup, matchRow, workRow, chapterRows,
+  normGroup, matchRow, bookMatchRow, workRow, chapterRows,
   newChapters, chapterUpdateRows, seriesFetchPlan,
 } from './ondevice-pure.js';
 
@@ -54,9 +55,10 @@ async function readPrefs() {
 export async function discoverGroup(group, prefs) {
   if (!hasSupabase) return 0;
   const g = normGroup(group);
+  prefs = prefs || (await readPrefs());
+  if (g.source === 'romanceio') return discoverRomanceGroup(g, prefs);
   if (g.source !== 'ao3') return 0;
   if (!g.langCode && !g.include.length) return 0;
-  prefs = prefs || (await readPrefs());
 
   // Per-group excludes + this shelf's global excludes (deduped), handed to AO3 as
   // excluded_tag_names so it drops them server-side.
@@ -99,6 +101,33 @@ export async function discoverGroup(group, prefs) {
   return rows.length;
 }
 
+// Discover one romance.io Books group on-device: query the site's books API by the
+// group's include topic slugs, hiding the group's excludes + this shelf's global
+// excludes (mapped to slugs) + the permanent non-binary-MC default-exclude list
+// (merged inside searchRomanceBooks). Books are metadata-only — upsert them as
+// tag_matches that link out. normGroup carries slugs in includeIds/excludeIds.
+async function discoverRomanceGroup(g, prefs) {
+  if (!g.includeIds.length) return 0;
+  const shelfExcl = excludedForShelf(prefs, 'books'); // [{name}|string]
+  const exclude = [...new Set([...g.excludeIds, ...slugsForNames(shelfExcl)])];
+
+  let books = [];
+  try { books = await searchRomanceBooks(g.includeIds, exclude); } catch (e) { return 0; }
+
+  const seen = new Set();
+  books = books.filter((b) => b.sourceWorkId && !seen.has(b.sourceWorkId) && (seen.add(b.sourceWorkId), true));
+
+  const rows = books.map((b) => bookMatchRow(g.id, b));
+  if (rows.length) {
+    const { error } = await supabase
+      .from('tag_matches')
+      .upsert(rows, { onConflict: 'group_id,source,source_work_id' });
+    if (error) throw error;
+  }
+  try { await supabase.from('tracked_groups').update({ last_checked: new Date().toISOString() }).eq('id', g.id); } catch (e) {}
+  return rows.length;
+}
+
 // Discover across every tracked AO3 group (pull-to-refresh / app open / on track).
 export async function discoverAll({ onProgress } = {}) {
   if (!hasSupabase) return { newMatches: 0, groups: 0 };
@@ -111,15 +140,17 @@ export async function discoverAll({ onProgress } = {}) {
     groups = data || [];
   } catch (e) { groups = []; }
   const prefs = await readPrefs();
-  const aoGroups = groups.filter((g) => (g.source || 'ao3') === 'ao3');
+  // AO3 (on-device HTML scrape) + romance.io (on-device books API). Other sources
+  // stay on the worker. Both go through discoverGroup, which branches by source.
+  const onDeviceGroups = groups.filter((g) => ['ao3', 'romanceio'].includes(g.source || 'ao3'));
   let newMatches = 0, checked = 0;
-  for (const g of aoGroups) {
+  for (const g of onDeviceGroups) {
     if (checked) await sleep(SPACE_MS);
     checked += 1;
-    if (onProgress) onProgress({ done: checked, total: aoGroups.length, title: g.label || 'group' });
+    if (onProgress) onProgress({ done: checked, total: onDeviceGroups.length, title: g.label || 'group' });
     try { newMatches += await discoverGroup(g, prefs); } catch (e) { /* non-fatal */ }
   }
-  return { newMatches, groups: aoGroups.length };
+  return { newMatches, groups: onDeviceGroups.length };
 }
 
 // ---- download (a work → works + chapters) ----------------------------------

@@ -140,7 +140,7 @@ export function passesGlobalPrefs(work, { excludedTags = [], languages = [] } = 
 // are scoped per shelf: AO3 → 'ao3', Royal Road / Scribble Hub → 'sites'
 // (Stories), Books → 'books'.
 export function discoveryShelfForSource(source) {
-  return source === 'books' ? 'books' : source === 'ao3' ? 'ao3' : 'sites';
+  return (source === 'books' || source === 'romanceio') ? 'books' : source === 'ao3' ? 'ao3' : 'sites';
 }
 
 // The globally-excluded tags for one Discovery shelf. Accepts the per-shelf

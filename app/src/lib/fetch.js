@@ -54,7 +54,10 @@ export async function fetchJson(url, { attempts = 4 } = {}) {
   for (let i = 0; i < attempts; i++) {
     try {
       const r = await getOnce(url);
-      if (r.status >= 200 && r.status < 300 && Array.isArray(r.data)) return r;
+      // Success = 2xx AND the body parsed to non-null JSON. AO3 autocomplete
+      // returns a top-level array; romance.io returns an object ({success,books}).
+      // Both are non-null; an error page (HTML) fails JSON.parse → null → retry.
+      if (r.status >= 200 && r.status < 300 && r.data != null) return r;
       last = r;
     } catch (e) {
       last = { status: 0, data: null, url, raw: String(e && e.message || e) };
