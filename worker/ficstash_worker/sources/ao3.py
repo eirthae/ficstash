@@ -20,6 +20,7 @@ import math
 import os
 import re
 import time
+import urllib.parse
 from datetime import datetime, timezone
 
 import AO3
@@ -67,6 +68,98 @@ def _hash_str(s: str) -> int:
 
 def palette_for(seed: str) -> int:
     return _hash_str(seed or "") % _PALETTE_COUNT
+
+
+# AO3 escapes these characters in tag URLs (Tag#to_param): the canonical works
+# page for "A & B" lives at /tags/A *a* B/works, not with a literal '&'.
+_TAG_URL_ESCAPES = {
+    "/": "*s*", "&": "*a*", ".": "*d*", "?": "*q*",
+    "#": "*h*", "<": "*l*", ">": "*g*", "\\": "*b*",
+}
+
+
+def _tag_to_path(tag: str) -> str:
+    """A tag name → its AO3 canonical works-page path segment.
+
+    Applies AO3's special-character escaping (e.g. '&' → '*a*', '/' → '*s*'), then
+    URL-encodes spaces/unicode while leaving the '*' markers intact.
+    """
+    s = tag or ""
+    for ch, rep in _TAG_URL_ESCAPES.items():
+        s = s.replace(ch, rep)
+    return urllib.parse.quote(s, safe="*")
+
+
+def _needs_tag_page(tag: str) -> bool:
+    """True for a single tag that AO3's works-search other_tag_names field can't
+    match — notably gen/platonic '&' pairings, which AO3's search treats as a
+    query operator and returns nothing for. Such a tag is looked up via its
+    canonical works page instead. Kept narrow ('&' only) so ordinary tags and '/'
+    romantic pairings (which work fine via search) keep the unchanged path."""
+    return "&" in (tag or "")
+
+
+def _chapters_from_text(text: str) -> tuple[int, int | None]:
+    """'5/12' → (5, 12); '13/?' → (13, None); junk → (0, None)."""
+    m = re.search(r"(\d[\d,]*)\s*/\s*(\d[\d,]*|\?)", text or "")
+    if not m:
+        return 0, None
+    have = int(m.group(1).replace(",", ""))
+    total = None if m.group(2) == "?" else int(m.group(2).replace(",", ""))
+    return have, total
+
+
+def _parse_search_blurbs(html_text: str, source: str) -> list[WorkMeta]:
+    """Parse an AO3 works-listing page (search results / a tag's works page) into
+    WorkMeta — the same blurb shape the app's parseSearchResults reads. Metadata
+    only (title/author/fandom/tags/summary/words/chapters/status); no chapter
+    bodies. Pure/DOM-based so it unit-tests without network."""
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    out: list[WorkMeta] = []
+    for li in soup.select("li.work.blurb.group, li.blurb.work"):
+        title_a = li.select_one('h4.heading a[href*="/works/"]')
+        wid = (li.get("id") or "").replace("work_", "").strip()
+        if not wid.isdigit() and title_a and title_a.get("href"):
+            m = re.search(r"/works/(\d+)", title_a["href"])
+            wid = m.group(1) if m else ""
+        if not wid.isdigit():
+            continue
+        title = (title_a.get_text(strip=True) if title_a else "") or "Untitled"
+        authors = [a.get_text(strip=True) for a in li.select('h4.heading a[rel="author"]')]
+        author = ", ".join(a for a in authors if a) or "Anonymous"
+        fandoms = [a.get_text(strip=True) for a in li.select("h5.fandoms a.tag") if a.get_text(strip=True)]
+        tags: list[dict] = []
+        for sel, kind in (("li.relationships a.tag", "relationship"),
+                          ("li.characters a.tag", "character"),
+                          ("li.freeforms a.tag", "freeform")):
+            for a in li.select("ul.tags " + sel):
+                nm = a.get_text(strip=True)
+                if nm:
+                    tags.append({"t": nm, "k": kind})
+        summ = li.select_one("blockquote.userstuff.summary") or li.select_one("blockquote.userstuff")
+        summary = summ.get_text(" ", strip=True) if summ else ""
+        lang_el = li.select_one("dd.language")
+        words_el = li.select_one("dd.words")
+        words = int(re.sub(r"[^\d]", "", words_el.get_text()) or 0) if words_el else 0
+        ch_el = li.select_one("dd.chapters")
+        have, total = _chapters_from_text(ch_el.get_text() if ch_el else "")
+        out.append(WorkMeta(
+            source=source,
+            source_work_id=wid,
+            title=title,
+            author=author,
+            fandom=", ".join(fandoms),
+            pairing=next((t["t"] for t in tags if t["k"] == "relationship"), ""),
+            summary=summary,
+            tags=tags,
+            language=(lang_el.get_text(strip=True) if lang_el else ""),
+            words=words,
+            chapters=have,
+            chapters_total=total,
+            status="complete" if (total is not None and have >= total) else "ongoing",
+            url=f"https://archiveofourown.org/works/{wid}",
+        ))
+    return out
 
 
 def _revised_since(since: datetime | None) -> str:
@@ -495,6 +588,14 @@ class AO3Source(Source):
         tags = [t for t in (tags or []) if t]
         if not tags:
             return []
+        # A single gen/platonic '&' tag can't be matched via works-search
+        # other_tag_names (AO3 treats '&' as a query operator → zero results), so
+        # look it up on its canonical works page, exactly as clicking the tag does.
+        if len(tags) == 1 and _needs_tag_page(tags[0]):
+            return self._search_tag_page(
+                tags[0], limit=limit, excluded_tags=excluded_tags or [],
+                since=since, max_pages=max_pages, completed=completed,
+            )
         excluded_csv = ",".join(t for t in (excluded_tags or []) if t)
         revised = _revised_since(since)
         queries = [",".join(tags)] if match_mode == "all" else list(tags)
@@ -644,6 +745,59 @@ class AO3Source(Source):
                 break  # short final page — we've reached the tail
             time.sleep(RATE_LIMIT_SECONDS)  # be kind between pages
         return out[:limit]
+
+    def _search_tag_page(
+        self,
+        tag: str,
+        *,
+        limit: int,
+        excluded_tags: list[str],
+        since: datetime | None,
+        max_pages: int,
+        completed: bool | None,
+    ) -> list[WorkMeta]:
+        """Discover a single tag's works via its canonical AO3 works page
+        (/tags/<escaped>/works) — the exact-match route AO3 uses when you click a
+        tag. Used for '&' (gen) tags that works-search can't match. Same filters as
+        the search path (newest-first, date window, excluded tags, completion),
+        passed as work_search[...] params; walks pages politely like series_works.
+        """
+        s = self._require_session()
+        base = f"https://archiveofourown.org/tags/{_tag_to_path(tag)}/works"
+        revised = _revised_since(since)
+        excluded_csv = ",".join(t for t in (excluded_tags or []) if t)
+        seen: dict[str, WorkMeta] = {}
+        for page in range(1, max_pages + 1):
+            params: dict = {"work_search[sort_column]": "created_at", "page": page}
+            if revised:
+                params["work_search[revised_at]"] = revised
+            if excluded_csv:
+                params["work_search[excluded_tag_names]"] = excluded_csv
+            if completed is True:
+                params["work_search[complete]"] = "T"
+            elif completed is False:
+                params["work_search[complete]"] = "F"
+            try:
+                resp = s.session.get(base, params=params, timeout=30)
+                htmltext = resp.text if resp.status_code == 200 else ""
+            except Exception as exc:  # noqa: BLE001
+                if _is_rate_limited(exc):
+                    raise RateLimitError(str(exc)) from exc
+                if page == 1:
+                    raise
+                break
+            metas = _parse_search_blurbs(htmltext, self.id)
+            if not metas:
+                break  # walked past the last page (or an empty tag)
+            for m in metas:
+                if m.source_work_id not in seen:
+                    seen[m.source_work_id] = m
+            if len(seen) >= limit:
+                break
+            if len(metas) < 15:
+                break  # short final page — reached the tail
+            time.sleep(RATE_LIMIT_SECONDS)  # be kind between pages
+        return list(seen.values())[:limit]
 
 
 # ---- helpers ---------------------------------------------------------------
