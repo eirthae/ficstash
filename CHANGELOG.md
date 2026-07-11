@@ -4,7 +4,28 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
-## 2026-07-11 — romance.io Books discovery + unified include/exclude picker
+## 2026-07-11 — Discover perf, Saved-feed window, sticky track button (v0.8.48)
+
+### Fixed
+
+- **Discover tab was slow to open.** `fetchTrackedGroups` was paging through
+  *every* `tag_matches` row (1000 at a time) on each open to count matches per
+  tile — fine before, but romance.io discovery adds thousands of book matches, so
+  a big library meant dozens of round-trips. Now uses parallel server-side `COUNT`
+  per group (`head:true`, no rows transferred).
+- **Saved stories were missing from What's New (only ~20% showed).** The "Saved"
+  feed's clear window was 24h, but non-AO3 stories only download via the daily
+  worker sweep (1–3h per run), so they aged out — or hadn't downloaded yet — before
+  appearing. Widened to **5 days**, matching the New-chapters feed
+  (`DEFAULT_WHATS_NEW_DAYS = 5`). Display window only; the library is unaffected.
+  (AO3 fics were unaffected because they download instantly on-device.)
+
+### Changed
+
+- **The track/save button in the Discover builder is now a sticky footer** — always
+  reachable without scrolling to the bottom of the long Books/Stories topic trees.
+
+## 2026-07-11 — romance.io Books discovery + unified include/exclude picker (v0.8.47)
 
 Commit `0dfa58e` (branch `main`).
 

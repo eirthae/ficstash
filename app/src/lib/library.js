@@ -108,11 +108,13 @@ function dayBucketLocal(iso) {
 // you chose, now downloaded — not the raw discovery match stream.
 export async function fetchSavedWorks() {
   if (!hasSupabase) return null;
-  // Show only the last 24h of saves so the What's New "Saved" feed clears daily
-  // (matches the New-chapters WHATS_NEW_DAYS default of 1 day). This is a DISPLAY
-  // window only — the works stay in the library (fetchWorks) permanently; this
-  // never removes anything from your shelf.
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  // Rolling display window so the "Saved" feed self-clears (matches the New-chapters
+  // feed, which the worker prunes at DEFAULT_WHATS_NEW_DAYS = 5). It must be 5 days,
+  // NOT 1: non-AO3 stories only download via the daily worker sweep (each run is
+  // 1-3h), so a 24h window let them age out — or never appear — before the download
+  // landed. This is a DISPLAY window only; works stay in the library permanently.
+  const SAVED_FEED_DAYS = 5;
+  const since = new Date(Date.now() - SAVED_FEED_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from('works')
     .select('*')

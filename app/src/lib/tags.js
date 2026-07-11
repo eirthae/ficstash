@@ -100,30 +100,27 @@ export async function fetchTrackedGroups() {
     .order('created_at', { ascending: true });
   if (error) throw error;
 
-  // One extra read to tally total/fresh matches per group, client-side. The
-  // tally must match what opening the group actually shows (see fetchMatches):
-  // dismissed (hidden), saved (already in the library), and later (moved to the
-  // Later stash) matches all drop out of the feed, so they don't count here —
-  // otherwise a group reads "12 tracked" but opens to 2.
-  // Page through ALL matches — a single select is capped at PostgREST's 1000-row
-  // default, so a big library silently under-counted every tile. We .range() until
-  // a short page comes back, so the per-group tally is complete.
+  // Tally total/fresh matches per group. The tally must match what opening the
+  // group actually shows (see fetchMatches): dismissed (hidden), saved (already in
+  // the library) and later (Later stash) matches drop out of the feed, so they
+  // don't count here — otherwise a tile reads "12 tracked" but opens to 2.
+  //
+  // Server-side COUNT per group (head:true → NO rows transferred), run in parallel.
+  // The old approach paged EVERY tag_matches row to count client-side, which got
+  // slow once romance.io discovery started adding thousands of book matches — a big
+  // library meant dozens of 1000-row round-trips on every Discover open.
+  const inFeed = (q) => q.eq('dismissed', false).eq('saved', false).eq('later', false);
+  const headCount = () => supabase.from('tag_matches').select('id', { count: 'exact', head: true });
   const counts = {};
-  const PAGE = 1000;
-  for (let start = 0; ; start += PAGE) {
-    const { data: page, error: mErr } = await supabase
-      .from('tag_matches')
-      .select('group_id,seen,dismissed,saved,later')
-      .range(start, start + PAGE - 1);
-    if (mErr) throw mErr;
-    for (const m of page || []) {
-      if (m.dismissed || m.saved || m.later) continue;
-      const c = counts[m.group_id] || (counts[m.group_id] = { total: 0, fresh: 0 });
-      c.total += 1;
-      if (!m.seen) c.fresh += 1;
-    }
-    if (!page || page.length < PAGE) break;
-  }
+  await Promise.all((groups || []).map(async (g) => {
+    const [tot, fr] = await Promise.all([
+      inFeed(headCount().eq('group_id', g.id)),
+      inFeed(headCount().eq('group_id', g.id)).eq('seen', false),
+    ]);
+    if (tot.error) throw tot.error;
+    if (fr.error) throw fr.error;
+    counts[g.id] = { total: tot.count || 0, fresh: fr.count || 0 };
+  }));
   return (groups || []).map((g) => mapGroup(g, counts[g.id]));
 }
 

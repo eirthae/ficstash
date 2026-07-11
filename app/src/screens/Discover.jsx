@@ -834,9 +834,21 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
           </div>
         )}
 
-        <button className="btn btn-lg btn-primary btn-block" disabled={busy || !picked.length} onClick={save} style={{ opacity: busy || !picked.length ? 0.6 : 1 }}>
-          {busy ? 'Saving…' : editing ? 'Save changes' : `Track this ${picked.length > 1 ? 'group' : noun}`}
-        </button>
+        {/* Sticky footer so the track/save button is always reachable — the Books
+            and Stories topic trees are long, and scrolling to the bottom each time
+            to find it was tedious. Negative margins full-bleed it and cancel the
+            sheet-body's bottom padding so it sits flush at the sheet's edge. */}
+        <div style={{
+          position: 'sticky', bottom: 0, zIndex: 2,
+          marginLeft: -20, marginRight: -20,
+          marginBottom: 'calc(-20px - env(safe-area-inset-bottom))',
+          padding: '12px 20px calc(12px + env(safe-area-inset-bottom))',
+          background: 'var(--surface-elevated)', borderTop: '1px solid var(--border)',
+        }}>
+          <button className="btn btn-lg btn-primary btn-block" disabled={busy || !picked.length} onClick={save} style={{ opacity: busy || !picked.length ? 0.6 : 1 }}>
+            {busy ? 'Saving…' : editing ? 'Save changes' : `Track this ${picked.length > 1 ? 'group' : noun}`}
+          </button>
+        </div>
       </div>
     </Sheet>
   );
