@@ -89,6 +89,7 @@ test('workRow builds the works shape, follow derived from status, offline set', 
     sourceId: '42', title: 'T', author: 'a', fandom: 'F', summary: 's',
     tags: [{ t: 'x', k: 'freeform' }], words: 1000, chapters: 3, chaptersTotal: 5, status: 'ongoing',
   }, 'tag');
+  assert.equal(row.source, 'ao3'); // no parsed.source → AO3 default (regression guard)
   assert.equal(row.source_work_id, '42');
   assert.equal(row.chapters, 3);
   assert.equal(row.chapters_total, 5);
@@ -110,6 +111,17 @@ test('workRow unfollows a complete work and includes series fields when present'
   assert.equal(row.ao3_series_name, 'My Series');
   assert.equal(row.ao3_series_index, 2);
   assert.equal(row.origin, 'link');
+});
+
+test('workRow honors parsed.source (Scribble Hub stores as scribblehub)', () => {
+  const row = workRow({
+    source: 'scribblehub', sourceId: '2318244', title: 'A Story', author: 'w',
+    tags: [{ t: 'Fantasy', k: 'freeform' }], words: 5000, chapters: 12, status: 'ongoing',
+  }, 'tag');
+  assert.equal(row.source, 'scribblehub');
+  assert.equal(row.source_work_id, '2318244');
+  assert.equal(row.follow, true);
+  assert.equal(row.offline, true);
 });
 
 // ---- chapterRows -----------------------------------------------------------

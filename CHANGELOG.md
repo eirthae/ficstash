@@ -22,10 +22,21 @@ scheme yet, so entries are dated and reference the commit that shipped them.
   - **Recovery:** a single pull-to-refresh now re-downloads SH saves that were stuck
     (they were unreachable from the worker entirely).
 
+### Tests / audit
+
+- Audited every call site of the source-aware refactor (`downloadWork`,
+  `saveMatchNow`, `markMatchesSaved`, the save queue, `downloadWanted`,
+  `refetchWork`, `requestSave`) — all pass `source` correctly; AO3 remains the
+  default, so the existing AO3 path is unchanged.
+- Added unit tests (node `--test`, 85 total, all green): `workRow` source-awareness
+  (AO3 default + Scribble Hub), and the Scribble Hub parsers via linkedom — id/URL
+  extraction, series metadata, TOC, and chapter-body cleaning. `linkedom` added as a
+  dev-only dependency (not bundled into the app).
+
 ### Notes
 
-- Verified by build + faithful port; the SH fetch itself can only be confirmed on a
-  real device (this build environment hits the same Cloudflare 403).
+- Verified by build + faithful port + unit tests; the live SH fetch itself can only
+  be confirmed on a real device (this build environment hits the same Cloudflare 403).
 - Next up (agreed): a "Failed" stash (like Later) for works that fail definitively —
   a deleted work, or repeated failures — with Retry + Dismiss, so nothing fails silently.
 
