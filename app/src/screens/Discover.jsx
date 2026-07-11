@@ -6,7 +6,7 @@ import { TagTile, SuggestionCard } from '../components/cards.jsx';
 import {
   fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup, updateGroup,
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
-  markLater, unmarkLater, fetchLaterMatches,
+  markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch,
 } from '../lib/tags.js';
 import { syncNow } from '../lib/sync.js';
 import { LANGUAGES } from '../lib/languages.js';
@@ -116,6 +116,7 @@ export function DiscoverScreen({ nav }) {
   const shelfTags = tags.filter((t) => shelfMatch[tagShelf](t.source));
   const open = (tag) => nav.push('tagresults', { tag, onLeave: load, onEdit: (g) => { setEditGroup(g); setBuilderOpen(true); } });
   const openLater = () => nav.push('later', { onLeave: load });
+  const openFailed = () => nav.push('failed', { onLeave: load });
 
   const onCreated = (g, editing) => {
     setBuilderOpen(false);
@@ -154,6 +155,16 @@ export function DiscoverScreen({ nav }) {
           <div style={{ flex: 1 }}>
             <div className="set-h">Later</div>
             <div className="set-d">Works you set aside to decide on.</div>
+          </div>
+          <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
+        </button>
+
+        <button className="set-group pressable" onClick={openFailed}
+          style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, width: '100%', textAlign: 'left', marginBottom: 18 }}>
+          <div className="set-ic"><Icon icon="solar:danger-triangle-linear" size={18} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="set-h">Failed</div>
+            <div className="set-d">Saves that couldn’t download — retry or dismiss.</div>
           </div>
           <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
         </button>
@@ -1030,6 +1041,72 @@ export function LaterScreen({ nav, onLeave }) {
                 onDismiss={() => remove(w)}
                 onOpen={() => nav.push('detail', { work: w, suggestion: true })}
               />
+            ))}
+          </div>
+        )}
+        {toast}
+      </div>
+    </div>
+  );
+}
+
+// ---- Failed stash: saves that couldn't download (retry / dismiss) -----------
+export function FailedScreen({ nav, onLeave }) {
+  const [items, setItems] = useState(null); // null = loading
+  const [toast, showToast] = useToast();
+
+  const load = useCallback(() => {
+    fetchFailedMatches()
+      .then((r) => setItems(r ?? []))
+      .catch(() => setItems([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const leave = () => { onLeave && onLeave(); nav.pop(); };
+
+  const remove = (w) => {
+    setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
+    dismissMatch(w.matchId || w.id).catch(() => {});
+    showToast('Dismissed', 'solar:trash-bin-trash-linear');
+  };
+  const retry = (w) => {
+    setItems((arr) => (arr || []).filter((x) => x.id !== w.id)); // optimistic — back into the retry loop
+    retryMatch(w.matchId || w.id).catch(() => {});
+    showToast('Retrying — downloading', 'solar:refresh-circle-linear');
+  };
+
+  const list = items || [];
+  return (
+    <div className="screen">
+      <Appbar back={leave} title="Failed" sub={`${list.length} couldn’t download`} />
+      <div className="scroll" style={{ padding: '4px 20px 24px' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 14 }}>
+          Saves that couldn’t be downloaded — a work removed at the source, or one that stayed unreachable. Tap the retry arrow to try again, or ✕ to dismiss.
+        </div>
+        {items === null ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Loading…</div>
+        ) : list.length === 0 ? (
+          <EmptyState icon="solar:check-circle-linear" title="Nothing failed"
+            desc="Saves that can’t be downloaded show up here to retry or dismiss." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+            {list.map((w) => (
+              <div key={w.id}>
+                {w.failReason && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--danger, #f5455c)', margin: '0 2px 5px' }}>
+                    <Icon icon="solar:danger-triangle-linear" size={14} color="var(--danger, #f5455c)" />
+                    {w.failReason}
+                  </div>
+                )}
+                <SuggestionCard
+                  work={w}
+                  onSave={isSavableSource(w.source) ? retry : null}
+                  saveState="idle"
+                  cta="Retry"
+                  onDismiss={() => remove(w)}
+                  onOpen={() => nav.push('detail', { work: w, suggestion: true })}
+                />
+              </div>
             ))}
           </div>
         )}

@@ -4,6 +4,29 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-07-11 — "Failed" stash: retry / dismiss saves that couldn't download (v0.8.51)
+
+### Added
+
+- **A "Failed" section in Discover** (alongside Later). A tapped Save that fails
+  DEFINITIVELY — the work was removed at the source (404 / "cannot find"), or it's
+  members-only/restricted — now lands here with its reason shown, and a **Retry**
+  (re-queues the download) or **Dismiss** button. Nothing fails silently or retries
+  forever anymore.
+- Transient failures (throttling, network) are NOT flagged — they stay queued and
+  keep auto-retrying on pull-to-refresh, exactly as before.
+
+### Details
+
+- Migration `0026_failed_matches.sql`: `failed` + `fail_reason` on `tag_matches`
+  (idempotent), plus a partial index for the stash read.
+- `ondevice.saveMatchNow` flags a match failed on a definitive miss (a 404 /
+  restricted result), classified by `isDefinitiveFailure` (unit-tested). Failed
+  matches drop out of the group feed, tile counts, and What's New.
+- `tags.fetchFailedMatches` + `retryMatch` (retry re-queues on-device for AO3 /
+  Scribble Hub, or the worker otherwise). `FailedScreen` mirrors the Later stash.
+- Tests: 86 total, all green (adds `isDefinitiveFailure` coverage).
+
 ## 2026-07-11 — Scribble Hub downloads move on-device (v0.8.50)
 
 ### Fixed

@@ -5,7 +5,7 @@ import { BottomNav } from './components/chrome.jsx';
 import { AddMenu } from './components/AddMenu.jsx';
 import { LibraryScreen } from './screens/Library.jsx';
 import { WhatsNewScreen } from './screens/WhatsNew.jsx';
-import { DiscoverScreen, TagResultsScreen, LaterScreen } from './screens/Discover.jsx';
+import { DiscoverScreen, TagResultsScreen, LaterScreen, FailedScreen } from './screens/Discover.jsx';
 import { SettingsScreen, ConnectScreen } from './screens/Settings.jsx';
 import { StoryDetailScreen } from './screens/Detail.jsx';
 import { SeriesScreen } from './screens/Series.jsx';
@@ -242,6 +242,7 @@ export default function App() {
     if (item.screen === 'reader') return <ReaderScreen work={p.work} workId={p.workId} chapterN={p.chapterN} chapterTitle={p.chapterTitle} settings={readerSettings} setSettings={updateReaderSettings} nav={n} />;
     if (item.screen === 'tagresults') return <TagResultsScreen tag={p.tag} onLeave={p.onLeave} onEdit={p.onEdit} nav={n} />;
     if (item.screen === 'later') return <LaterScreen onLeave={p.onLeave} nav={n} />;
+    if (item.screen === 'failed') return <FailedScreen onLeave={p.onLeave} nav={n} />;
     if (item.screen === 'connect') return <ConnectScreen nav={n} />;
     return null;
   };

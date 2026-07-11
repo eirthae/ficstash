@@ -67,6 +67,8 @@ function mapMatch(row) {
     saved: !!row.saved,
     dismissed: !!row.dismissed,
     later: !!row.later,
+    failed: !!row.failed,
+    failReason: row.fail_reason || '',
   };
 }
 
@@ -114,7 +116,7 @@ export async function fetchTrackedGroups() {
   // The old approach paged EVERY tag_matches row to count client-side, which got
   // slow once romance.io discovery started adding thousands of book matches — a big
   // library meant dozens of 1000-row round-trips on every Discover open.
-  const inFeed = (q) => q.eq('dismissed', false).eq('saved', false).eq('later', false);
+  const inFeed = (q) => q.eq('dismissed', false).eq('saved', false).eq('later', false).eq('failed', false);
   const headCount = () => supabase.from('tag_matches').select('id', { count: 'exact', head: true });
   const counts = {};
   await Promise.all((groups || []).map(async (g) => {
@@ -247,6 +249,7 @@ export async function fetchMatches(groupId) {
     .eq('dismissed', false)
     .eq('saved', false)
     .eq('later', false)
+    .eq('failed', false)
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(mapMatch);
@@ -272,6 +275,39 @@ export async function unmarkLater(matchId) {
     .update({ later: false })
     .eq('id', matchId);
   if (error) throw error;
+}
+
+// Everything in the Failed stash: a save that failed definitively (removed at the
+// source, or members-only), not since dismissed or somehow saved.
+export async function fetchFailedMatches() {
+  if (!hasSupabase) return null;
+  const { data, error } = await supabase
+    .from('tag_matches')
+    .select('*')
+    .eq('failed', true)
+    .eq('saved', false)
+    .eq('dismissed', false)
+    .order('first_seen_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(mapMatch);
+}
+
+// Retry a failed save: clear the failed flag and re-queue it. AO3 + Scribble Hub
+// download on-device (residential IP); other sources go back to the worker.
+export async function retryMatch(matchId) {
+  if (!hasSupabase) return;
+  const { data, error } = await supabase
+    .from('tag_matches')
+    .update({ failed: false, fail_reason: null, wanted: true, seen: true })
+    .eq('id', matchId)
+    .select('source, source_work_id')
+    .maybeSingle();
+  if (error) throw error;
+  if (data && data.source_work_id && (data.source === 'ao3' || data.source === 'scribblehub')) {
+    enqueueSave(data.source_work_id, data.source);
+  } else {
+    kickSave().catch(() => {});
+  }
 }
 
 // Everything in the Later stash: kept (later), not yet saved, not dismissed.
@@ -366,6 +402,7 @@ export async function fetchNewMatches() {
     .eq('seen', false)
     .eq('dismissed', false)
     .eq('later', false)
+    .eq('failed', false)
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
 

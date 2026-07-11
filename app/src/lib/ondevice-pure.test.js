@@ -2,8 +2,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normGroup, matchRow, bookMatchRow, workRow, chapterRows, paletteFor,
-  newChapters, chapterUpdateRows, seriesFetchPlan,
+  newChapters, chapterUpdateRows, seriesFetchPlan, isDefinitiveFailure,
 } from './ondevice-pure.js';
+
+// ---- isDefinitiveFailure (Failed-stash gating) -----------------------------
+test('isDefinitiveFailure: 404 / cannot-find are definitive, throttle/network are not', () => {
+  assert.equal(isDefinitiveFailure('AO3 HTTP 404'), true);
+  assert.equal(isDefinitiveFailure('InvalidIdError: Cannot find work'), true);
+  assert.equal(isDefinitiveFailure('Scribble Hub HTTP 404'), true);
+  assert.equal(isDefinitiveFailure('AO3 HTTP 525'), false);       // transient → keep retrying
+  assert.equal(isDefinitiveFailure('network request failed'), false);
+  assert.equal(isDefinitiveFailure(''), false);
+  assert.equal(isDefinitiveFailure(null), false);
+});
 
 // ---- normGroup -------------------------------------------------------------
 test('normGroup handles a mapGroup() shape (camelCase)', () => {

@@ -32,6 +32,13 @@ export function normGroup(g) {
   };
 }
 
+// A fetch error that means the work is GONE at the source (404 / removed), vs a
+// transient throttle/network error. Decides whether a failed save is flagged failed
+// (definitive → Failed stash) or left wanted to auto-retry on the next sync.
+export function isDefinitiveFailure(errorMessage) {
+  return /\b404\b|not\s*found|cannot find/i.test(String(errorMessage || ''));
+}
+
 // A romance.io book (searchRomanceBooks shape) → a tag_matches row. Metadata-only:
 // no words/chapters, always "complete", series shown in the fandom slot, and the
 // steam + star rating surfaced as card tags. source 'romanceio' so the card links

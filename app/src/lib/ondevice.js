@@ -5,7 +5,7 @@ import { searchRomanceBooks, slugsForNames } from './sources/romanceio.js';
 import { statusMatches, passesGlobalPrefs, excludedForShelf } from './shelving.js';
 import {
   normGroup, matchRow, bookMatchRow, workRow, chapterRows,
-  newChapters, chapterUpdateRows, seriesFetchPlan,
+  newChapters, chapterUpdateRows, seriesFetchPlan, isDefinitiveFailure,
 } from './ondevice-pure.js';
 
 // ============================================================================
@@ -190,7 +190,12 @@ export async function downloadWork(sourceWorkId, { origin = 'tag', source = 'ao3
   let parsed;
   try {
     parsed = source === 'scribblehub' ? await fetchScribbleWork(wid) : await fetchWork(wid);
-  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    // A 404 / "cannot find" means the work was removed at the source — a DEFINITIVE
+    // failure (won't ever succeed), vs a transient 525/throttle/network error.
+    return { ok: false, error: msg, notFound: isDefinitiveFailure(msg) };
+  }
   if (parsed && parsed.restricted) return { ok: false, restricted: true };
   if (!parsed || !(parsed.chaptersData || []).some((c) => c.content && c.content.trim())) {
     return { ok: false, empty: true }; // gated/throttled — leave it to retry
@@ -225,11 +230,28 @@ export async function refetchWork(sourceWorkId, source = 'ao3') {
   return downloadWork(sourceWorkId, { origin: null, source });
 }
 
+// Flag a match as failed (across every group it matched) so it leaves the wanted-
+// retry loop and shows in the app's Failed stash. Only DEFINITIVE failures call this.
+async function markMatchFailed(sourceWorkId, source, reason) {
+  try {
+    await supabase
+      .from('tag_matches')
+      .update({ failed: true, wanted: false, fail_reason: reason || null })
+      .eq('source', source)
+      .eq('source_work_id', String(sourceWorkId));
+  } catch (e) { /* non-fatal */ }
+}
+
 // Save a single match NOW (a tapped Save), on-device. On success the match flips
-// to saved and the work is in the library. `source` = 'ao3' | 'scribblehub'.
+// to saved and the work is in the library. `source` = 'ao3' | 'scribblehub'. A
+// DEFINITIVE failure (removed at source / members-only) flags the match failed so
+// it stops retrying and appears in the Failed stash; a transient miss (empty/
+// throttle) is left wanted to auto-retry on the next pull-to-refresh.
 export async function saveMatchNow(sourceWorkId, source = 'ao3') {
   const r = await downloadWork(sourceWorkId, { origin: 'tag', source });
   if (r.ok) await markMatchesSaved(sourceWorkId, source);
+  else if (r.restricted) await markMatchFailed(sourceWorkId, source, 'Restricted — members-only at the source');
+  else if (r.notFound) await markMatchFailed(sourceWorkId, source, 'Removed at the source (not found)');
   return r;
 }
 
