@@ -111,7 +111,7 @@ export function StoryDetailScreen({ work: workProp, suggestion, onSaved, onRemov
     setRefetching(true);
     showToast('Re-fetching from AO3…');
     try {
-      const r = await refetchWork(work.sourceWorkId);
+      const r = await refetchWork(work.sourceWorkId, work.source);
       if (r && r.ok) {
         const fresh = await fetchWorkById(work.id);
         if (fresh) setWork(fresh); // reader now opens the updated copy

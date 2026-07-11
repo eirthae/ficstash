@@ -1,5 +1,6 @@
 import { supabase, hasSupabase } from './supabase.js';
 import { searchTags, searchLanguage, fetchWork, seriesWorks, isAo3Url, workIdFromUrl } from './sources/ao3.js';
+import { fetchWork as fetchScribbleWork } from './sources/scribblehub.js';
 import { searchRomanceBooks, slugsForNames } from './sources/romanceio.js';
 import { statusMatches, passesGlobalPrefs, excludedForShelf } from './shelving.js';
 import {
@@ -177,15 +178,19 @@ async function writeChapters(workId, chaptersData) {
   return rows.filter((r) => (r.content || '').trim()).length;
 }
 
-// Fetch one AO3 work on-device and store it (work + chapters) in Supabase.
+// Fetch one work on-device and store it (work + chapters) in Supabase. `source`
+// picks the fetcher: AO3 (default) or Scribble Hub — both are Cloudflare-walled to
+// datacenter IPs but answer the phone, so both download here, on the device.
 // Returns { ok, restricted?, empty?, workId? }. Does NOT mark tag_matches saved —
 // the caller decides (a Save marks the match; a link import marks the request).
-export async function downloadWork(sourceWorkId, { origin = 'tag' } = {}) {
+export async function downloadWork(sourceWorkId, { origin = 'tag', source = 'ao3' } = {}) {
   if (!hasSupabase) return { ok: false };
   const wid = String(sourceWorkId || '').match(/\d+/)?.[0];
   if (!wid) return { ok: false };
   let parsed;
-  try { parsed = await fetchWork(wid); } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+  try {
+    parsed = source === 'scribblehub' ? await fetchScribbleWork(wid) : await fetchWork(wid);
+  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
   if (parsed && parsed.restricted) return { ok: false, restricted: true };
   if (!parsed || !(parsed.chaptersData || []).some((c) => c.content && c.content.trim())) {
     return { ok: false, empty: true }; // gated/throttled — leave it to retry
@@ -202,12 +207,12 @@ export async function downloadWork(sourceWorkId, { origin = 'tag' } = {}) {
 
 // Flag every tag_matches row for a work as saved (across all groups it matched),
 // mirroring the worker's mark_matches_saved.
-async function markMatchesSaved(sourceWorkId) {
+async function markMatchesSaved(sourceWorkId, source = 'ao3') {
   try {
     await supabase
       .from('tag_matches')
       .update({ saved: true, wanted: false })
-      .eq('source', 'ao3')
+      .eq('source', source)
       .eq('source_work_id', String(sourceWorkId));
   } catch (e) { /* non-fatal */ }
 }
@@ -216,15 +221,15 @@ async function markMatchesSaved(sourceWorkId) {
 // pipeline (captures the work skin + inlines images). For the per-work "Re-fetch"
 // action — fixes chat/texting/image works that were fetched by an older build.
 // origin:null so the upsert keeps the work's existing origin lane.
-export async function refetchWork(sourceWorkId) {
-  return downloadWork(sourceWorkId, { origin: null });
+export async function refetchWork(sourceWorkId, source = 'ao3') {
+  return downloadWork(sourceWorkId, { origin: null, source });
 }
 
-// Save a single AO3 match NOW (a tapped Save), on-device. On success the match
-// flips to saved and the work is in the library.
-export async function saveMatchNow(sourceWorkId) {
-  const r = await downloadWork(sourceWorkId, { origin: 'tag' });
-  if (r.ok) await markMatchesSaved(sourceWorkId);
+// Save a single match NOW (a tapped Save), on-device. On success the match flips
+// to saved and the work is in the library. `source` = 'ao3' | 'scribblehub'.
+export async function saveMatchNow(sourceWorkId, source = 'ao3') {
+  const r = await downloadWork(sourceWorkId, { origin: 'tag', source });
+  if (r.ok) await markMatchesSaved(sourceWorkId, source);
   return r;
 }
 
@@ -236,8 +241,8 @@ export async function saveMatchNow(sourceWorkId) {
 // that still misses stays wanted=true and is retried by downloadWanted on the next
 // pull-to-refresh. Best-effort + fire-and-forget; the queue is in-memory (the durable
 // record is tag_matches.wanted in Supabase).
-const _saveQueue = [];
-const _saveQueued = new Set();
+const _saveQueue = [];        // [{ wid, source }]
+const _saveQueued = new Set(); // keys `source:wid`, for dedupe
 let _saveDraining = false;
 
 async function _drainSaveQueue() {
@@ -245,46 +250,55 @@ async function _drainSaveQueue() {
   _saveDraining = true;
   try {
     while (_saveQueue.length) {
-      const wid = _saveQueue.shift();
-      try { await saveMatchNow(wid); } catch (e) { /* stays wanted → retried on sync */ }
-      _saveQueued.delete(wid);
-      if (_saveQueue.length) await sleep(SPACE_MS); // polite gap between AO3 fetches
+      const { wid, source } = _saveQueue.shift();
+      try { await saveMatchNow(wid, source); } catch (e) { /* stays wanted → retried on sync */ }
+      _saveQueued.delete(`${source}:${wid}`);
+      if (_saveQueue.length) await sleep(SPACE_MS); // polite gap between fetches
     }
   } finally {
     _saveDraining = false;
   }
 }
 
-// Queue a tapped AO3 save for serial, spaced download. Deduped, so double-taps and
-// a re-tap of an already-queued work don't fetch it twice.
-export function enqueueSave(sourceWorkId) {
+// Queue a tapped on-device save (AO3 or Scribble Hub) for serial, spaced download.
+// Deduped, so double-taps and a re-tap of an already-queued work don't fetch twice.
+export function enqueueSave(sourceWorkId, source = 'ao3') {
   const wid = String(sourceWorkId || '').match(/\d+/)?.[0];
-  if (!wid || _saveQueued.has(wid)) return;
-  _saveQueued.add(wid);
-  _saveQueue.push(wid);
+  if (!wid) return;
+  const key = `${source}:${wid}`;
+  if (_saveQueued.has(key)) return;
+  _saveQueued.add(key);
+  _saveQueue.push({ wid, source });
   _drainSaveQueue();
 }
 
-// Download every wanted-but-unsaved AO3 match on-device (pull-to-refresh).
+// Download every wanted-but-unsaved on-device match (AO3 + Scribble Hub) on the
+// device — the pull-to-refresh retry. This is what rescues saves that missed
+// (including SH stories the worker can't fetch at all: Cloudflare 403s its IP).
 export async function downloadWanted({ onProgress } = {}) {
   if (!hasSupabase) return { saved: 0, failed: 0 };
   let wanted = [];
   try {
     const { data } = await supabase
       .from('tag_matches')
-      .select('source_work_id')
-      .eq('source', 'ao3')
+      .select('source, source_work_id')
+      .in('source', ['ao3', 'scribblehub'])
       .eq('wanted', true)
       .eq('saved', false);
-    wanted = [...new Set((data || []).map((r) => r.source_work_id).filter(Boolean))];
+    const seen = new Set();
+    wanted = (data || []).filter((r) => {
+      const k = `${r.source}:${r.source_work_id}`;
+      if (!r.source_work_id || seen.has(k)) return false;
+      seen.add(k); return true;
+    });
   } catch (e) { wanted = []; }
   let saved = 0, failed = 0, i = 0;
-  for (const wid of wanted) {
+  for (const w of wanted) {
     if (i) await sleep(SPACE_MS);
     i += 1;
-    if (onProgress) onProgress({ done: i, total: wanted.length, title: wid });
+    if (onProgress) onProgress({ done: i, total: wanted.length, title: w.source_work_id });
     try {
-      const r = await saveMatchNow(wid);
+      const r = await saveMatchNow(w.source_work_id, w.source);
       if (r.ok) saved += 1; else failed += 1;
     } catch (e) { failed += 1; }
   }

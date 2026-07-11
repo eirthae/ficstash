@@ -85,6 +85,42 @@ async function getHtmlOnce(url, accept) {
   };
 }
 
+// POST a form-encoded body over native HTTP and return the response text/HTML.
+// Scribble Hub's chapter list comes from an admin-ajax POST (not in the page), so
+// the on-device SH downloader needs this. Residential IP like the GET helpers —
+// Scribble Hub Cloudflare-403s datacenter IPs (the worker), but answers the phone.
+export async function fetchHtmlPost(url, form = {}, { headers = {}, attempts = 3 } = {}) {
+  const body = Object.entries(form)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+  let last = { status: 0, url, html: '' };
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await CapacitorHttp.post({
+        url,
+        headers: {
+          'User-Agent': HTML_UA,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'text/html,*/*',
+          ...headers,
+        },
+        data: body,
+        responseType: 'text',
+      });
+      const data = res && res.data;
+      const html = typeof data === 'string' ? data : (data == null ? '' : String(data));
+      if (res && res.status >= 200 && res.status < 300 && html) {
+        return { status: res.status, url: (res && res.url) || url, html };
+      }
+      last = { status: res ? res.status : 0, url, html };
+    } catch (e) {
+      last = { status: 0, url, html: '' };
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 200));
+  }
+  return last;
+}
+
 // Fetch a remote image over native HTTP and return it as a `data:` URI (so the
 // reader can show it OFFLINE — the reader neutralizes any remaining remote <img>
 // to a placeholder). Native CapacitorHttp returns binary as a base64 string for

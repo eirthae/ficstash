@@ -85,13 +85,15 @@ export async function requestSave(matchId) {
     .select('source, source_work_id')
     .maybeSingle();
   if (error) throw error;
-  if (data && data.source === 'ao3' && data.source_work_id) {
-    // Queue for serial, spaced download — NOT a direct fetch. Tapping Save on
-    // several works in a row otherwise fired concurrent AO3 fetches that AO3
-    // rate-limited, so only the first actually saved (enqueueSave fixes that).
-    enqueueSave(data.source_work_id); // on-device (residential IP)
+  const src = data && data.source;
+  if (data && data.source_work_id && (src === 'ao3' || src === 'scribblehub')) {
+    // Queue for serial, spaced ON-DEVICE download (residential IP) — NOT a direct
+    // fetch. Both AO3 and Scribble Hub Cloudflare-403 the worker's datacenter IP
+    // but answer the phone; the queue also stops rapid saves from throttling
+    // each other (only the first used to persist).
+    enqueueSave(data.source_work_id, src);
   } else {
-    kickSave().catch(() => {}); // non-AO3 (Royal Road, …) or unresolved → worker
+    kickSave().catch(() => {}); // Royal Road / Books / unresolved → worker
   }
 }
 

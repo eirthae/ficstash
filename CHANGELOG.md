@@ -4,6 +4,31 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-07-11 — Scribble Hub downloads move on-device (v0.8.50)
+
+### Fixed
+
+- **Saved Scribble Hub stories never downloaded.** Scribble Hub is Cloudflare-fronted
+  and returns `403 / Cf-Mitigated: challenge` to the worker's datacenter IP — the
+  exact same wall as AO3 — so every SH save silently failed at the worker. SH now
+  downloads **on-device** (residential IP), like AO3:
+  - `lib/sources/scribblehub.js` — ported from FanFicFare's SH adapter: series page
+    metadata, the `admin-ajax` chapter-list POST (`wi_getreleases_pagination`), and
+    `#chp_raw` chapter text. Returns the same parsed shape as the AO3 fetcher.
+  - `lib/fetch.js` — `fetchHtmlPost` (native form POST) for the chapter-list call.
+  - The on-device engine (`downloadWork`, `saveMatchNow`, the serial save queue,
+    `downloadWanted`, `refetchWork`) is now source-aware (AO3 + Scribble Hub).
+    `requestSave` routes SH saves to the on-device queue instead of the worker.
+  - **Recovery:** a single pull-to-refresh now re-downloads SH saves that were stuck
+    (they were unreachable from the worker entirely).
+
+### Notes
+
+- Verified by build + faithful port; the SH fetch itself can only be confirmed on a
+  real device (this build environment hits the same Cloudflare 403).
+- Next up (agreed): a "Failed" stash (like Later) for works that fail definitively —
+  a deleted work, or repeated failures — with Retry + Dismiss, so nothing fails silently.
+
 ## 2026-07-11 — Fix: rapid AO3 saves silently dropped (v0.8.49)
 
 ### Fixed

@@ -82,7 +82,7 @@ export function matchRow(groupId, m) {
 // A parsed full work (parseWork shape) → a works row (worker's upsert_work shape).
 export function workRow(parsed, origin) {
   const row = {
-    source: 'ao3',
+    source: parsed.source || 'ao3',
     source_work_id: String(parsed.sourceId),
     title: parsed.title,
     author: parsed.author || '',
