@@ -4,6 +4,22 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-07-11 — Fix: rapid AO3 saves silently dropped (v0.8.49)
+
+### Fixed
+
+- **Saving several AO3 works in a row only saved the first one.** Each tapped Save
+  fired its own on-device AO3 fetch immediately, so rapid taps hit AO3 concurrently;
+  AO3 rate-limits bursts, so most fetches came back empty and those works were never
+  downloaded or added to the library (they stayed silently "wanted"). Tapped saves
+  now go through a **serial, spaced queue** — one fetch at a time — so a burst of
+  saves all download instead of throttling each other.
+- **Pull-to-refresh didn't rescue the dropped saves.** The on-device sync ran the
+  heavy tag-discovery sweep *first*, hammering AO3 before it retried pending
+  downloads — so the retry hit an already-throttled AO3. Sync now **downloads
+  pending links + saves first**, then runs discovery. A single pull-to-refresh now
+  recovers works stuck from earlier bursts.
+
 ## 2026-07-11 — Discover perf, Saved-feed window, sticky track button (v0.8.48)
 
 ### Fixed

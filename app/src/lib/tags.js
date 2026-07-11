@@ -1,7 +1,7 @@
 import { supabase, hasSupabase } from './supabase.js';
 import { hashStr, COVER_PALETTES } from '../data/sample.js';
 import { fetchJson } from './fetch.js';
-import { discoverGroup, saveMatchNow } from './ondevice.js';
+import { discoverGroup, enqueueSave } from './ondevice.js';
 import { kickSave } from './sync.js';
 
 // ============================================================================
@@ -86,7 +86,10 @@ export async function requestSave(matchId) {
     .maybeSingle();
   if (error) throw error;
   if (data && data.source === 'ao3' && data.source_work_id) {
-    saveMatchNow(data.source_work_id).catch(() => {}); // on-device (residential IP)
+    // Queue for serial, spaced download — NOT a direct fetch. Tapping Save on
+    // several works in a row otherwise fired concurrent AO3 fetches that AO3
+    // rate-limited, so only the first actually saved (enqueueSave fixes that).
+    enqueueSave(data.source_work_id); // on-device (residential IP)
   } else {
     kickSave().catch(() => {}); // non-AO3 (Royal Road, …) or unresolved → worker
   }

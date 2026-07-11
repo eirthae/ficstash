@@ -228,6 +228,43 @@ export async function saveMatchNow(sourceWorkId) {
   return r;
 }
 
+// Serial save queue. Tapping Save several times in a row fired several downloadWork
+// fetches AT ONCE — AO3 (a volunteer nonprofit) rate-limits concurrent bursts hard,
+// so most came back empty/525 and only the first save actually persisted. We funnel
+// every tapped AO3 save through ONE worker that fetches them one at a time, spaced,
+// so a rapid burst of saves all download instead of throttling each other. A save
+// that still misses stays wanted=true and is retried by downloadWanted on the next
+// pull-to-refresh. Best-effort + fire-and-forget; the queue is in-memory (the durable
+// record is tag_matches.wanted in Supabase).
+const _saveQueue = [];
+const _saveQueued = new Set();
+let _saveDraining = false;
+
+async function _drainSaveQueue() {
+  if (_saveDraining) return;
+  _saveDraining = true;
+  try {
+    while (_saveQueue.length) {
+      const wid = _saveQueue.shift();
+      try { await saveMatchNow(wid); } catch (e) { /* stays wanted → retried on sync */ }
+      _saveQueued.delete(wid);
+      if (_saveQueue.length) await sleep(SPACE_MS); // polite gap between AO3 fetches
+    }
+  } finally {
+    _saveDraining = false;
+  }
+}
+
+// Queue a tapped AO3 save for serial, spaced download. Deduped, so double-taps and
+// a re-tap of an already-queued work don't fetch it twice.
+export function enqueueSave(sourceWorkId) {
+  const wid = String(sourceWorkId || '').match(/\d+/)?.[0];
+  if (!wid || _saveQueued.has(wid)) return;
+  _saveQueued.add(wid);
+  _saveQueue.push(wid);
+  _drainSaveQueue();
+}
+
 // Download every wanted-but-unsaved AO3 match on-device (pull-to-refresh).
 export async function downloadWanted({ onProgress } = {}) {
   if (!hasSupabase) return { saved: 0, failed: 0 };
@@ -420,11 +457,14 @@ export async function runSync({ onProgress } = {}) {
   if (!hasSupabase) return { ok: false, error: 'Not connected' };
   let newMatches = 0, saved = 0, seriesAdded = 0, newChaptersCount = 0;
   try {
-    const d = await discoverAll({ onProgress });
-    newMatches = d.newMatches;
+    // Downloads FIRST — pending links + tapped Saves — so a pull-to-refresh rescues
+    // works you saved against a fresh AO3, before the heavy discovery sweep hammers
+    // it. (Discovery used to run first, pre-throttling AO3 so the retry then failed.)
     const links = await processAo3Links({ onProgress });
     const dl = await downloadWanted({ onProgress });
     saved = links.done + dl.saved;
+    const d = await discoverAll({ onProgress });
+    newMatches = d.newMatches;
     const ser = await processFollowedSeries({ onProgress });
     seriesAdded = ser.seriesAdded;
     const ref = await refreshOngoing({ onProgress });
