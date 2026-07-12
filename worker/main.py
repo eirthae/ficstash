@@ -840,7 +840,7 @@ def main() -> None:
     # legacy flat array (older rows) is treated as AO3-only. Each shelf's list is
     # folded into that shelf's group searches below.
     def _shelf_for_source(src: str) -> str:
-        return "books" if src == "books" else "ao3" if src == "ao3" else "sites"
+        return "books" if src in ("books", "romanceio") else "ao3" if src == "ao3" else "sites"
 
     def _names(items):
         return [n for n in ((t.get("name") if isinstance(t, dict) else str(t)) for t in (items or [])) if n]

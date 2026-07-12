@@ -4,6 +4,35 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-07-11 — Restricted-retry via account, stash counts, romance.io on worker, labeled filters (v0.8.52)
+
+### Fixed
+
+- **Retrying a restricted (members-only) save now uses your AO3 account.** The
+  on-device fetch is logged-out and can never see restricted works, so retrying one
+  from Failed just failed again. Retry now routes restricted works to the WORKER,
+  which logs in with `AO3_USERNAME`/`AO3_PASSWORD` — so it actually downloads and
+  then follows the work for updates. (Non-restricted retries stay on-device.)
+- **romance.io discovery now runs on the worker** (`RomanceIoSource`), not just
+  on-device. romance.io — unlike AO3/Scribble Hub — answers a datacenter IP, so its
+  discovery belongs server-side like Goodreads; putting it only on-device was
+  unreliable. Registered in the worker, mapped to the Books shelf for global
+  excludes. The app still tries on-device for instant results; both write the same
+  rows, so the worker is the dependable fallback. (Verified with a live fetch:
+  multi-tag AND + excludes work.)
+
+### Added
+
+- **Counts on the Later and Failed buttons** in Discover (e.g. "Failed · 5"), so you
+  can see how many are waiting without opening them.
+- **Labels on the Ongoing / Completed filter toggles** in a tag group's results —
+  the top-right icons now read "Ongoing" and "Completed" instead of bare icons.
+
+### Tests
+
+- App: 86 (unchanged, all green). Worker: 96 total incl. new `test_romanceio`
+  (URL building, spaced-slug encoding, default-exclude, JSON parsing).
+
 ## 2026-07-11 — "Failed" stash: retry / dismiss saves that couldn't download (v0.8.51)
 
 ### Added

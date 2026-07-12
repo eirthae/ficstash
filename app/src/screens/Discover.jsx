@@ -6,7 +6,7 @@ import { TagTile, SuggestionCard } from '../components/cards.jsx';
 import {
   fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup, updateGroup,
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
-  markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch,
+  markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch, fetchStashCounts,
 } from '../lib/tags.js';
 import { syncNow } from '../lib/sync.js';
 import { LANGUAGES } from '../lib/languages.js';
@@ -82,12 +82,14 @@ export function DiscoverScreen({ nav }) {
   const [addLangOpen, setAddLangOpen] = useState(false); // follow a new language
   const [filtersOpen, setFiltersOpen] = useState(false); // global discovery filters
   const [tagShelf, setTagShelf] = useState('ao3'); // ao3 | sites | books
+  const [stash, setStash] = useState({ later: 0, failed: 0 }); // Later/Failed counts
   const [toast, showToast] = useToast();
 
   const load = useCallback(() => {
     fetchTrackedGroups()
       .then((r) => setGroups(r ?? TRACKED_TAGS))
       .catch(() => setGroups(TRACKED_TAGS));
+    fetchStashCounts().then(setStash).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -156,6 +158,7 @@ export function DiscoverScreen({ nav }) {
             <div className="set-h">Later</div>
             <div className="set-d">Works you set aside to decide on.</div>
           </div>
+          {stash.later > 0 && <span className="chip" style={{ height: 22, background: 'var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 700, fontSize: 12 }}>{stash.later}</span>}
           <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
         </button>
 
@@ -166,6 +169,7 @@ export function DiscoverScreen({ nav }) {
             <div className="set-h">Failed</div>
             <div className="set-d">Saves that couldn’t download — retry or dismiss.</div>
           </div>
+          {stash.failed > 0 && <span className="chip" style={{ height: 22, background: 'color-mix(in srgb, var(--danger, #f5455c) 15%, transparent)', color: 'var(--danger, #f5455c)', fontWeight: 700, fontSize: 12 }}>{stash.failed}</span>}
           <Icon icon="solar:alt-arrow-right-linear" size={18} color="var(--text-tertiary)" />
         </button>
 
@@ -940,17 +944,20 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
             <span className="swatch" style={{ background: c }}></span>{kindLabel}
           </span>
           {list.length > 0 && (
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-              <button aria-label="Ongoing only" title="Ongoing only"
-                onClick={() => setStatusFilter((s) => (s === 'ongoing' ? 'all' : 'ongoing'))}
-                style={{ width: 34, height: 30, borderRadius: 8, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: statusFilter === 'ongoing' ? 'var(--accent-soft)' : 'transparent' }}>
-                <Icon icon="solar:clock-circle-linear" size={19} color={statusFilter === 'ongoing' ? 'var(--accent)' : 'var(--text-tertiary)'} />
-              </button>
-              <button aria-label="Complete only" title="Complete only"
-                onClick={() => setStatusFilter((s) => (s === 'complete' ? 'all' : 'complete'))}
-                style={{ width: 34, height: 30, borderRadius: 8, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: statusFilter === 'complete' ? 'var(--accent-soft)' : 'transparent' }}>
-                <Icon icon="solar:check-circle-linear" size={19} color={statusFilter === 'complete' ? 'var(--accent)' : 'var(--text-tertiary)'} />
-              </button>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+              {[
+                { key: 'ongoing', label: 'Ongoing', icon: 'solar:clock-circle-linear' },
+                { key: 'complete', label: 'Completed', icon: 'solar:check-circle-linear' },
+              ].map((o) => {
+                const on = statusFilter === o.key;
+                return (
+                  <button key={o.key} aria-label={`${o.label} only`} title={`${o.label} only`}
+                    onClick={() => setStatusFilter((s) => (s === o.key ? 'all' : o.key))}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 600, background: on ? 'var(--accent-soft)' : 'var(--surface-2)', color: on ? 'var(--accent)' : 'var(--text-tertiary)' }}>
+                    <Icon icon={o.icon} size={16} color={on ? 'var(--accent)' : 'var(--text-tertiary)'} /> {o.label}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

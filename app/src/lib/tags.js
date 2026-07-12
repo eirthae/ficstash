@@ -277,6 +277,18 @@ export async function unmarkLater(matchId) {
   if (error) throw error;
 }
 
+// Counts for the Later + Failed stash buttons on Discover (head-only COUNT, no rows
+// transferred). Lets the tiles read "Later · 3" / "Failed · 5" at a glance.
+export async function fetchStashCounts() {
+  if (!hasSupabase) return { later: 0, failed: 0 };
+  const base = () => supabase.from('tag_matches').select('id', { count: 'exact', head: true }).eq('saved', false).eq('dismissed', false);
+  const [later, failed] = await Promise.all([
+    base().eq('later', true),
+    base().eq('failed', true),
+  ]);
+  return { later: later.count || 0, failed: failed.count || 0 };
+}
+
 // Everything in the Failed stash: a save that failed definitively (removed at the
 // source, or members-only), not since dismissed or somehow saved.
 export async function fetchFailedMatches() {
@@ -292,21 +304,30 @@ export async function fetchFailedMatches() {
   return (data || []).map(mapMatch);
 }
 
-// Retry a failed save: clear the failed flag and re-queue it. AO3 + Scribble Hub
-// download on-device (residential IP); other sources go back to the worker.
+// Retry a failed save: clear the failed flag and re-queue it. Routing depends on
+// WHY it failed (read the reason first, since the update clears it):
+//   * Restricted (members-only) → the WORKER, which logs in with the AO3 account
+//     (AO3_USERNAME/PASSWORD) — the on-device fetch is logged-out and can't see it.
+//     The worker also then follows it for updates.
+//   * Otherwise AO3 / Scribble Hub → on-device (residential IP); other sources → worker.
 export async function retryMatch(matchId) {
   if (!hasSupabase) return;
-  const { data, error } = await supabase
+  const { data: cur } = await supabase
+    .from('tag_matches')
+    .select('source, source_work_id, fail_reason')
+    .eq('id', matchId)
+    .maybeSingle();
+  const { error } = await supabase
     .from('tag_matches')
     .update({ failed: false, fail_reason: null, wanted: true, seen: true })
-    .eq('id', matchId)
-    .select('source, source_work_id')
-    .maybeSingle();
+    .eq('id', matchId);
   if (error) throw error;
-  if (data && data.source_work_id && (data.source === 'ao3' || data.source === 'scribblehub')) {
-    enqueueSave(data.source_work_id, data.source);
+  const restricted = /restricted|members-only/i.test((cur && cur.fail_reason) || '');
+  const src = cur && cur.source;
+  if (!restricted && cur && cur.source_work_id && (src === 'ao3' || src === 'scribblehub')) {
+    enqueueSave(cur.source_work_id, src); // on-device (logged-out is fine)
   } else {
-    kickSave().catch(() => {});
+    kickSave().catch(() => {}); // restricted AO3 → worker (logged in); or worker-only source
   }
 }
 
