@@ -1,0 +1,72 @@
+name: Reclaim storage
+
+# One-off Supabase storage reclaim (see docs/supabase-storage.md). Runs SQL via the
+# Management API using the repo secrets — no SQL editor needed.
+#   mode=measure (default): READ-ONLY. Prints DB size + what would be freed.
+#   mode=clean:  DESTRUCTIVE. Strips inlined images, deletes removed (hidden) works +
+#                their chapters + already-dismissed matches, then VACUUM FULL.
+# Run `clean` when no sync is active (VACUUM FULL takes an exclusive lock).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "measure (read-only) or clean (destructive)"
+        type: choice
+        options: [measure, clean]
+        default: measure
+
+jobs:
+  reclaim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reclaim
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -uo pipefail
+          ref="$(printf '%s' "$SUPABASE_URL" | sed -E 's#https?://([^.]+)\..*#\1#')"
+          API="https://api.supabase.com/v1/projects/$ref/database/query"
+          # Run one SQL statement; print the JSON result (pretty if possible).
+          q() {
+            local out
+            out="$(curl -sS -X POST "$API" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "$(jq -nc --arg s "$1" '{query:$s}')")"
+            echo "$out" | jq -c . 2>/dev/null || echo "$out"
+          }
+          # Count rows a DELETE/UPDATE ... returning affected (jq length of the array).
+          qn() { q "$1" | jq 'if type=="array" then length else . end' 2>/dev/null; }
+
+          echo "== DB size ==";        q "select pg_size_pretty(pg_database_size(current_database())) as db_size;"
+          echo "== chapters =="
+          q "select count(*) total, count(*) filter (where content like '%data:image%') image_chapters, pg_size_pretty(coalesce(sum(length(content)),0)::bigint) all_content, pg_size_pretty(coalesce(sum(case when content like '%data:image%' then length(content) else 0 end),0)::bigint) image_bytes from chapters;"
+          echo "== hidden (removed) works ==";  q "select count(*) hidden_works from works where hidden = true;"
+          echo "== tag_matches ==";
+          q "select count(*) total, count(*) filter (where saved) saved, count(*) filter (where later) later, count(*) filter (where coalesce(failed,false)) failed, count(*) filter (where coalesce(dismissed,false)) dismissed from tag_matches;"
+
+          if [ "$MODE" != "clean" ]; then
+            echo; echo "measure only — nothing changed. Re-run with mode=clean to reclaim."; exit 0
+          fi
+
+          echo; echo "===== CLEAN (destructive) ====="
+          echo "-- 1. strip inlined images -> placeholder (batched) --"
+          for i in $(seq 1 60); do
+            n="$(qn "with c as (select ctid from chapters where content like '%data:image%' limit 40) update chapters set content = regexp_replace(content, '<img[^>]*data:image[^>]*>', '<span class=\"fs-img-missing\">📷 image</span>', 'gi') where ctid in (select ctid from c) returning 1;")"
+            echo "   batch $i: ${n:-0} chapter(s)"
+            [ "${n:-0}" = "0" ] && break
+          done
+          echo "-- 2. delete removed (hidden) works' chapters --"
+          echo "   deleted: $(qn "delete from chapters where work_id in (select id from works where hidden = true) returning 1;") chapter(s)"
+          echo "-- 3. delete removed (hidden) works --"
+          echo "   deleted: $(qn "delete from works where hidden = true returning 1;") work(s)"
+          echo "-- 4. delete already-dismissed tag_matches --"
+          echo "   deleted: $(qn "delete from tag_matches where coalesce(dismissed,false) returning 1;") match(es)"
+          echo "-- 5. VACUUM FULL (reclaim disk; each alone) --"
+          q "vacuum full chapters;"    && echo "   chapters vacuumed"    || echo "   chapters vacuum FAILED — run 'vacuum full chapters;' in the SQL editor"
+          q "vacuum full works;"       && echo "   works vacuumed"       || echo "   works vacuum FAILED — run it in the SQL editor"
+          q "vacuum full tag_matches;" && echo "   tag_matches vacuumed" || echo "   tag_matches vacuum FAILED — run it in the SQL editor"
+
+          echo; echo "== DB size after ==";  q "select pg_size_pretty(pg_database_size(current_database())) as db_size;"
