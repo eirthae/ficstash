@@ -132,9 +132,12 @@ select pg_size_pretty(pg_database_size(current_database()));
    (`app/src/lib/sources/ao3.js`, "capture work skin + inline images" commit)
    embed images into `chapters.content`. base64 is ~1.37× the raw bytes, and a
    handful of image-heavy chatfics dominate the table.
-3. **Discovery hoards metadata.** Each tag search upserts every match into
-   `tag_matches` (`upsert_tag_matches`). `TAG_SEED_LIMIT` (worker `ao3.py`, raised
-   to 300) × ~30 tags = up to ~9k rows of suggestions you never saved.
+3. **Discovery hoards metadata, and dismiss doesn't free it.** Each tag search
+   upserts every match into `tag_matches` (`upsert_tag_matches`); `TAG_SEED_LIMIT`
+   (worker `ao3.py`, raised to 300) × ~30 tags = up to ~9k rows of suggestions you
+   never saved. And **dismissing a suggestion only flags `dismissed = true`** —
+   the row (with its full metadata/summary) stays. So browsing-and-deleting
+   suggestions, which the user does a lot, quietly accumulates them forever.
 
 ---
 
@@ -161,11 +164,43 @@ Two options:
   images < 40 KB). Worker caps live near `_inline_chapter_images`; on-device in
   `app/src/lib/sources/ao3.js`.
 
-### 3. Lean discovery metadata (root cause #3)
-- Lower `TAG_SEED_LIMIT` (worker `ao3.py`) from 300 back to ~150 — env-tunable.
-- Optionally age out `tag_matches` that are unsaved + older than N days in the
-  worker's What's-New retention pass (`age_out_saved_matches` already exists;
-  extend it to prune stale unsaved suggestions, not just flip origins).
+### 3. Discovery metadata: delete, don't hoard (root cause #3)
+
+Same soft-delete trap as works, but for `tag_matches`. When you browse discovery
+suggestions and delete the ones you don't want, they are **not removed** — they're
+just flagged and kept forever. This must change: dismissed suggestions should not
+live in Supabase at all.
+
+- **Dismiss = hard delete (the important one).** `dismissMatch` in
+  `app/src/lib/tags.js` (~line 369) does `update({ dismissed: true, seen: true })`
+  and keeps the row. Change it to **`.delete()` the row(s)** instead of flagging
+  `dismissed = true`. It already targets by `source` + `source_work_id` so one
+  dismiss clears the match across every tag group — keep that scoping, just delete
+  instead of update. Afterwards the `dismissed = false` filters in `fetchMatches` /
+  the count queries become unnecessary (a dismissed row no longer exists).
+  - Consideration: with a hard delete, the same work could resurface as a "new"
+    match on a later tag search. If that's annoying, keep a tiny **dismissed-ids**
+    tombstone table (`group_id, source, source_work_id`) — just the keys, no
+    metadata/summary — and skip those on upsert. That's a few bytes per dismissal
+    vs a full metadata row.
+
+- **Lower `TAG_SEED_LIMIT`** (worker `ao3.py`) from 300 back to ~150 — env-tunable —
+  so each tag stores fewer suggestions to begin with.
+
+- **Prune stale unsaved matches** on a schedule: in the worker's retention pass,
+  delete `tag_matches` that are unsaved + not in Later + older than N days, so
+  suggestions you never acted on don't pile up. (`age_out_saved_matches` already
+  exists as a hook; add a sibling that DELETEs stale unsaved rows rather than
+  flipping a flag.)
+
+One-off cleanup of existing dismissed rows (safe — they're already hidden from the
+feed; run the vacuum alone):
+```sql
+delete from tag_matches where dismissed = true;
+```
+```sql
+vacuum full tag_matches;
+```
 
 ### 4. (Optional) periodic maintenance
 - `VACUUM FULL` frees on-disk space, but Supabase's **dashboard figure lags** (can
