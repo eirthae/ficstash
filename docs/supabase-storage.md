@@ -202,6 +202,39 @@ delete from tag_matches where dismissed = true;
 vacuum full tag_matches;
 ```
 
+> **⚠ Open question — dismisses aren't persisting (investigate before coding this).**
+> On 2026-07-14, `select count(*) from tag_matches where dismissed = true;` returned
+> **0**, even though the user has dismissed a *lot* of suggestions. So the one-off
+> cleanup above had nothing to delete, and the 25 MB in `tag_matches` is almost all
+> **active** suggestions (mostly the 300/tag reseed), not dismissed ones.
+>
+> What we ruled out: it is **not** the re-discovery upsert resetting the flag —
+> `matchRow` (`app/src/lib/ondevice-pure.js`) omits `dismissed`/`saved`/`later`, and
+> the worker's `upsert_tag_matches` explicitly omits them too, so a conflict UPDATE
+> leaves them untouched. So the dismiss is either **not being written**
+> (`dismissMatch` in `app/src/lib/tags.js` ~line 369 — verify it actually runs and
+> the update succeeds against the right rows), or it's being **cleared elsewhere**
+> (a reset/migration), or re-discovery **inserts a new row** for a re-surfaced work
+> under a key that doesn't collide with the dismissed one. Worth confirming what the
+> app's "delete/dismiss" gesture actually calls, and whether dismissed works keep
+> **reappearing** in Discover (a strong symptom that the flag isn't sticking).
+>
+> Practical upshot: this actually **argues for the hard-delete + dismissed-ids
+> tombstone** approach above — it doesn't depend on a `dismissed` boolean surviving
+> re-discovery at all, so it's robust regardless of the root cause.
+>
+> To see where the 25 MB really is, run:
+> ```sql
+> select count(*) as total,
+>        count(*) filter (where dismissed) as dismissed,
+>        count(*) filter (where saved) as saved,
+>        count(*) filter (where later) as later,
+>        count(*) filter (where coalesce(failed,false)) as failed,
+>        count(*) filter (where not coalesce(dismissed,false) and not coalesce(saved,false)
+>                           and not coalesce(later,false) and not coalesce(failed,false)) as active
+> from tag_matches;
+> ```
+
 ### 4. (Optional) periodic maintenance
 - `VACUUM FULL` frees on-disk space, but Supabase's **dashboard figure lags** (can
   take hours to recompute) and the **provisioned disk doesn't auto-shrink**. So
