@@ -525,7 +525,7 @@ export async function processFollowedSeries({ onProgress } = {}) {
 // chapters — all on the phone, written to Supabase. Returns a small summary.
 export async function runSync({ onProgress } = {}) {
   if (!hasSupabase) return { ok: false, error: 'Not connected' };
-  let newMatches = 0, saved = 0, seriesAdded = 0, newChaptersCount = 0;
+  let newMatches = 0, saved = 0, savesFailed = 0, seriesAdded = 0, newChaptersCount = 0;
   try {
     // Downloads FIRST — pending links + tapped Saves — so a pull-to-refresh rescues
     // works you saved against a fresh AO3, before the heavy discovery sweep hammers
@@ -533,6 +533,9 @@ export async function runSync({ onProgress } = {}) {
     const links = await processAo3Links({ onProgress });
     const dl = await downloadWanted({ onProgress });
     saved = links.done + dl.saved;
+    // Works the device couldn't get (empty — likely members-only/adult that a
+    // logged-out fetch can't read). syncNow escalates these to the logged-in worker.
+    savesFailed = (links.failed || 0) + (dl.failed || 0);
     const d = await discoverAll({ onProgress });
     newMatches = d.newMatches;
     const ser = await processFollowedSeries({ onProgress });
@@ -542,5 +545,5 @@ export async function runSync({ onProgress } = {}) {
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
-  return { ok: true, newMatches, saved, seriesAdded, newChapters: newChaptersCount };
+  return { ok: true, newMatches, saved, savesFailed, seriesAdded, newChapters: newChaptersCount };
 }

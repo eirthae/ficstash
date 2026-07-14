@@ -7,7 +7,12 @@ import { runSync } from './ondevice.js';
 // The worker still runs on its schedule for non-AO3 sources + ongoing refresh.
 // Never throws (runSync catches); returns { ok, newMatches, saved }.
 export async function syncNow({ onProgress } = {}) {
-  return runSync({ onProgress });
+  const r = await runSync({ onProgress });
+  // Anything the device couldn't download (members-only / adult works a logged-out
+  // fetch returns empty for) → hand off to the logged-in worker ONCE (guarded), so
+  // saves don't sit "pending" forever when on-device simply can't read them.
+  if (r && r.ok && r.savesFailed > 0) kickSaveGuarded().catch(() => {});
+  return r;
 }
 
 // Ask the worker to run now (via the trigger-sync edge function → GitHub).
