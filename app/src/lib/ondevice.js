@@ -47,17 +47,36 @@ async function readPrefs() {
   }
 }
 
+// Keys-only tombstone of dismissed works ("source:id"), so on-device discovery never
+// re-adds one the user swiped away (dismiss hard-deletes the tag_matches row). Best-
+// effort: empty set if the table isn't there yet.
+async function readDismissedKeys() {
+  const keys = new Set();
+  try {
+    const PAGE = 1000;
+    for (let start = 0; ; start += PAGE) {
+      const { data, error } = await supabase
+        .from('dismissed_matches').select('source,source_work_id').range(start, start + PAGE - 1);
+      if (error) break;
+      for (const r of data || []) keys.add(`${r.source}:${r.source_work_id}`);
+      if (!data || data.length < PAGE) break;
+    }
+  } catch (e) { /* table may not exist yet */ }
+  return keys;
+}
+
 // ---- discovery -------------------------------------------------------------
 
 // Search AO3 for one group on-device and upsert its matches to Supabase. Returns
 // the number of rows written (0 on a miss — and no last_checked burn, since
 // on-device always fetches newest, never a date window). AO3-only; other sources
 // are skipped (the worker still handles them).
-export async function discoverGroup(group, prefs) {
+export async function discoverGroup(group, prefs, dismissed) {
   if (!hasSupabase) return 0;
   const g = normGroup(group);
   prefs = prefs || (await readPrefs());
-  if (g.source === 'romanceio') return discoverRomanceGroup(g, prefs);
+  if (dismissed === undefined) dismissed = await readDismissedKeys();
+  if (g.source === 'romanceio') return discoverRomanceGroup(g, prefs, dismissed);
   if (g.source !== 'ao3') return 0;
   if (!g.langCode && !g.include.length) return 0;
 
@@ -90,6 +109,7 @@ export async function discoverGroup(group, prefs) {
   });
   metas = metas.filter((m) => statusMatches(m, g.status));
   metas = metas.filter((m) => passesGlobalPrefs(m, { excludedTags: shelfExcl, languages: prefs.languages }, !!g.langCode));
+  if (dismissed && dismissed.size) metas = metas.filter((m) => !dismissed.has(`ao3:${m.sourceId}`));
 
   const rows = metas.map((m) => matchRow(g.id, m));
   if (rows.length) {
@@ -107,7 +127,7 @@ export async function discoverGroup(group, prefs) {
 // excludes (mapped to slugs) + the permanent non-binary-MC default-exclude list
 // (merged inside searchRomanceBooks). Books are metadata-only — upsert them as
 // tag_matches that link out. normGroup carries slugs in includeIds/excludeIds.
-async function discoverRomanceGroup(g, prefs) {
+async function discoverRomanceGroup(g, prefs, dismissed) {
   if (!g.includeIds.length) return 0;
   const shelfExcl = excludedForShelf(prefs, 'books'); // [{name}|string]
   const exclude = [...new Set([...g.excludeIds, ...slugsForNames(shelfExcl)])];
@@ -117,6 +137,7 @@ async function discoverRomanceGroup(g, prefs) {
 
   const seen = new Set();
   books = books.filter((b) => b.sourceWorkId && !seen.has(b.sourceWorkId) && (seen.add(b.sourceWorkId), true));
+  if (dismissed && dismissed.size) books = books.filter((b) => !dismissed.has(`romanceio:${b.sourceWorkId}`));
 
   const rows = books.map((b) => bookMatchRow(g.id, b));
   if (rows.length) {
@@ -141,6 +162,7 @@ export async function discoverAll({ onProgress } = {}) {
     groups = data || [];
   } catch (e) { groups = []; }
   const prefs = await readPrefs();
+  const dismissed = await readDismissedKeys(); // fetched once for the whole pass
   // AO3 (on-device HTML scrape) + romance.io (on-device books API). Other sources
   // stay on the worker. Both go through discoverGroup, which branches by source.
   const onDeviceGroups = groups.filter((g) => ['ao3', 'romanceio'].includes(g.source || 'ao3'));
@@ -149,7 +171,7 @@ export async function discoverAll({ onProgress } = {}) {
     if (checked) await sleep(SPACE_MS);
     checked += 1;
     if (onProgress) onProgress({ done: checked, total: onDeviceGroups.length, title: g.label || 'group' });
-    try { newMatches += await discoverGroup(g, prefs); } catch (e) { /* non-fatal */ }
+    try { newMatches += await discoverGroup(g, prefs, dismissed); } catch (e) { /* non-fatal */ }
   }
   return { newMatches, groups: onDeviceGroups.length };
 }

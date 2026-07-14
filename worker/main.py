@@ -83,6 +83,8 @@ from ficstash_worker.supabase_io import (
     mark_flag,
     mark_group_checked,
     delete_chapters_for_hidden_works,
+    delete_stale_unsaved_matches,
+    fetch_dismissed_keys,
     mark_matches_saved,
     mark_not_offline,
     mark_request,
@@ -796,6 +798,15 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001 — cleanup is best-effort
         print(f"Hidden-works chapter cleanup skipped ({type(exc).__name__}: {exc})")
 
+    # Prune discovery suggestions the user never acted on (unsaved, not Later/Failed/
+    # wanted, older than the window) so they don't hoard metadata forever.
+    try:
+        pruned_matches = delete_stale_unsaved_matches(db, days=int(os.environ.get("MATCH_RETENTION_DAYS", "30") or 30))
+        if pruned_matches:
+            print(f"Storage: pruned {pruned_matches} stale unsaved discovery suggestion(s).")
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        print(f"Stale-match prune skipped ({type(exc).__name__}: {exc})")
+
     # ---- Pass 3: repair works with blank metadata --------------------------
     # Older builds tolerated an ao3-api reload() abort without falling back to
     # the soup, so some works landed with an empty title/author/fandom (readable
@@ -830,6 +841,12 @@ def main() -> None:
     print("\n== Tracked tag groups ==")
     groups = fetch_tracked_groups(db)
     print(f"{len(groups)} tracked group(s).")
+    # Keys-only tombstone of dismissed works — skipped on upsert so a work the user
+    # swiped away is never re-added by a later tag search (dismiss hard-deletes the
+    # row, so the memory lives here). Fetched once for the whole discovery pass.
+    dismissed_keys = fetch_dismissed_keys(db)
+    if dismissed_keys:
+        print(f"{len(dismissed_keys)} dismissed work(s) will be skipped.")
 
     # ---- global discovery filters (app-editable; discovery_prefs row) -------
     # `languages` = only keep tag-discovery matches in these languages (empty =
@@ -920,7 +937,7 @@ def main() -> None:
                     what=f"language search '{label}'",
                     broad=True,
                 )
-                written = upsert_tag_matches(db, g["id"], metas)
+                written = upsert_tag_matches(db, g["id"], metas, dismissed_keys=dismissed_keys)
                 mark_group_checked(db, g["id"])
                 print(f"    '{label}' (language): {written} match(es).")
             except Exception as exc:  # noqa: BLE001
@@ -969,7 +986,7 @@ def main() -> None:
                 )
                 kept = [m for m in metas if keep_discovery_language(m) and _keep_status(m)]
                 dropped = len(metas) - len(kept)
-                written = upsert_tag_matches(db, g["id"], kept)
+                written = upsert_tag_matches(db, g["id"], kept, dismissed_keys=dismissed_keys)
                 mark_group_checked(db, g["id"])
                 note = f" ({dropped} filtered by language)" if dropped else ""
                 print(f"    '{label}': {written} match(es).{note}")
@@ -1014,7 +1031,7 @@ def main() -> None:
                 broad=True,
             )
             metas = [m for m in metas if _keep_status(m)]
-            written = upsert_tag_matches(db, g["id"], metas)
+            written = upsert_tag_matches(db, g["id"], metas, dismissed_keys=dismissed_keys)
             mark_group_checked(db, g["id"])
             note = f" (excluding {len(exclude_terms)})" if exclude_terms else ""
             print(f"    '{label}' ({source_id}): {written} match(es).{note}")

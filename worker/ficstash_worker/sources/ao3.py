@@ -963,9 +963,16 @@ def _chapter_html(ch) -> str:
 # FicStash's frozen-copy ethos. Oversized / failed / too-many fall back to a
 # placeholder the app styles. (The app also neutralizes any remote <img> at
 # render as a belt-and-suspenders, so a missed one never hotlinks.)
-MAX_IMG_BYTES = 2_000_000   # skip a single image larger than this
-MAX_IMG_TOTAL = 4_000_000   # cap total inlined bytes per chapter (keeps DB writes small)
-MAX_IMG_COUNT = 50          # and total inlined images per chapter
+# Image inlining is the #1 DB-storage driver (see docs/supabase-storage.md): a
+# handful of image-heavy chatfics inlined ~231 MB of base64. So the per-image cap is
+# small by default — inline only tiny decorative images (emoji/icons); anything
+# bigger becomes the reader's placeholder. INLINE_IMAGES=0 disables inlining entirely
+# (leaves remote <img>, which the app neutralizes to a placeholder at render — near-
+# zero storage). All env-tunable.
+INLINE_IMAGES = (os.environ.get("INLINE_IMAGES", "1") or "1").strip().lower() not in ("0", "false", "no")
+MAX_IMG_BYTES = int(os.environ.get("MAX_IMG_BYTES", "50000") or 50000)   # skip a single image larger than this (was 2 MB)
+MAX_IMG_TOTAL = int(os.environ.get("MAX_IMG_TOTAL", "300000") or 300000) # cap total inlined bytes per chapter (was 4 MB)
+MAX_IMG_COUNT = int(os.environ.get("MAX_IMG_COUNT", "50") or 50)         # and total inlined images per chapter
 
 
 def _download_image(url: str):
@@ -1005,6 +1012,10 @@ def _inline_chapter_images(html_text: str, download=_download_image) -> str:
     """
     if not html_text or "<img" not in html_text.lower():
         return html_text or ""
+    if not INLINE_IMAGES:
+        # Inlining off: leave remote <img> as-is (tiny storage) — the app's
+        # neutralizeRemoteImages swaps it for a placeholder at render time.
+        return html_text
     soup = BeautifulSoup(html_text, "html.parser")
     total = 0
     count = 0

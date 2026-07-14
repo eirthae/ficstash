@@ -367,7 +367,62 @@ def propagate_dismissals(client: Client) -> int:
     return total
 
 
-def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> int:
+def fetch_dismissed_keys(client: Client) -> set[tuple[str, str]]:
+    """All (source, source_work_id) the user has dismissed — a keys-only tombstone.
+    Dismiss HARD-DELETEs the tag_matches row (frees storage), so the row can't carry
+    a 'dismissed' flag across a re-discovery; this tiny table is the durable memory,
+    checked on upsert so a dismissed work is never re-added. Best-effort: returns an
+    empty set if the table isn't there yet (before the migration deploys)."""
+    keys: set[tuple[str, str]] = set()
+    try:
+        start, page = 0, 1000
+        while True:
+            resp = (
+                client.table("dismissed_matches").select("source,source_work_id")
+                .range(start, start + page - 1).execute()
+            )
+            rows = resp.data or []
+            for r in rows:
+                keys.add((r.get("source") or "ao3", r.get("source_work_id") or ""))
+            if len(rows) < page:
+                break
+            start += page
+    except Exception:  # noqa: BLE001 — table may not exist yet
+        return set()
+    return keys
+
+
+def delete_stale_unsaved_matches(client: Client, days: int = 30) -> int:
+    """Prune discovery suggestions the user never acted on: not saved, not in Later,
+    not failed, not queued-to-save (wanted), older than `days`. Keeps the library and
+    the Later/Failed stashes; re-discovery re-populates any that still match. Batched
+    (id-only selects) so a big one-off prune doesn't transfer full rows."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    ids: list[str] = []
+    start, page = 0, 1000
+    while True:
+        resp = (
+            client.table("tag_matches").select("id")
+            .eq("saved", False).eq("later", False).eq("wanted", False).eq("failed", False)
+            .lt("first_seen_at", cutoff)
+            .range(start, start + page - 1).execute()
+        )
+        rows = resp.data or []
+        ids.extend(r["id"] for r in rows)
+        if len(rows) < page:
+            break
+        start += page
+    if not ids:
+        return 0
+    for i in range(0, len(ids), 500):
+        client.table("tag_matches").delete().in_("id", ids[i:i + 500]).execute()
+    return len(ids)
+
+
+def upsert_tag_matches(
+    client: Client, group_id: str, metas: list[WorkMeta],
+    dismissed_keys: set[tuple[str, str]] | None = None,
+) -> int:
     """Store discovered works for a tracked group.
 
     Omits `seen`/`first_seen_at`/`dismissed`/`later` so a work already marked seen
@@ -380,7 +435,12 @@ def upsert_tag_matches(client: Client, group_id: str, metas: list[WorkMeta]) -> 
     `dismissed` on only some rows silently dropped the WHOLE batch — and any tag
     that overlapped a previously-dismissed work came back with 0 matches. Spreading
     a dismissal across tags is handled separately by propagate_dismissals().
+
+    `dismissed_keys` (the tombstone from fetch_dismissed_keys) is skipped on upsert so
+    a work the user dismissed is never re-added by a later tag search.
     """
+    if dismissed_keys:
+        metas = [m for m in metas if (m.source, m.source_work_id) not in dismissed_keys]
     rows = [
         {
             "group_id": group_id,

@@ -133,19 +133,24 @@ export function parseWork(html, id = '') {
 // size/politeness; a failed/oversized image is left remote (→ placeholder), so
 // this only ever improves on the current behaviour. Mutates chaptersData.
 async function inlineChapterImages(parsed) {
+  // Image inlining is the #1 DB-storage driver (see docs/supabase-storage.md), so
+  // the caps are small: only tiny decorative images (emoji/icons) get inlined;
+  // anything bigger is left remote → the reader shows its placeholder. MAX_IMAGE is
+  // a base64-length cap (~50 KB raw ≈ 68 KB base64).
   const MAX_IMAGES = 40;
-  const MAX_TOTAL = 6_000_000; // ~4.4 MB decoded budget across the whole work
+  const MAX_IMAGE = 68_000;    // per-image base64 length cap (skip bigger)
+  const MAX_TOTAL = 400_000;   // total inlined base64 budget across the whole work
   let count = 0, total = 0;
   for (const ch of parsed.chaptersData || []) {
     if (!ch || !ch.content || !/<img/i.test(ch.content) || count >= MAX_IMAGES) continue;
     const doc = new DOMParser().parseFromString(ch.content, 'text/html');
     let changed = false;
     for (const img of doc.querySelectorAll('img')) {
-      if (count >= MAX_IMAGES) break;
+      if (count >= MAX_IMAGES || total >= MAX_TOTAL) break;
       const src = (img.getAttribute('src') || '').trim();
       if (!src || /^data:/i.test(src) || !/^https?:\/\//i.test(src)) continue;
       const uri = await fetchImageDataUri(src);
-      if (uri && (total + uri.length) <= MAX_TOTAL) {
+      if (uri && uri.length <= MAX_IMAGE && (total + uri.length) <= MAX_TOTAL) {
         img.setAttribute('src', uri);
         img.removeAttribute('srcset');
         img.removeAttribute('loading');

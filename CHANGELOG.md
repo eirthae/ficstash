@@ -4,6 +4,31 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-07-14 — Storage: image cap, stale-match prune, dismissed tombstone (v0.8.54)
+
+The remaining durable fixes from docs/supabase-storage.md.
+
+### Fixed (Supabase storage)
+
+- **Image inlining capped hard.** Inlining chatfic/social images as base64 was the
+  #1 storage driver (~231 MB across 196 chapters). The per-image cap dropped from
+  2 MB → ~50 KB and the per-work/chapter budget with it (worker + on-device), so only
+  tiny decorative images inline; bigger ones become the reader's placeholder. New
+  worker env `INLINE_IMAGES=0` disables inlining entirely.
+- **Stale discovery suggestions are pruned.** The worker now deletes unsaved / not-
+  Later / not-Failed / not-queued `tag_matches` older than 30 days
+  (`MATCH_RETENTION_DAYS`) each full sweep, so browsed-and-ignored suggestions don't
+  pile up.
+- **Dismissed works stay gone (tombstone).** New `dismissed_matches` keys-only table
+  records what you dismiss; discovery — worker *and* on-device (AO3 + romance.io) —
+  skips those keys on upsert, so a hard-deleted (dismissed) suggestion never
+  re-surfaces on a later tag search. Migration `0027_dismissed_matches.sql`.
+
+### Tests
+
+- App 86 green; worker 99 green (adds `test_dismissed_tombstone`). Existing
+  image-inline tests still pass at the lower cap.
+
 ## 2026-07-14 — Failed link imports, storage fixes (v0.8.53)
 
 ### Added

@@ -375,6 +375,14 @@ export async function dismissMatch(matchId) {
     ? await q.eq('source', row.source).eq('source_work_id', row.source_work_id)
     : await q.eq('id', matchId);
   if (error) throw error;
+  // Remember the key so discovery never re-adds it (the row itself is now gone).
+  if (row?.source_work_id) {
+    try {
+      await supabase.from('dismissed_matches')
+        .upsert({ source: row.source, source_work_id: row.source_work_id },
+          { onConflict: 'source,source_work_id', ignoreDuplicates: true });
+    } catch (e) { /* tombstone is best-effort */ }
+  }
 }
 
 // Mark every fresh match in a group as seen and stamp the group as viewed.

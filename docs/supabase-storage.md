@@ -146,14 +146,23 @@ select pg_size_pretty(pg_database_size(current_database()));
 Priority order. All are **worker/DB-side or optional app-side** — none strictly
 requires an APK except where noted.
 
-> **Status (2026-07-14, v0.8.53):**
-> - ✅ **#1 hidden-works chapter cleanup** — done worker-side
->   (`delete_chapters_for_hidden_works`, runs each full sweep).
-> - ✅ **#3 dismiss = hard delete** — done (`dismissMatch` now `.delete()`s).
-> - ✅ **#3 lower `TAG_SEED_LIMIT`** — done (300 → 150, env-tunable).
-> - ⏳ **Deferred (next batch):** #2 stop/cap image inlining; #3 prune stale unsaved
->   matches on a schedule; #3 dismissed-ids tombstone (so hard-deleted works don't
->   re-surface on a later tag search).
+> **Status:** all durable fixes now implemented.
+> - ✅ **#1 hidden-works chapter cleanup** (v0.8.53) — `delete_chapters_for_hidden_works`,
+>   each full sweep.
+> - ✅ **#2 image inlining capped** (v0.8.54) — per-image cap dropped to ~50 KB
+>   (`MAX_IMG_BYTES`, worker + on-device); `INLINE_IMAGES=0` disables it entirely.
+>   Big images become the reader placeholder instead of ~hundreds of KB of base64.
+> - ✅ **#3 dismiss = hard delete** (v0.8.53) + **dismissed-ids tombstone** (v0.8.54,
+>   `dismissed_matches` table) — discovery (worker + on-device) skips dismissed keys
+>   on upsert, so a swiped-away work never re-surfaces.
+> - ✅ **#3 lower `TAG_SEED_LIMIT`** (v0.8.53) — 300 → 150.
+> - ✅ **#3 prune stale unsaved matches** (v0.8.54) — `delete_stale_unsaved_matches`
+>   removes unsaved / not-Later / not-Failed / not-wanted suggestions older than
+>   `MATCH_RETENTION_DAYS` (30) each full sweep.
+>
+> The one-off SQL reclaims below (strip existing inlined images, delete hidden-works
+> leftovers, `VACUUM FULL`, delete existing dismissed rows) still need running once in
+> the SQL editor — code only prevents *future* growth.
 
 ### 1. Make "remove" actually free space (root cause #1)
 Two options:
