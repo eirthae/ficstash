@@ -57,6 +57,23 @@ export async function kickSave() {
   catch (e) { return { ok: false, error: String(e) }; }
 }
 
+// Like kickSave, but SKIP if a run is already queued/in-progress — so a burst of
+// callers (e.g. several AO3 link imports that the on-device pass couldn't finish)
+// results in ONE worker run, not a stack of them. The fast lane (logged in) then
+// mops up whatever the device left 'queued'.
+export async function kickSaveGuarded() {
+  if (!hasSupabase) return { ok: false, error: 'Not connected' };
+  try {
+    const run = await syncStatus();
+    if (run && (run.status === 'queued' || run.status === 'in_progress')) {
+      return { ok: true, alreadyRunning: true };
+    }
+    return await triggerSync({ savesOnly: true });
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
 // Trigger a sync and WATCH it through to completion, so the UI can hold a live
 // "Syncing…" state until the worker run actually finishes — instead of the old
 // fire-and-forget that said "started" and stopped (so a run that later failed

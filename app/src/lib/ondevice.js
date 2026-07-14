@@ -353,7 +353,19 @@ export async function downloadWanted({ onProgress } = {}) {
 
 // Fetch any queued AO3 link requests on-device and resolve them (done/restricted,
 // or left queued to retry). Non-AO3 requests are left untouched for the worker.
-export async function processAo3Links({ onProgress } = {}) {
+//
+// SINGLE-FLIGHT: requestUrl fires this on every AO3 add, so pasting/importing a
+// batch of links used to spawn many concurrent runs that hit AO3 all at once and
+// got throttled (works stuck 'queued'). We coalesce concurrent calls onto one
+// in-flight run, which processes the whole queue one at a time, spaced.
+let _linksInFlight = null;
+export function processAo3Links(opts = {}) {
+  if (_linksInFlight) return _linksInFlight;
+  _linksInFlight = _processAo3Links(opts).finally(() => { _linksInFlight = null; });
+  return _linksInFlight;
+}
+
+async function _processAo3Links({ onProgress } = {}) {
   if (!hasSupabase) return { done: 0, failed: 0 };
   let reqs = [];
   try {

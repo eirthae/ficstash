@@ -1,5 +1,5 @@
 import { supabase, hasSupabase } from './supabase.js';
-import { triggerSync } from './sync.js';
+import { triggerSync, kickSaveGuarded } from './sync.js';
 import { parseWorkRef } from './urlref.js';
 import { processAo3Links } from './ondevice.js';
 import { isAo3Url } from './sources/ao3.js';
@@ -21,8 +21,16 @@ export async function requestUrl(url) {
   // AO3 → fetch on-device (residential IP). Non-AO3 (Royal Road, FFN, …) needs
   // FanFicFare, so those go to the worker. Only ONE path fires, so we stop spamming
   // the worker on every AO3 add (which was churning its runs into cancellations).
-  if (isAo3Url(clean)) processAo3Links().catch(() => {});
-  else triggerSync({ savesOnly: true }).catch(() => {});
+  // AO3 → fetch on-device (residential IP). If the on-device pass can't finish some
+  // (e.g. AO3 throttled a big burst), fall back to the worker's fast lane ONCE
+  // (guarded), so links never sit 'queued' until the far-off nightly run.
+  if (isAo3Url(clean)) {
+    processAo3Links()
+      .then((r) => { if (r && r.failed) kickSaveGuarded().catch(() => {}); })
+      .catch(() => { kickSaveGuarded().catch(() => {}); });
+  } else {
+    triggerSync({ savesOnly: true }).catch(() => {});
+  }
   return { ok: true };
 }
 

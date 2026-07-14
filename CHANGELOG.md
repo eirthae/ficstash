@@ -4,6 +4,20 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-07-14 — Fix: batches of AO3 link imports stuck "queued" (v0.8.55)
+
+### Fixed
+
+- **Importing several AO3 works by link at once left them stuck "queued to
+  download."** Each add fired its own on-device fetch, so a batch hit AO3
+  concurrently, got rate-limited, and fell back to `queued` with no worker fallback
+  until the far-off nightly run. Now:
+  - `processAo3Links` is **single-flight** — a burst of adds coalesces onto one run
+    that fetches the queue one at a time, spaced (no concurrent AO3 hammering).
+  - If the on-device pass can't finish some, `requestUrl` kicks the worker's fast
+    lane **once (guarded)** — the logged-in worker mops up whatever's left `queued`,
+    instead of it waiting hours for the scheduled sync.
+
 ## 2026-07-14 — Storage: image cap, stale-match prune, dismissed tombstone (v0.8.54)
 
 The remaining durable fixes from docs/supabase-storage.md.
