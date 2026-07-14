@@ -4,6 +4,17 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-07-14 — Fix: discovery saves stuck "pending" when on-device can't read them (v0.8.56)
+
+### Fixed
+
+- **Saved discovery works could sit "pending" forever.** An AO3 work a logged-out
+  on-device fetch can't read (members-only / adult that returns empty, without being
+  flagged restricted) stayed `wanted` with no worker fallback — so it never
+  downloaded and refreshing didn't help (6 were stuck, some since 07-08). Now a
+  pull-to-refresh (`syncNow`) escalates any saves the device couldn't get to the
+  logged-in worker ONCE (guarded), so it fetches them with your AO3 account.
+
 ## 2026-07-14 — Fix: batches of AO3 link imports stuck "queued" (v0.8.55)
 
 ### Fixed
