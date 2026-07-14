@@ -46,6 +46,10 @@ jobs:
           echo "== hidden (removed) works ==";  q "select count(*) hidden_works from works where hidden = true;"
           echo "== tag_matches ==";
           q "select count(*) total, count(*) filter (where saved) saved, count(*) filter (where later) later, count(*) filter (where coalesce(failed,false)) failed, count(*) filter (where coalesce(dismissed,false)) dismissed from tag_matches;"
+          echo "== requested_urls (link imports) by status =="
+          q "select status, count(*) from requested_urls group by status order by count(*) desc;"
+          echo "== not-done link requests (oldest first) =="
+          q "select status, source, left(url,64) as url, left(coalesce(error,''),80) as error, created_at from requested_urls where status <> 'done' order by created_at asc limit 40;"
 
           if [ "$MODE" != "clean" ]; then
             echo; echo "measure only — nothing changed. Re-run with mode=clean to reclaim."; exit 0
