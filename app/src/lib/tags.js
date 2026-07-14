@@ -282,11 +282,12 @@ export async function unmarkLater(matchId) {
 export async function fetchStashCounts() {
   if (!hasSupabase) return { later: 0, failed: 0 };
   const base = () => supabase.from('tag_matches').select('id', { count: 'exact', head: true }).eq('saved', false).eq('dismissed', false);
-  const [later, failed] = await Promise.all([
+  const [later, failedMatches, failedLinks] = await Promise.all([
     base().eq('later', true),
     base().eq('failed', true),
+    supabase.from('requested_urls').select('id', { count: 'exact', head: true }).in('status', ['error', 'restricted']),
   ]);
-  return { later: later.count || 0, failed: failed.count || 0 };
+  return { later: later.count || 0, failed: (failedMatches.count || 0) + (failedLinks.count || 0) };
 }
 
 // Everything in the Failed stash: a save that failed definitively (removed at the
@@ -355,18 +356,21 @@ export async function markMatchSeen(matchId) {
   if (error) throw error;
 }
 
-// Permanently hide a match — the user dropped it. Distinct from `seen`: a
-// dismissed work is filtered out of group results and the What's New feed and
-// stays gone across reloads and worker re-runs.
+// Dismiss a match — the user dropped it. HARD DELETE (not a `dismissed=true` flag):
+// flagged rows kept their full metadata/summary forever and quietly filled the DB
+// (see docs/supabase-storage.md), and the flag wasn't even sticking. Deleting the
+// row frees the space and can't fail to "stick".
+// The delete is GLOBAL: a work that also matches another tag shouldn't reappear
+// there once swiped away, so we remove every row for that work (by source +
+// source_work_id), not just this match id.
+// (Trade-off: with no `dismissed` tombstone, a re-surfaced work could re-appear on
+// a later tag search — acceptable for now; a keys-only tombstone table is the
+// planned follow-up.)
 export async function dismissMatch(matchId) {
   if (!hasSupabase) return;
-  // A dismissal is GLOBAL: hide this work under every tracked tag, not just this
-  // one — a work that also matches another tag shouldn't reappear there once you
-  // swipe it away. Look up the work, then dismiss all its match rows. (The worker
-  // also propagates this each sync, so older duplicates get cleaned up too.)
   const { data: row } = await supabase
     .from('tag_matches').select('source,source_work_id').eq('id', matchId).maybeSingle();
-  const q = supabase.from('tag_matches').update({ dismissed: true, seen: true });
+  const q = supabase.from('tag_matches').delete();
   const { error } = row?.source_work_id
     ? await q.eq('source', row.source).eq('source_work_id', row.source_work_id)
     : await q.eq('id', matchId);

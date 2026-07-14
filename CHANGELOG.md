@@ -4,6 +4,32 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-07-14 — Failed link imports, storage fixes (v0.8.53)
+
+### Added
+
+- **Failed link imports now appear in Discover → Failed.** An added-by-link AO3 work
+  that failed — usually because it's members-only to a logged-out fetch — now shows
+  in the Failed stash alongside failed discovery saves, with **Retry** and **Dismiss**.
+  Retry re-queues it and kicks the WORKER, which logs in with your AO3 account, so
+  registered-users-only works actually download (and then follow for updates). A
+  **"Retry all links with my account"** button retries a whole batch at once. Failed
+  links no longer clutter the Library's pending-links list.
+
+### Fixed (Supabase storage — see docs/supabase-storage.md)
+
+- **"Remove from library" now frees the offline text.** Removed (hidden) works kept
+  all their chapter rows forever — the bulk of the DB. The worker now purges chapters
+  for hidden works each full sweep (`delete_chapters_for_hidden_works`), keeping the
+  lightweight tombstone so they're never re-added.
+- **Dismissing a discovery suggestion hard-deletes it** instead of flagging
+  `dismissed=true` and keeping the full metadata forever (which also wasn't sticking).
+- **Lowered `TAG_SEED_LIMIT` 300 → 150** so each tracked tag stores fewer unsaved
+  suggestion rows.
+
+Deferred (next batch): cap/stop base64 image inlining; prune stale unsaved matches;
+a keys-only dismissed tombstone so hard-deleted works don't re-surface.
+
 ## 2026-07-11 — Restricted-retry via account, stash counts, romance.io on worker, labeled filters (v0.8.52)
 
 ### Fixed

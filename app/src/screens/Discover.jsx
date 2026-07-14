@@ -8,6 +8,7 @@ import {
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch, fetchStashCounts,
 } from '../lib/tags.js';
+import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
 import { syncNow } from '../lib/sync.js';
 import { LANGUAGES } from '../lib/languages.js';
 import { fetchDiscoveryPrefs, updateDiscoveryPrefs } from '../lib/discovery.js';
@@ -1063,8 +1064,10 @@ export function FailedScreen({ nav, onLeave }) {
   const [toast, showToast] = useToast();
 
   const load = useCallback(() => {
-    fetchFailedMatches()
-      .then((r) => setItems(r ?? []))
+    // Failed discovery saves (tag_matches) + failed link imports (requested_urls),
+    // newest first — both retryable, links via the logged-in worker.
+    Promise.all([fetchFailedMatches().catch(() => []), fetchFailedLinks().catch(() => [])])
+      .then(([matches, links]) => setItems([...(links || []), ...(matches || [])]))
       .catch(() => setItems([]));
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -1073,13 +1076,21 @@ export function FailedScreen({ nav, onLeave }) {
 
   const remove = (w) => {
     setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
-    dismissMatch(w.matchId || w.id).catch(() => {});
+    (w.isLink ? removeRequest(w.requestId) : dismissMatch(w.matchId || w.id)).catch?.(() => {});
     showToast('Dismissed', 'solar:trash-bin-trash-linear');
   };
   const retry = (w) => {
     setItems((arr) => (arr || []).filter((x) => x.id !== w.id)); // optimistic — back into the retry loop
-    retryMatch(w.matchId || w.id).catch(() => {});
-    showToast('Retrying — downloading', 'solar:refresh-circle-linear');
+    (w.isLink ? retryLinkRequest(w.requestId) : retryMatch(w.matchId || w.id)).catch?.(() => {});
+    showToast(w.isLink ? 'Retrying with your AO3 account' : 'Retrying — downloading', 'solar:refresh-circle-linear');
+  };
+
+  const linkCount = (items || []).filter((w) => w.isLink).length;
+  const retryAllLinks = async () => {
+    if (!linkCount) return;
+    setItems((arr) => (arr || []).filter((x) => !x.isLink)); // optimistic
+    const r = await retryAllFailedLinks().catch(() => ({}));
+    showToast(`Retrying ${r.count || linkCount} link${(r.count || linkCount) === 1 ? '' : 's'} with your AO3 account`, 'solar:refresh-circle-linear');
   };
 
   const list = items || [];
@@ -1090,6 +1101,12 @@ export function FailedScreen({ nav, onLeave }) {
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 14 }}>
           Saves that couldn’t be downloaded — a work removed at the source, or one that stayed unreachable. Tap the retry arrow to try again, or ✕ to dismiss.
         </div>
+        {linkCount > 1 && (
+          <button className="btn btn-surface btn-md" onClick={retryAllLinks}
+            style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            <Icon icon="solar:refresh-circle-linear" size={17} /> Retry all {linkCount} links with my account
+          </button>
+        )}
         {items === null ? (
           <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Loading…</div>
         ) : list.length === 0 ? (

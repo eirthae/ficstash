@@ -146,6 +146,15 @@ select pg_size_pretty(pg_database_size(current_database()));
 Priority order. All are **worker/DB-side or optional app-side** — none strictly
 requires an APK except where noted.
 
+> **Status (2026-07-14, v0.8.53):**
+> - ✅ **#1 hidden-works chapter cleanup** — done worker-side
+>   (`delete_chapters_for_hidden_works`, runs each full sweep).
+> - ✅ **#3 dismiss = hard delete** — done (`dismissMatch` now `.delete()`s).
+> - ✅ **#3 lower `TAG_SEED_LIMIT`** — done (300 → 150, env-tunable).
+> - ⏳ **Deferred (next batch):** #2 stop/cap image inlining; #3 prune stale unsaved
+>   matches on a schedule; #3 dismissed-ids tombstone (so hard-deleted works don't
+>   re-surface on a later tag search).
+
 ### 1. Make "remove" actually free space (root cause #1)
 Two options:
 - **App-side (needs APK):** in `removeWork` (`app/src/lib/library.js`), after

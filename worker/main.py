@@ -82,6 +82,7 @@ from ficstash_worker.supabase_io import (
     make_client,
     mark_flag,
     mark_group_checked,
+    delete_chapters_for_hidden_works,
     mark_matches_saved,
     mark_not_offline,
     mark_request,
@@ -783,6 +784,17 @@ def main() -> None:
     if _saves_only():
         print("\n== Saves-only run: links, saves, series + repair done; skipping discovery/refresh. ==")
         return
+
+    # Free the offline text of works the user removed from the library — "remove"
+    # only soft-deletes (hidden=true), so chapter text (the bulk of the DB) piled up
+    # forever (see docs/supabase-storage.md). Daily on the full sweep; cheap once a
+    # work is purged. Keeps the works tombstone so it's never re-added.
+    try:
+        freed = delete_chapters_for_hidden_works(db)
+        if freed:
+            print(f"Storage: freed {freed} chapter row(s) from removed (hidden) works.")
+    except Exception as exc:  # noqa: BLE001 — cleanup is best-effort
+        print(f"Hidden-works chapter cleanup skipped ({type(exc).__name__}: {exc})")
 
     # ---- Pass 3: repair works with blank metadata --------------------------
     # Older builds tolerated an ao3-api reload() abort without falling back to

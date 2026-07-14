@@ -598,6 +598,38 @@ def fetch_requested_urls(client: Client) -> list[dict]:
     return list(resp.data or [])
 
 
+def delete_chapters_for_hidden_works(client: Client) -> int:
+    """Free the offline text of soft-deleted (hidden) works.
+
+    "Remove from library" only sets works.hidden=true; the chapter rows — the bulk
+    of the DB (see docs/supabase-storage.md) — stayed forever. This purges chapter
+    text for hidden works while keeping the lightweight `works` tombstone (so the
+    worker still won't re-add them and reading state survives). Returns the number
+    of chapter rows deleted. Cheap on repeat runs: once purged, a hidden work has no
+    chapters left to delete. Batched to stay under statement limits.
+    """
+    hidden_ids: list[str] = []
+    start, page = 0, 1000
+    while True:
+        resp = (
+            client.table("works").select("id").eq("hidden", True)
+            .range(start, start + page - 1).execute()
+        )
+        rows = resp.data or []
+        hidden_ids.extend(r["id"] for r in rows)
+        if len(rows) < page:
+            break
+        start += page
+    if not hidden_ids:
+        return 0
+    deleted = 0
+    for i in range(0, len(hidden_ids), 100):
+        batch = hidden_ids[i:i + 100]
+        resp = client.table("chapters").delete().in_("work_id", batch).execute()
+        deleted += len(resp.data or [])
+    return deleted
+
+
 def clear_series_requests(client: Client) -> int:
     """Delete AO3 series-link requests from the queue (any status).
 

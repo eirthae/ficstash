@@ -53,16 +53,76 @@ export async function removeRequest(id) {
   return { ok: true };
 }
 
-// In-flight / failed link requests, newest first. Completed requests are dropped
-// here because the finished work shows up in the library's "Added by link"
-// section instead.
+// In-flight link requests (queued / fetching), newest first. Completed ones drop
+// off (the finished work shows in the library's "Added by link" section); FAILED
+// ones (error / restricted) move to the Discover → Failed stash, so they're not
+// listed here anymore.
 export async function fetchPendingLinks() {
   if (!hasSupabase) return [];
   const { data, error } = await supabase
     .from('requested_urls')
     .select('id,url,status,title,error,created_at')
-    .neq('status', 'done')
+    .in('status', ['queued', 'fetching'])
     .order('created_at', { ascending: false });
   if (error) return [];
   return data || [];
+}
+
+// Retry a failed link import. Re-queues it and kicks the WORKER's fast lane — the
+// worker logs in with the AO3 account, so a work that was 'restricted' to a
+// logged-out fetch (registered-users-only) downloads on the authenticated retry.
+export async function retryLinkRequest(id) {
+  if (!hasSupabase) return { ok: false, error: 'Connect your account first.' };
+  const { error } = await supabase
+    .from('requested_urls')
+    .update({ status: 'queued', error: null })
+    .eq('id', id);
+  if (error) return { ok: false, error: error.message || String(error) };
+  triggerSync({ savesOnly: true }).catch(() => {}); // worker (logged in) re-fetches
+  return { ok: true };
+}
+
+// Retry ALL failed link imports at once (re-queue every error/restricted request),
+// then one worker kick. For when a batch of members-only links needs the account.
+export async function retryAllFailedLinks() {
+  if (!hasSupabase) return { ok: false, count: 0 };
+  const { data, error } = await supabase
+    .from('requested_urls')
+    .update({ status: 'queued', error: null })
+    .in('status', ['error', 'restricted'])
+    .select('id');
+  if (error) return { ok: false, error: error.message || String(error), count: 0 };
+  if ((data || []).length) triggerSync({ savesOnly: true }).catch(() => {});
+  return { ok: true, count: (data || []).length };
+}
+
+// Failed link imports for the Discover → Failed stash: requests that errored or hit
+// AO3's members-only gate. Shaped like a discovery match so the Failed screen can
+// render them with the same card (isLink flags the link-specific retry/remove).
+export async function fetchFailedLinks() {
+  if (!hasSupabase) return [];
+  const { data, error } = await supabase
+    .from('requested_urls')
+    .select('id,url,status,title,error,source,source_work_id,created_at')
+    .in('status', ['error', 'restricted'])
+    .order('created_at', { ascending: false });
+  if (error) return [];
+  return (data || []).map((r) => ({
+    id: `link-${r.id}`,
+    requestId: r.id,
+    isLink: true,
+    source: r.source || 'ao3',
+    sourceWorkId: r.source_work_id || '',
+    sourceUrl: r.url,
+    title: r.title || r.url,
+    author: '',
+    fandom: '',
+    summary: '',
+    tags: [],
+    status: 'ongoing',
+    palette: 0,
+    failReason: r.status === 'restricted'
+      ? 'Restricted — members-only; retry uses your AO3 account'
+      : (r.error || 'Import failed'),
+  }));
 }

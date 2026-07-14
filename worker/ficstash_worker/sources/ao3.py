@@ -46,7 +46,9 @@ RATE_LIMIT_SECONDS = 5
 # popular tag's back-catalogue isn't truncated to the first page or two.
 # Env-tunable. Incremental runs (a tag's later syncs) stop early on their own —
 # few new works — so a higher cap costs nothing there; it only deepens seeds.
-TAG_SEED_LIMIT = int(os.environ.get("TAG_SEED_LIMIT", "300") or 300)
+# Lowered 300 → 150 to curb tag_matches storage (300/tag × ~30 tags ≈ 9k unsaved
+# suggestion rows; see docs/supabase-storage.md). Still env-tunable for a deeper seed.
+TAG_SEED_LIMIT = int(os.environ.get("TAG_SEED_LIMIT", "150") or 150)
 TAG_SEED_PAGES = int(os.environ.get("TAG_SEED_PAGES", "16") or 16)
 
 # Mirror app/src/data/sample.js COVER_PALETTES length and hashStr() so the
