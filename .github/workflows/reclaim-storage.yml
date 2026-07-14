@@ -50,6 +50,8 @@ jobs:
           q "select status, count(*) from requested_urls group by status order by count(*) desc;"
           echo "== not-done link requests (oldest first) =="
           q "select status, source, left(url,64) as url, left(coalesce(error,''),80) as error, created_at from requested_urls where status <> 'done' order by created_at asc limit 40;"
+          echo "== pending saves (wanted, not yet downloaded) =="
+          q "select source, source_work_id, left(title,50) as title, coalesce(failed,false) as failed, seen, first_seen_at from tag_matches where wanted and not saved order by first_seen_at desc limit 20;"
 
           if [ "$MODE" != "clean" ]; then
             echo; echo "measure only — nothing changed. Re-run with mode=clean to reclaim."; exit 0
