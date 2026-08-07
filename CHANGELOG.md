@@ -4,6 +4,30 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-08-07 — Fix: Save runs blocked the nightly sweep, so no new discoveries (v0.8.57)
+
+### Fixed
+
+- **The saves-only "fast lane" wasn't a separate lane at all.** `sync.yml` picked its
+  concurrency group with `github.event.inputs.saves_only == 'true'`, but that input is
+  a *boolean* — GitHub compares mismatched types numerically, so the check was always
+  false and every Save landed in the `ficstash-sync` group. Saves queued behind each
+  other and behind the nightly sweep (run 1584 sat pending 52 minutes), and whenever a
+  third run arrived GitHub cancelled the one left pending. Now keyed on
+  `inputs.saves_only` directly.
+- **A real-time Save re-enumerated all 94 followed series.** At 6s spacing that alone
+  is ~50 minutes per Save — which is what filled the lane above. The saves-only pass
+  now only enumerates series that need attention *now*: one-shot "download all" taps
+  and never-checked follows. Existing follows are left to the nightly sweep, which is
+  the only thing that was ever refreshing them anyway.
+
+### Context
+
+The 2026-08-06 nightly sweep (run 1580) was cancelled 82 minutes in, during metadata
+repair and before the tracked-tag discovery pass, so no new What's New matches landed.
+The two runs before it (1578/1579) died in GitHub's own "Failed to resolve action
+download info — Service Unavailable" outage; nothing to fix on our side for those.
+
 ## 2026-07-14 — Fix: discovery saves stuck "pending" when on-device can't read them (v0.8.56)
 
 ### Fixed

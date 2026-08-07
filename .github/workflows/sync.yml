@@ -28,8 +28,11 @@ on:
 # Don't let a scheduled run and a manual run hammer AO3 at the same time.
 # Saves-only (real-time Save) runs in their OWN lane so they fire immediately
 # instead of queuing behind a full sweep.
+# `inputs.saves_only` is a BOOLEAN — comparing it to the string 'true' always
+# evaluated false, so every save landed in the sweep lane, queued behind it, and
+# GitHub cancelled whichever run was left pending.
 concurrency:
-  group: ${{ (github.event.inputs.saves_only == 'true') && 'ficstash-save' || 'ficstash-sync' }}
+  group: ${{ inputs.saves_only && 'ficstash-save' || 'ficstash-sync' }}
   cancel-in-progress: false
 
 jobs:

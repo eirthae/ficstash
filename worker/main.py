@@ -378,6 +378,17 @@ def _parse_ts(value) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _series_due_in_fast_lane(rows: list[dict]) -> list[dict]:
+    """The followed_series rows a real-time Save should enumerate right now.
+
+    Only what the user is actively waiting on: a one-shot "download all" tap
+    (follow falsy — the row is deleted once fully pulled) and a follow that has
+    never been enumerated. Established follows cost RATE_LIMIT_SECONDS each with
+    nothing new to show for it, and the nightly sweep already refreshes them.
+    """
+    return [r for r in rows if not r.get("follow") or not r.get("last_checked")]
+
+
 def run_ao3_series_pass(db, ao3, space, backoff) -> None:
     """Download works for followed / "download all" AO3 series (capped per run).
 
@@ -387,12 +398,25 @@ def run_ao3_series_pass(db, ao3, space, backoff) -> None:
     (follow=true, kept). Enumerates each series from AO3's public index, downloads
     any work not already offline (tagging it with its series + part), and drops a
     one-shot row once it's fully pulled.
+
+    In the saves-only lane only series that need attention *now* are enumerated —
+    one-shot "download all" taps and never-checked follows. Re-enumerating every
+    follow costs RATE_LIMIT_SECONDS each and was turning a real-time Save into a
+    ~50-minute run that queued behind (and blocked) the nightly sweep.
     """
     print("\n== AO3 series ==")
     followed = fetch_followed_series(db)
     print(f"{len(followed)} followed/requested series.")
     if not followed:
         return
+    if _saves_only():
+        due = _series_due_in_fast_lane(followed)
+        skipped = len(followed) - len(due)
+        if skipped:
+            print(f"Saves-only: enumerating {len(due)} new/one-shot; {skipped} follow(s) left to the sweep.")
+        followed = due
+        if not followed:
+            return
     offline_ids = fetch_offline_ao3_ids(db)
     series_cap = _series_max()
     for srow in followed:
