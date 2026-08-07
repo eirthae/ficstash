@@ -21,6 +21,12 @@ scheme yet, so entries are dated and reference the commit that shipped them.
   and never-checked follows. Existing follows are left to the nightly sweep, which is
   the only thing that was ever refreshing them anyway.
 
+### Added
+
+- `worker/tests/test_series_fast_lane.py` — covers `_series_due_in_fast_lane`, including
+  the case that made the old cap leaky: a one-shot "download all" stays due after a
+  previous check, because a capped run leaves works behind.
+
 ### Context
 
 The 2026-08-06 nightly sweep (run 1580) was cancelled 82 minutes in, during metadata
