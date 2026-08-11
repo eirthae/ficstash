@@ -142,6 +142,9 @@ export const SUGGESTIONS = [
     summary: 'An injury fic. The season ends early for one of them, and the other has to decide what winning was ever actually for.',
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Hurt/Comfort', 'freeform'), T('Recovery', 'freeform')],
     words: 39100, chapters: 8, chaptersTotal: 8, status: 'complete', updated: '1 week ago', sourceUpdated: '2025-11-22', palette: 7,
+    // Demoes the overlap case: a discovery match you already own (it reached the
+    // library some way other than a discovery save, so its match row isn't flagged).
+    inLibrary: true, libraryWorkId: 'w1',
   },
   {
     id: 's3', source: 'ao3', title: 'Neutral Zone', author: 'bluelines',

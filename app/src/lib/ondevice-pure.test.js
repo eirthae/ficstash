@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normGroup, matchRow, bookMatchRow, workRow, chapterRows, paletteFor,
-  newChapters, chapterUpdateRows, seriesFetchPlan, isDefinitiveFailure,
+  newChapters, chapterUpdateRows, seriesFetchPlan, isDefinitiveFailure, markOwned,
 } from './ondevice-pure.js';
 
 // ---- isDefinitiveFailure (Failed-stash gating) -----------------------------
@@ -213,4 +213,50 @@ test('seriesFetchPlan caps the fetch count and flags hitCap', () => {
   const plan = seriesFetchPlan(series, new Set(), 2);
   assert.deepEqual(plan.toFetch.map((e) => e.id), ['11', '12']);
   assert.equal(plan.hitCap, true);
+});
+
+// ---- markOwned -------------------------------------------------------------
+// tag_matches.saved is only set when a work is saved THROUGH discovery, so a fic
+// that reached the library via a bookmark sync, a pasted link or a series
+// download keeps resurfacing as a suggestion. markOwned labels those instead.
+
+test('markOwned flags matches that are already in the library', () => {
+  const matches = [
+    { id: 'm1', source: 'ao3', sourceWorkId: '111' },
+    { id: 'm2', source: 'ao3', sourceWorkId: '222' },
+  ];
+  const owned = [{ id: 'w-uuid', source: 'ao3', source_work_id: '111' }];
+  const out = markOwned(matches, owned);
+  assert.equal(out[0].inLibrary, true);
+  assert.equal(out[0].libraryWorkId, 'w-uuid');
+  assert.equal(out[1].inLibrary, undefined);
+});
+
+test('markOwned keys on source AND id, never the id alone', () => {
+  // AO3 work 123 and Royal Road fiction 123 are different stories; matching on
+  // the id alone would label one because you own the other.
+  const matches = [{ id: 'm1', source: 'royalroad', sourceWorkId: '123' }];
+  const owned = [{ id: 'w1', source: 'ao3', source_work_id: '123' }];
+  assert.equal(markOwned(matches, owned)[0].inLibrary, undefined);
+});
+
+test('markOwned tolerates numeric vs string ids from the two tables', () => {
+  const matches = [{ id: 'm1', source: 'ao3', sourceWorkId: '77' }];
+  assert.equal(markOwned(matches, [{ id: 'w1', source: 'ao3', source_work_id: 77 }])[0].inLibrary, true);
+});
+
+test('markOwned does not mutate the matches it is given', () => {
+  const matches = [{ id: 'm1', source: 'ao3', sourceWorkId: '111' }];
+  markOwned(matches, [{ id: 'w1', source: 'ao3', source_work_id: '111' }]);
+  assert.equal(matches[0].inLibrary, undefined);
+});
+
+test('markOwned with nothing owned returns the matches unchanged', () => {
+  const matches = [{ id: 'm1', source: 'ao3', sourceWorkId: '111' }];
+  assert.deepEqual(markOwned(matches, []), matches);
+  assert.deepEqual(markOwned(matches, null), matches);
+});
+
+test('markOwned handles an empty match list', () => {
+  assert.deepEqual(markOwned([], [{ id: 'w1', source: 'ao3', source_work_id: '1' }]), []);
 });

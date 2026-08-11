@@ -174,3 +174,25 @@ export function seriesFetchPlan(seriesList, existingIds, cap = 12) {
   });
   return { toFetch, have, hitCap };
 }
+
+// Label the discovery matches you already own.
+//
+// `ownedRows` are `works` rows ({id, source, source_work_id}); `matches` are
+// mapped tag_matches. Keyed on source AND source_work_id together, because ids
+// are only unique within a source — AO3 work 123 and Royal Road fiction 123 are
+// different stories, and keying on the id alone would cross-label them.
+//
+// Returns a new array; matched entries gain { inLibrary, libraryWorkId }.
+export function markOwned(matches, ownedRows) {
+  const owned = new Map();
+  for (const r of ownedRows || []) {
+    if (r && r.source && r.source_work_id != null) {
+      owned.set(`${r.source}:${r.source_work_id}`, r.id);
+    }
+  }
+  if (!owned.size) return [...(matches || [])];
+  return (matches || []).map((m) => {
+    const libraryWorkId = owned.get(`${m.source}:${m.sourceWorkId}`);
+    return libraryWorkId ? { ...m, inLibrary: true, libraryWorkId } : m;
+  });
+}

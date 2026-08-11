@@ -10,6 +10,7 @@ import {
 } from '../lib/tags.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
 import { syncNow } from '../lib/sync.js';
+import { fetchWorkById } from '../lib/library.js';
 import { sortMatches } from '../lib/dates.js';
 import { LANGUAGES } from '../lib/languages.js';
 import { fetchDiscoveryPrefs, updateDiscoveryPrefs } from '../lib/discovery.js';
@@ -922,7 +923,18 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     requestSave(w.matchId || w.id).catch(() => {});
     showToast('Saved — starting download', 'solar:download-minimalistic-linear');
   };
-  const saveStateOf = (w) => (w.saved ? 'saved' : w.wanted ? 'queued' : 'idle');
+  // inLibrary = the work IS in your library, but this match row was never flagged
+  // saved because it got there another way (bookmark sync, pasted link, series
+  // download). Same button either way: don't save this twice.
+  const saveStateOf = (w) => (w.saved || w.inLibrary ? 'saved' : w.wanted ? 'queued' : 'idle');
+
+  // Open YOUR copy rather than the suggestion preview, re-reading the row so the
+  // detail screen shows current chapter counts instead of the match's metadata.
+  const openInLibrary = async (w) => {
+    const work = await fetchWorkById(w.libraryWorkId).catch(() => null);
+    if (work) nav.push('detail', { work, onReload: () => {} });
+    else showToast('Could not open it — try the Library tab.', 'solar:danger-triangle-bold');
+  };
 
   const removeGroup = async () => {
     try { await deleteGroup(tag.id); } catch (e) { /* sample data / offline */ }
@@ -997,7 +1009,8 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
                 saveState={saveStateOf(w)}
                 onLater={() => later(w)}
                 onDismiss={() => dismiss(w)}
-                onOpen={() => nav.push('detail', { work: w, suggestion: true })}
+                onOpen={() => (w.inLibrary ? openInLibrary(w) : nav.push('detail', { work: w, suggestion: true }))}
+                onOpenInLibrary={w.inLibrary ? openInLibrary : null}
               />
             ))}
           </div>
@@ -1037,7 +1050,12 @@ export function LaterScreen({ nav, onLeave }) {
     requestSave(w.matchId || w.id).catch(() => {});
     showToast('Saved — starting download', 'solar:download-minimalistic-linear');
   };
-  const saveStateOf = (w) => (w.saved ? 'saved' : w.wanted ? 'queued' : 'idle');
+  const saveStateOf = (w) => (w.saved || w.inLibrary ? 'saved' : w.wanted ? 'queued' : 'idle');
+  const openInLibrary = async (w) => {
+    const work = await fetchWorkById(w.libraryWorkId).catch(() => null);
+    if (work) nav.push('detail', { work, onReload: () => {} });
+    else showToast('Could not open it — try the Library tab.', 'solar:danger-triangle-bold');
+  };
 
   const list = items || [];
   return (
@@ -1064,7 +1082,8 @@ export function LaterScreen({ nav, onLeave }) {
                 laterIcon="solar:undo-left-round-linear"
                 laterTitle="Send back to Discover"
                 onDismiss={() => remove(w)}
-                onOpen={() => nav.push('detail', { work: w, suggestion: true })}
+                onOpen={() => (w.inLibrary ? openInLibrary(w) : nav.push('detail', { work: w, suggestion: true }))}
+                onOpenInLibrary={w.inLibrary ? openInLibrary : null}
               />
             ))}
           </div>

@@ -2,6 +2,7 @@ import { supabase, hasSupabase } from './supabase.js';
 import { hashStr, COVER_PALETTES } from '../data/sample.js';
 import { fetchJson } from './fetch.js';
 import { discoverGroup, enqueueSave } from './ondevice.js';
+import { markOwned } from './ondevice-pure.js';
 import { kickSave } from './sync.js';
 
 // ============================================================================
@@ -243,6 +244,40 @@ export async function updateGroup(groupId, { label = '', tags, excludedTags = []
   return mapGroup(data);
 }
 
+// Mark the matches you ALREADY have in the library.
+//
+// tag_matches.saved is only flipped when a work is saved through discovery
+// (the app's save path and the worker's Pass 2). A work that reached the library
+// any other way — an AO3 bookmark sync, a pasted link, a series "download all" —
+// leaves every tag_matches row for it untouched, so it keeps surfacing as a
+// suggestion. Popular tags overlap heavily, so the same fic reappears under
+// several tracked tags with no sign you already own it.
+//
+// Rather than back-filling the flag (which would hide these outright), we check
+// at read time and label them: you still see the overlap, you just know not to
+// save it again — and can jump straight to your copy.
+//
+// One extra query per group open, keyed on (source, source_work_id) because ids
+// are only unique WITHIN a source. Hidden (removed) works don't count as owned.
+export async function annotateInLibrary(matches) {
+  if (!hasSupabase || !matches || !matches.length) return matches || [];
+  const ids = [...new Set(matches.map((m) => String(m.sourceWorkId)).filter(Boolean))];
+  if (!ids.length) return matches;
+
+  const rows = [];
+  const CHUNK = 200; // keep the PostgREST query string a sane length
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { data, error } = await supabase
+      .from('works')
+      .select('id, source, source_work_id')
+      .eq('hidden', false)
+      .in('source_work_id', ids.slice(i, i + CHUNK));
+    if (error) return matches; // best-effort: an unlabelled feed beats no feed
+    rows.push(...(data || []));
+  }
+  return markOwned(matches, rows);
+}
+
 export async function fetchMatches(groupId) {
   if (!hasSupabase) return null;
   const { data, error } = await supabase
@@ -260,7 +295,7 @@ export async function fetchMatches(groupId) {
     .order('source_updated', { ascending: false, nullsFirst: false })
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map(mapMatch);
+  return annotateInLibrary((data || []).map(mapMatch));
 }
 
 // Swipe LEFT = "Later": keep the match's blurb/tags but don't download it. It
@@ -351,7 +386,7 @@ export async function fetchLaterMatches() {
     .eq('dismissed', false)
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map(mapMatch);
+  return annotateInLibrary((data || []).map(mapMatch));
 }
 
 // Flip a single match to "seen" (clears its fresh badge, e.g. on open).

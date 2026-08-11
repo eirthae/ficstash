@@ -1,5 +1,5 @@
 import { supabase, hasSupabase } from './supabase.js';
-import { DEMO_CHAPTERS } from '../data/sample.js';
+import { DEMO_CHAPTERS, WORKS } from '../data/sample.js';
 
 // Map a Supabase `works` row (snake_case) to the shape the UI expects.
 function mapWork(row) {
@@ -85,7 +85,10 @@ export async function fetchWorks() {
 // detail screen and the reader it opens use the updated copy — not the stale object
 // captured when the screen was first pushed.
 export async function fetchWorkById(id) {
-  if (!hasSupabase || !id) return null;
+  if (!id) return null;
+  // Demo mode (no Supabase) still resolves ids, so "In library" on a discovery
+  // card opens something instead of dead-ending — same reason DEMO_CHAPTERS exists.
+  if (!hasSupabase) return WORKS.find((w) => w.id === id) || null;
   const { data, error } = await supabase.from('works').select('*').eq('id', id).maybeSingle();
   if (error || !data) return null;
   return mapWork(data);

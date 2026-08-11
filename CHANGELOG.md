@@ -41,8 +41,19 @@ scheme yet, so entries are dated and reference the commit that shipped them.
   thumb-sized target. Removable chips now use a shared `.chip.removable` style
   with a real 26px control.
 
+- **Discovery kept suggesting fics you already own.** `tag_matches.saved` is only
+  flipped when a work is saved *through discovery* (the app's save path and the
+  worker's Pass 2). A work that reached your library any other way — an AO3
+  bookmark sync, a pasted link, a series "download all" — left every match row
+  for it untouched, so it kept resurfacing. Popular tags overlap heavily, so the
+  same fic reappeared under several tracked tags with nothing to say you had it.
+
 ### Added
 
+- **"In library" on discovery cards.** Matches are cross-referenced against the
+  library on load and labelled; tapping one opens *your* copy rather than the
+  suggestion preview. Deliberately a label, not a filter — you still see the
+  overlap, you just know not to save it twice. Applies to the Later stash too.
 - Sort control on a tracked group's feed: **Newest / Oldest / Longest / Shortest**,
   reusing the same `SortDropdown` the Library shelves use (lifted into `ui.jsx`
   rather than duplicated).
@@ -53,6 +64,9 @@ scheme yet, so entries are dated and reference the commit that shipped them.
 
 - Existing `tag_matches` rows have no date until their tag is next discovered;
   they sort after dated rows in the meantime. No migration or backfill needed.
+- The "In library" check costs one extra query per group open (keyed on source +
+  source_work_id, since ids are only unique within a source) and never hides a
+  match — if the lookup fails you get an unlabelled feed, not an empty one.
 - Discover's own tag-picker chips still use the old 18px × — say the word and
   they can move to `.chip.removable` too.
 

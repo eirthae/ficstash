@@ -92,7 +92,7 @@ export function GridCard({ work, onOpen }) {
 
 // ---- Suggestion card (+ save / dismiss) -----------------------------------
 // saveState: 'idle' → 'queued' (worker will fetch on next sync) → 'saved' (in library)
-export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, cta = 'Open', onLater, laterIcon = 'solar:bookmark-linear', laterTitle = 'Save for later', excludeTags = [] }) {
+export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, onOpenInLibrary, cta = 'Open', onLater, laterIcon = 'solar:bookmark-linear', laterTitle = 'Save for later', excludeTags = [] }) {
   const updatedLabel = fmtUpdated(work.sourceUpdated);
   return (
     <div className="libcard fade-enter">
@@ -127,10 +127,15 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
           {onSave ? (
             <button
               className={`btn btn-sm ${saveState === 'idle' ? 'btn-primary' : 'btn-flat'}`}
-              onClick={() => saveState === 'idle' && onSave(work)}
-              disabled={saveState !== 'idle'}
+              onClick={() => {
+                if (saveState === 'idle') return onSave(work);
+                // Already yours — tapping goes to your copy instead of nothing.
+                if (saveState === 'saved' && onOpenInLibrary) onOpenInLibrary(work);
+              }}
+              disabled={saveState === 'queued' || (saveState === 'saved' && !onOpenInLibrary)}
               style={{ minWidth: 104 }}
-              title={saveState === 'queued' ? 'Downloading — sync started' : undefined}
+              title={saveState === 'queued' ? 'Downloading — sync started'
+                : saveState === 'saved' ? 'Already in your library — tap to open it' : undefined}
             >
               {saveState === 'saved' ? <><Icon icon="solar:check-read-linear" size={16} /> In library</>
                 : saveState === 'queued' ? <><Icon icon="solar:clock-circle-linear" size={16} /> Queued</>
