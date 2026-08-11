@@ -60,6 +60,9 @@ function mapMatch(row) {
     words: row.words,
     chapters: row.chapters,
     status: row.status,
+    // AO3's blurb date (last updated). Null on rows discovered before we started
+    // capturing it — they sort last and simply show no date until re-discovered.
+    sourceUpdated: row.source_updated || null,
     palette: row.palette,
     seen: row.seen,
     fresh: !row.seen,
@@ -250,6 +253,11 @@ export async function fetchMatches(groupId) {
     .eq('saved', false)
     .eq('later', false)
     .eq('failed', false)
+    // Newest work first — by the work's OWN date, not when we inserted the row.
+    // first_seen_at only breaks ties (and carries rows discovered before we
+    // captured a date); on a first tag seed every row shares that timestamp, so
+    // ordering by it alone made the feed look shuffled.
+    .order('source_updated', { ascending: false, nullsFirst: false })
     .order('first_seen_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(mapMatch);

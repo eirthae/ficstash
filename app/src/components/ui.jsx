@@ -246,3 +246,35 @@ export function useToast() {
   ) : null;
   return [node, show];
 }
+
+// Sort control — a compact icon button that opens a dropdown of options
+// (icon + label), instead of laying every option out in a row. `opts` maps each
+// option key to { icon, label }; the caller owns its own option set, so Library's
+// shelf sorts and Discover's feed sorts share this one control.
+export function SortDropdown({ value, options, opts, onChange, align = 'right' }) {
+  const [open, setOpen] = useState(false);
+  const cur = opts[value] || opts[options[0]];
+  return (
+    <div className="sortdd">
+      <button className="sortdd-btn" onClick={() => setOpen(o => !o)} aria-haspopup="listbox"
+        aria-expanded={open} aria-label={`Sort: ${cur.label}`} title={`Sort: ${cur.label}`}>
+        <Icon icon={cur.icon} size={20} />
+      </button>
+      {open && (
+        <>
+          <div className="dd-backdrop" onClick={() => setOpen(false)} />
+          <div className={`sortdd-menu ${align === 'left' ? 'left' : ''}`} role="listbox">
+            {options.map(v => (
+              <button key={v} role="option" aria-selected={v === value}
+                className={`sortdd-item ${v === value ? 'on' : ''}`}
+                onClick={() => { onChange(v); setOpen(false); }}>
+                <Icon icon={opts[v].icon} size={18} />
+                <span>{opts[v].label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

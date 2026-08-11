@@ -51,6 +51,15 @@ RATE_LIMIT_SECONDS = 5
 TAG_SEED_LIMIT = int(os.environ.get("TAG_SEED_LIMIT", "150") or 150)
 TAG_SEED_PAGES = int(os.environ.get("TAG_SEED_PAGES", "16") or 16)
 
+# Sort discovery searches by AO3's "Date Updated" — the same date the blurb shows,
+# that we store as tag_matches.source_updated, and that the app's feed orders by.
+# It also matches the work_search[revised_at] window an incremental run filters on.
+# Sorting by created_at (Date Posted) meant AO3 paginated by posted date while we
+# filtered and displayed by updated date, so on a tag with more results than we
+# fetch, the top of the feed was whichever of the works we happened to keep had
+# been updated most recently — which read as a random old fic at the top.
+SORT_BY_UPDATED = "revised_at"
+
 # Mirror app/src/data/sample.js COVER_PALETTES length and hashStr() so the
 # worker assigns the same cover palette index the app would compute for a seed.
 _PALETTE_COUNT = 8
@@ -111,6 +120,28 @@ def _chapters_from_text(text: str) -> tuple[int, int | None]:
     return have, total
 
 
+_BLURB_MONTHS = {
+    "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
+    "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12",
+}
+
+
+def _blurb_date(text: str) -> str | None:
+    """An AO3 blurb's `p.datetime` ("14 Aug 2025") → an ISO date, or None.
+
+    The one date a search listing carries: the work's last-updated date (its
+    posted date when never revised). Mirrors the app's parseBlurbDate so both
+    discovery paths store the same tag_matches.source_updated the feed sorts by.
+    """
+    m = re.match(r"^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$", (text or "").strip())
+    if not m:
+        return None
+    mm = _BLURB_MONTHS.get(m.group(2)[:3].lower())
+    if not mm:
+        return None
+    return f"{m.group(3)}-{mm}-{int(m.group(1)):02d}"
+
+
 def _parse_search_blurbs(html_text: str, source: str) -> list[WorkMeta]:
     """Parse an AO3 works-listing page (search results / a tag's works page) into
     WorkMeta — the same blurb shape the app's parseSearchResults reads. Metadata
@@ -145,6 +176,7 @@ def _parse_search_blurbs(html_text: str, source: str) -> list[WorkMeta]:
         words = int(re.sub(r"[^\d]", "", words_el.get_text()) or 0) if words_el else 0
         ch_el = li.select_one("dd.chapters")
         have, total = _chapters_from_text(ch_el.get_text() if ch_el else "")
+        date_el = li.select_one("p.datetime")
         out.append(WorkMeta(
             source=source,
             source_work_id=wid,
@@ -159,6 +191,7 @@ def _parse_search_blurbs(html_text: str, source: str) -> list[WorkMeta]:
             chapters=have,
             chapters_total=total,
             status="complete" if (total is not None and have >= total) else "ongoing",
+            updated=_blurb_date(date_el.get_text(strip=True) if date_el else ""),
             url=f"https://archiveofourown.org/works/{wid}",
         ))
     return out
@@ -648,7 +681,7 @@ class AO3Source(Source):
                 return AO3.Search(
                     language=language,
                     revised_at=revised,
-                    sort_column="created_at",
+                    sort_column=SORT_BY_UPDATED,
                     page=page,
                     session=s,
                 )
@@ -707,7 +740,7 @@ class AO3Source(Source):
                     excluded_tags=excluded_tags,
                     revised_at=revised_at,
                     completion_status=completed,
-                    sort_column="created_at",
+                    sort_column=SORT_BY_UPDATED,
                     page=page,
                     session=s,
                 )
@@ -770,7 +803,7 @@ class AO3Source(Source):
         excluded_csv = ",".join(t for t in (excluded_tags or []) if t)
         seen: dict[str, WorkMeta] = {}
         for page in range(1, max_pages + 1):
-            params: dict = {"work_search[sort_column]": "created_at", "page": page}
+            params: dict = {"work_search[sort_column]": SORT_BY_UPDATED, "page": page}
             if revised:
                 params["work_search[revised_at]"] = revised
             if excluded_csv:

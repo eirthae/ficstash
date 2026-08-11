@@ -2,6 +2,7 @@ import Icon from './Icon.jsx';
 import { Cover, FetchButton, StatusBadge, FrozenBadge, OriginBadges, TagChip, fmtWords } from './ui.jsx';
 import { COVER_PALETTES } from '../data/sample.js';
 import { pickCardTags } from '../lib/cardtags.js';
+import { fmtUpdated } from '../lib/dates.js';
 
 // The chapter total to SHOW. AO3 ongoing works are usually "13/?" (no declared
 // end), and we must not render that as "13/13" — it reads as complete. We only
@@ -92,6 +93,7 @@ export function GridCard({ work, onOpen }) {
 // ---- Suggestion card (+ save / dismiss) -----------------------------------
 // saveState: 'idle' → 'queued' (worker will fetch on next sync) → 'saved' (in library)
 export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, cta = 'Open', onLater, laterIcon = 'solar:bookmark-linear', laterTitle = 'Save for later', excludeTags = [] }) {
+  const updatedLabel = fmtUpdated(work.sourceUpdated);
   return (
     <div className="libcard fade-enter">
       <div className="meta">
@@ -109,7 +111,12 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
           {pickCardTags(work.tags, excludeTags).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <div className="metarow"><StatusBadge status={work.status} /><span>·</span><span>{fmtWords(work.words)}</span></div>
+          <div className="metarow">
+            <StatusBadge status={work.status} /><span>·</span><span>{fmtWords(work.words)}</span>
+            {/* AO3's last-updated date. Omitted entirely for rows discovered
+                before we captured dates, rather than showing a hollow dash. */}
+            {updatedLabel && <><span>·</span><span title="Last updated on AO3">{updatedLabel}</span></>}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {onLater && (
             <button className="iconbtn ghost" onClick={() => onLater(work)} aria-label={laterTitle} title={laterTitle}

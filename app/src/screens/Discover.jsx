@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Appbar } from '../components/chrome.jsx';
 import Icon from '../components/Icon.jsx';
-import { SearchField, EmptyState, TAG_COLOR, useToast, Sheet, Segmented, PullToRefresh } from '../components/ui.jsx';
+import { SearchField, EmptyState, TAG_COLOR, useToast, Sheet, Segmented, PullToRefresh, SortDropdown } from '../components/ui.jsx';
 import { TagTile, SuggestionCard } from '../components/cards.jsx';
 import {
   fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup, updateGroup,
@@ -10,6 +10,7 @@ import {
 } from '../lib/tags.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
 import { syncNow } from '../lib/sync.js';
+import { sortMatches } from '../lib/dates.js';
 import { LANGUAGES } from '../lib/languages.js';
 import { fetchDiscoveryPrefs, updateDiscoveryPrefs } from '../lib/discovery.js';
 import { TRACKED_TAGS, SUGGESTIONS } from '../data/sample.js';
@@ -70,6 +71,17 @@ const SITES_TAXONOMY = (() => {
 // link path. "Books" is notify-only — a commercial release can't be fetched, so
 // its cards just link out to Open Library and the user buys + uploads the EPUB.
 const isSavableSource = (src) => src !== 'books' && src !== 'romanceio';
+
+// Sort options for a group's match feed. Dates come from AO3's blurb, which
+// carries the work's LAST-UPDATED date — the same one AO3 itself shows and
+// sorts its search by, so "Newest" here means what it means on AO3.
+const FEED_SORT_OPTS = {
+  newest: { icon: 'solar:clock-circle-linear', label: 'Newest first' },
+  oldest: { icon: 'solar:history-linear', label: 'Oldest first' },
+  longest: { icon: 'solar:sort-from-bottom-to-top-linear', label: 'Longest first' },
+  shortest: { icon: 'solar:sort-from-top-to-bottom-linear', label: 'Shortest first' },
+};
+const FEED_SORTS = ['newest', 'oldest', 'longest', 'shortest'];
 
 // ============================================================================
 // Discover — track AO3 tags / tag groups and review the works they turn up.
@@ -874,6 +886,7 @@ export function TagGroupBuilder({ open, onClose, onCreated, initialSource = 'ao3
 export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   const [items, setItems] = useState(null); // null = loading
   const [statusFilter, setStatusFilter] = useState('all'); // all | ongoing | complete — quick filter over the results
+  const [sort, setSort] = useState('newest');              // newest | oldest | longest | shortest
   const [titleExpanded, setTitleExpanded] = useState(false); // tap title to see full tag-group name
   const [toast, showToast] = useToast();
   const c = TAG_COLOR[tag.kind] || 'var(--accent)';
@@ -920,9 +933,12 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   const list = items || [];
   // Quick complete/ongoing filter over the loaded results (client-side — separate
   // from the group's own status setting in its tag settings).
-  const shown = statusFilter === 'all' ? list
+  const filtered = statusFilter === 'all' ? list
     : statusFilter === 'complete' ? list.filter((w) => (w.status || '') === 'complete')
       : list.filter((w) => (w.status || '') !== 'complete');
+  // fetchMatches already returns newest-first; re-sorting client-side is what
+  // makes the other three options work without a round trip.
+  const shown = sortMatches(filtered, sort);
   // Tags this group is already defined by — hidden from each card so the chips
   // show OTHER tags (no repeating what you're browsing).
   const groupTagNames = [tag.name, ...((tag.tags || []).map((t) => (typeof t === 'string' ? t : t.name)))].filter(Boolean);
@@ -945,7 +961,8 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
             <span className="swatch" style={{ background: c }}></span>{kindLabel}
           </span>
           {list.length > 0 && (
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <SortDropdown value={sort} options={FEED_SORTS} opts={FEED_SORT_OPTS} onChange={setSort} align="right" />
               {[
                 { key: 'ongoing', label: 'Ongoing', icon: 'solar:clock-circle-linear' },
                 { key: 'complete', label: 'Completed', icon: 'solar:check-circle-linear' },

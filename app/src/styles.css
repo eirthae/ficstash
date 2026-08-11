@@ -229,6 +229,14 @@ input,textarea { font-family:inherit; }
 .chip { display:inline-flex; align-items:center; gap:5px; height:23px; padding:0 9px; border-radius:var(--radius-full); font-size:11.5px; font-weight:600; line-height:1; white-space:nowrap; }
 .chip .swatch { width:6px; height:6px; border-radius:50%; }
 
+/* A chip you can remove. The × used to be an 18px button holding a 14px glyph —
+   far under a thumb-sized target, and visually a speck next to the label. The
+   chip grows a little so the button can be a real 26px control. */
+.chip.removable { height:30px; padding-right:4px; }
+.chip.removable .chip-x { width:26px; height:26px; border-radius:var(--radius-full); display:flex; align-items:center; justify-content:center; flex:none; color:inherit; transition:background .15s, transform .1s; }
+.chip.removable .chip-x svg { flex:none; } /* else the glyph gets shrunk to a squashed 14×18 */
+.chip.removable .chip-x:active { transform:scale(.9); background:color-mix(in srgb, currentColor 20%, transparent); }
+
 /* status / frozen badges */
 .statusbadge { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; }
 .statusbadge .ic { display:flex; }

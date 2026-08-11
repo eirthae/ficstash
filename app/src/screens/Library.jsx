@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Appbar } from '../components/chrome.jsx';
-import { EmptyState, useToast, Sheet, PullToRefresh } from '../components/ui.jsx';
+import { EmptyState, useToast, Sheet, PullToRefresh, SortDropdown } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { LibraryCard } from '../components/cards.jsx';
 import { syncNow } from '../lib/sync.js';
@@ -27,35 +27,9 @@ const SORT_OPTS = {
 };
 
 
-// Sort control — a compact icon button that opens a dropdown of options
-// (icon + label), instead of laying every option out in a row.
-function SortDropdown({ value, options, onChange, align = 'right' }) {
-  const [open, setOpen] = useState(false);
-  const cur = SORT_OPTS[value] || SORT_OPTS[options[0]];
-  return (
-    <div className="sortdd">
-      <button className="sortdd-btn" onClick={() => setOpen(o => !o)} aria-haspopup="listbox"
-        aria-expanded={open} aria-label={`Sort: ${cur.label}`} title={`Sort: ${cur.label}`}>
-        <Icon icon={cur.icon} size={20} />
-      </button>
-      {open && (
-        <>
-          <div className="dd-backdrop" onClick={() => setOpen(false)} />
-          <div className={`sortdd-menu ${align === 'left' ? 'left' : ''}`} role="listbox">
-            {options.map(v => (
-              <button key={v} role="option" aria-selected={v === value}
-                className={`sortdd-item ${v === value ? 'on' : ''}`}
-                onClick={() => { onChange(v); setOpen(false); }}>
-                <Icon icon={SORT_OPTS[v].icon} size={18} />
-                <span>{SORT_OPTS[v].label}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+// The sort control itself lives in ui.jsx (Discover's feed uses it too); this
+// screen just supplies SORT_OPTS as its option set.
+const ShelfSort = (props) => <SortDropdown {...props} opts={SORT_OPTS} />;
 
 // Advanced tag filter: pick tags from the shelf's own pool. Tapping a tag
 // requires it (AND across all required tags); the − button excludes it. A tag
@@ -342,13 +316,13 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
         {(incTags.length > 0 || excTags.length > 0) && (
           <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8, margin: '0 20px 12px' }}>
             {incTags.map(t => (
-              <span key={`i${t}`} className="chip" style={{ background: 'var(--accent-soft)', color: 'var(--accent)', paddingRight: 6 }}>
-                {t}<button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => setIncTags(xs => xs.filter(x => x !== t))}><Icon icon="solar:close-circle-bold" size={14} color="var(--accent)" /></button>
+              <span key={`i${t}`} className="chip removable" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                {t}<button className="chip-x" aria-label={`Stop requiring ${t}`} onClick={() => setIncTags(xs => xs.filter(x => x !== t))}><Icon icon="solar:close-circle-bold" size={18} color="var(--accent)" /></button>
               </span>
             ))}
             {excTags.map(t => (
-              <span key={`e${t}`} className="chip" style={{ background: 'color-mix(in srgb, var(--danger,#f5455c) 16%, transparent)', color: 'var(--danger,#f5455c)', paddingRight: 6 }}>
-                –{t}<button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => setExcTags(xs => xs.filter(x => x !== t))}><Icon icon="solar:close-circle-bold" size={14} color="var(--danger,#f5455c)" /></button>
+              <span key={`e${t}`} className="chip removable" style={{ background: 'color-mix(in srgb, var(--danger,#f5455c) 16%, transparent)', color: 'var(--danger,#f5455c)' }}>
+                –{t}<button className="chip-x" aria-label={`Stop excluding ${t}`} onClick={() => setExcTags(xs => xs.filter(x => x !== t))}><Icon icon="solar:close-circle-bold" size={18} color="var(--danger,#f5455c)" /></button>
               </span>
             ))}
             <button className="linklike" style={{ fontSize: 12 }} onClick={() => { setIncTags([]); setExcTags([]); }}>Clear</button>
@@ -377,7 +351,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
                   <button className={status === 'ongoing' ? 'on' : ''} onClick={() => setStatus('ongoing')}>Ongoing{status === 'ongoing' ? ` · ${ongoingCount}` : ''}</button>
                   <button className={status === 'complete' ? 'on' : ''} onClick={() => setStatus('complete')}>Complete{status === 'complete' ? ` · ${completeCount}` : ''}</button>
                 </div>
-                <SortDropdown value={activeSort} options={SORTS} onChange={setSort} align="right" />
+                <ShelfSort value={activeSort} options={SORTS} onChange={setSort} align="right" />
                 {collapseBtn}
               </>
             )}

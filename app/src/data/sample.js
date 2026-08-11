@@ -84,7 +84,7 @@ export const WORKS = [
     // A sample AO3 work skin. NOTE the last rule is a deliberately BAD prose
     // override (#workskin p) — the sanitizer must strip it so prose keeps your
     // reader settings; only the .text/.msg/.who chat classes should style.
-    workSkin: "#workskin .text{max-width:94%;margin:16px auto;font-family:-apple-system,'Segoe UI',sans-serif}#workskin .who{font-size:11px;color:#9a9a9f;margin:10px 0 2px 8px}#workskin .msg{display:block;width:fit-content;max-width:76%;padding:8px 13px;margin:4px 0;border-radius:18px;font-size:15px;line-height:1.35}#workskin .them{background:#e9e9eb;color:#111}#workskin .me{background:#0a7cff;color:#fff;margin-left:auto}#workskin .post{max-width:300px;margin:18px auto;border:1px solid #dbdbdb;border-radius:10px;overflow:hidden;background:#fff;color:#111;font-family:-apple-system,sans-serif}#workskin .phead{display:flex;align-items:center;gap:9px;padding:9px 11px}#workskin .pav{width:30px;height:30px;border-radius:50%;background:#1d6e56;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}#workskin .puser{font-size:13px;font-weight:600}#workskin .pimg{display:block;width:100%;height:auto}#workskin .pacts{display:flex;gap:14px;padding:9px 11px 2px;font-size:14px;color:#222}#workskin .plikes{font-size:13px;font-weight:600;padding:2px 11px}#workskin .pcap{font-size:13px;line-height:1.4;padding:3px 11px 11px}#workskin p{line-height:4 !important;color:#c0392b !important}",
+    workSkin: "#workskin .text{max-width:94%;margin:16px auto;font-family:-apple-system,'Segoe UI',sans-serif}#workskin .who{font-size:11px;color:#9a9a9f;margin:10px 0 2px 8px}#workskin .msg{display:block;width:fit-content;max-width:76%;padding:8px 13px;margin:4px 0;border-radius:18px;font-size:15px;line-height:1.35}#workskin .them{background:#e9e9eb;color:#111}#workskin .me{background:#0a7cff;color:#fff;margin-left:auto}#workskin .post{max-width:300px;margin:18px auto;border:1px solid #dbdbdb;border-radius:10px;overflow:hidden;background:#fff;color:#111;font-family:-apple-system,sans-serif}#workskin .phead{display:flex;align-items:center;gap:9px;padding:9px 11px}#workskin .pav{width:30px;height:30px;border-radius:50%;background:#1d6e56;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}#workskin .puser{font-size:13px;font-weight:600}#workskin .pimg{display:block;width:100%;height:auto}#workskin .pacts{display:flex;gap:14px;padding:9px 11px 2px;font-size:14px;color:#222}#workskin .plikes{font-size:13px;font-weight:600;padding:2px 11px}#workskin .pcap{font-size:13px;line-height:1.4;padding:3px 11px 11px}#workskin .darkchat{background:#15161a;padding:12px 15px;border-radius:14px;margin:16px auto;max-width:94%}#workskin .darkchat .name{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.6}#workskin p{line-height:4 !important;color:#c0392b !important}",
   },
 ];
 
@@ -109,7 +109,13 @@ export const DEMO_CHAPTERS = {
       + '<div class="pacts"><span>♡</span><span>○</span><span>➤</span></div>'
       + '<div class="plikes">1,247 likes</div>'
       + '<div class="pcap"><b>ilya.rozanov</b> offseason hits different when someone keeps stealing the blanket 🏒</div></div>'
-      + '<p>Shane stared at it for a long time, then finally let himself smile.</p>',
+      + '<p>Shane stared at it for a long time, then finally let himself smile.</p>'
+      // A dark author block whose text colour lives on a bare <p> — the rule our
+      // sanitizer drops to protect prose. Without a contrast rule this renders
+      // near-black on near-black under the light/grey reader themes.
+      + '<div class="darkchat"><div class="name">group chat</div>'
+      + '<p>so are we going to talk about the photo or</p>'
+      + '<p>because i have <strong>questions</strong></p></div>',
   }],
 };
 
@@ -128,21 +134,21 @@ export const SUGGESTIONS = [
     fandom: 'Heated Rivalry – Rachel Reid', pairing: 'Shane Hollander/Ilya Rozanov',
     summary: "Shane gets traded. Ilya gets a phone number he isn't supposed to use. A long-distance fic told entirely in the spaces between road trips.",
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Long Distance', 'freeform'), T('Slow Burn', 'freeform'), T('Mind the Tags', 'warning')],
-    words: 58300, chapters: 12, chaptersTotal: 12, status: 'complete', updated: '6 days ago', palette: 2,
+    words: 58300, chapters: 12, chaptersTotal: 12, status: 'complete', updated: '6 days ago', sourceUpdated: '2026-08-05', palette: 2,
   },
   {
     id: 's2', source: 'ao3', title: 'The Year Without a Cup', author: 'overtime',
     fandom: 'Heated Rivalry – Rachel Reid', pairing: 'Shane Hollander/Ilya Rozanov',
     summary: 'An injury fic. The season ends early for one of them, and the other has to decide what winning was ever actually for.',
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Hurt/Comfort', 'freeform'), T('Recovery', 'freeform')],
-    words: 39100, chapters: 8, chaptersTotal: 8, status: 'complete', updated: '1 week ago', palette: 7,
+    words: 39100, chapters: 8, chaptersTotal: 8, status: 'complete', updated: '1 week ago', sourceUpdated: '2025-11-22', palette: 7,
   },
   {
     id: 's3', source: 'ao3', title: 'Neutral Zone', author: 'bluelines',
     fandom: 'Heated Rivalry – Rachel Reid', pairing: 'Shane Hollander/Ilya Rozanov',
     summary: 'They agree to be nothing to each other during the playoffs. It lasts exactly one game.',
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Friends With Benefits', 'freeform'), T('Feelings Realization', 'freeform')],
-    words: 14700, chapters: 4, chaptersTotal: 6, status: 'ongoing', updated: '2 days ago', palette: 6,
+    words: 14700, chapters: 4, chaptersTotal: 6, status: 'ongoing', updated: '2 days ago', sourceUpdated: '2026-08-09', palette: 6,
   },
 ];
 

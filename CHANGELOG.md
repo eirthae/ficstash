@@ -4,6 +4,58 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-08-11 — Discovery feed ordering + dates, readable chatfics (v0.8.59)
+
+### Fixed
+
+- **The discovery feed wasn't showing newest first.** It ordered by
+  `first_seen_at` — when *we* inserted the row, not when the work was posted or
+  updated. On a tag's first seed every row lands in the same second, so within
+  that batch the order was effectively arbitrary: a five-month-old fic could sit
+  at the top. Three things kept any real date from being available:
+  - `matchRow` hardcoded `source_updated: null`, so the on-device path — the
+    *primary* discovery path — stored no date at all.
+  - Neither AO3 blurb parser read `p.datetime`, the one date a search listing
+    carries (the work's last-updated date, same as AO3 shows).
+  - `mapMatch` didn't pass `source_updated` through, so the card couldn't show it.
+
+  All three fixed; the feed now orders by the work's own date, with
+  `first_seen_at` only breaking ties.
+- **Discovery fetched in one order and displayed in another.** Searches asked AO3
+  to sort by `created_at` (Date Posted) while the incremental window filtered on
+  `revised_at` (Date Updated) and the feed now sorts by the same. On a tag with
+  more results than we fetch, that meant *which* works we kept was decided by
+  posted date, but the top of the feed was whichever of them happened to be
+  updated most recently. Both paths now sort by `revised_at` end to end.
+- **Chatfics were unreadable on author-styled dark blocks.** The work-skin
+  sanitizer drops rules on bare elements to protect prose typography — which is
+  also where authors put the text colour that goes with their bubble background.
+  We kept the dark background and discarded the light text, so the reader's own
+  colour applied: near-black on a light or grey theme, fine on the dark one,
+  which is why it looked theme-dependent. A surviving rule that paints an opaque
+  background and sets no colour of its own now gets a WCAG-luminance-matched text
+  colour. Author intent still wins whenever they expressed one — including in a
+  separate rule. Verified across all five reader themes; ordinary prose still
+  follows the theme exactly.
+- **The tag-filter chip's × was an 18px speck** holding a 14px glyph, well under a
+  thumb-sized target. Removable chips now use a shared `.chip.removable` style
+  with a real 26px control.
+
+### Added
+
+- Sort control on a tracked group's feed: **Newest / Oldest / Longest / Shortest**,
+  reusing the same `SortDropdown` the Library shelves use (lifted into `ui.jsx`
+  rather than duplicated).
+- The last-updated date now shows on each discovery card. Rows discovered before
+  we captured dates simply omit it and sort last, in both directions.
+
+### Notes
+
+- Existing `tag_matches` rows have no date until their tag is next discovered;
+  they sort after dated rows in the meantime. No migration or backfill needed.
+- Discover's own tag-picker chips still use the old 18px × — say the word and
+  they can move to `.chip.removable` too.
+
 ## 2026-08-08 — Fix: removed works re-queued for download on every sync (v0.8.58)
 
 ### Fixed

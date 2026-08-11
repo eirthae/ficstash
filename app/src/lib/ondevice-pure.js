@@ -81,7 +81,9 @@ export function matchRow(groupId, m) {
     words: m.words || 0,
     chapters: m.chapters ?? null,
     status: m.status || 'ongoing',
-    source_updated: null,
+    // Was hardcoded null, so on-device discovery — the primary path — stored no
+    // date at all and the feed had nothing to order by but insertion time.
+    source_updated: m.updated || null,
     palette: paletteFor(m.fandom || m.title),
   };
 }

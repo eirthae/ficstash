@@ -16,9 +16,11 @@ import { fetchHtml, fetchJson, fetchImageDataUri } from '../fetch.js';
 // import); re-export them so existing importers keep getting them from './ao3.js'.
 export {
   AO3_HOST, isAo3Url, workIdFromUrl, fullWorkUrl, workUrl, parseChapterStat, searchUrl,
+  parseBlurbDate,
 } from './ao3-util.js';
 import {
   AO3_HOST, workIdFromUrl, fullWorkUrl, workUrl, parseChapterStat, searchUrl, languageSearchUrl,
+  parseBlurbDate,
 } from './ao3-util.js';
 
 const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim();
@@ -248,6 +250,10 @@ export function parseSearchResults(html) {
       words: parseInt((text(li, 'dd.words') || '').replace(/[^\d]/g, ''), 10) || 0,
       status: chStat.status,
       chaptersTotal: chStat.total,
+      // The blurb's one date — what the discovery feed sorts and shows. Without
+      // it every match fell back to "when we happened to insert the row", which
+      // on a first tag seed is one big tie, so the feed order looked random.
+      updated: parseBlurbDate(text(li, 'p.datetime')),
       url: workUrl(id),
     });
   }
