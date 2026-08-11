@@ -418,10 +418,10 @@ function TagPicker({ picked, onAdd, onRemove, placeholder, accent }) {
           {picked.map((t) => {
             const c = accent || TAG_COLOR[t.kind] || TAG_COLOR.freeform;
             return (
-              <span key={t.name} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
+              <span key={t.name} className="chip removable" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c }}>
                 <span className="swatch" style={{ background: c }}></span>{t.name}
-                <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t.name)} aria-label="Remove tag">
-                  <Icon icon="solar:close-circle-bold" size={15} color={c} />
+                <button className="chip-x" onClick={() => onRemove(t.name)} aria-label="Remove tag">
+                  <Icon icon="solar:close-circle-bold" size={18} color={c} />
                 </button>
               </span>
             );
@@ -481,10 +481,10 @@ function GenrePicker({ genres, label, picked, onAdd, onRemove }) {
           {picked.map((t) => {
             const c = TAG_COLOR.freeform;
             return (
-              <span key={t.id} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
+              <span key={t.id} className="chip removable" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c }}>
                 <span className="swatch" style={{ background: c }}></span>{t.name}
-                <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t.name)} aria-label="Remove genre">
-                  <Icon icon="solar:close-circle-bold" size={15} color={c} />
+                <button className="chip-x" onClick={() => onRemove(t.name)} aria-label="Remove genre">
+                  <Icon icon="solar:close-circle-bold" size={18} color={c} />
                 </button>
               </span>
             );
@@ -540,10 +540,10 @@ function SubjectPicker({ picked, onAdd, onRemove, placeholder = 'Search reader t
       {picked.length > 0 && (
         <div className="chiprow" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
           {picked.map((t) => (
-            <span key={t.name} className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, paddingRight: 6 }}>
+            <span key={t.name} className="chip removable" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c }}>
               <span className="swatch" style={{ background: c }}></span>{t.name}
-              <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t.name)} aria-label="Remove subject">
-                <Icon icon="solar:close-circle-bold" size={15} color={c} />
+              <button className="chip-x" onClick={() => onRemove(t.name)} aria-label="Remove subject">
+                <Icon icon="solar:close-circle-bold" size={18} color={c} />
               </button>
             </span>
           ))}
@@ -592,10 +592,10 @@ function TopicChip({ t, mode, onRemove }) {
   const c = mode === 'in' ? 'var(--accent)' : 'var(--danger, #f5455c)';
   const icon = mode === 'in' ? 'solar:check-circle-bold' : 'solar:forbidden-circle-bold';
   return (
-    <span className="chip" style={{ background: `color-mix(in srgb, ${c} 15%, transparent)`, color: c, paddingRight: 6 }}>
+    <span className="chip removable" style={{ background: `color-mix(in srgb, ${c} 15%, transparent)`, color: c }}>
       <Icon icon={icon} size={14} color={c} /> {t.name}
-      <button className="iconbtn" style={{ width: 18, height: 18, marginLeft: 2 }} onClick={() => onRemove(t)} aria-label="Remove topic">
-        <Icon icon="solar:close-circle-bold" size={15} color={c} />
+      <button className="chip-x" onClick={() => onRemove(t)} aria-label="Remove topic">
+        <Icon icon="solar:close-circle-bold" size={18} color={c} />
       </button>
     </span>
   );

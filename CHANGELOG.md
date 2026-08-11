@@ -4,6 +4,24 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-08-11 — Every icon button sized properly (v0.8.60)
+
+### Fixed
+
+- **Discover's own chips still had the 18px ×.** The tag, genre, subject and
+  topic pickers each carried their own copy of the same 18px button that v0.8.59
+  fixed in the Library. All four now use `.chip.removable`, so every removable
+  chip in the app has the same 26px control.
+- **Icon glyphs were being squashed by flex.** An icon inside an icon button is a
+  flex item with nothing stopping it collapsing, so on any button narrower than
+  the 40px default the glyph came out non-square — a 20px icon rendering 16×20,
+  an 18px one 14×18. Caught by measuring the rendered SVG rather than reading the
+  CSS. `.iconbtn svg` is now `flex:none`, which also fixes the shared
+  `SearchField`'s clear button, squashed the same way for as long as it existed.
+- Library's hand-rolled search field (it sits next to the filter button, so it
+  isn't the shared `SearchField`) had a 22px clear against the shared one's 28px.
+  Matched up, and given the `aria-label` it was missing.
+
 ## 2026-08-11 — Discovery feed ordering + dates, readable chatfics (v0.8.59)
 
 ### Fixed
@@ -37,10 +55,9 @@ scheme yet, so entries are dated and reference the commit that shipped them.
   colour. Author intent still wins whenever they expressed one — including in a
   separate rule. Verified across all five reader themes; ordinary prose still
   follows the theme exactly.
-- **The tag-filter chip's × was an 18px speck** holding a 14px glyph, well under a
-  thumb-sized target. Removable chips now use a shared `.chip.removable` style
-  with a real 26px control.
-
+- **The Library tag-filter chip's × was an 18px speck** holding a 14px glyph, well
+  under a thumb-sized target. Removable chips there now use a new
+  `.chip.removable` style with a real 26px control.
 - **Discovery kept suggesting fics you already own.** `tag_matches.saved` is only
   flipped when a work is saved *through discovery* (the app's save path and the
   worker's Pass 2). A work that reached your library any other way — an AO3
@@ -67,8 +84,6 @@ scheme yet, so entries are dated and reference the commit that shipped them.
 - The "In library" check costs one extra query per group open (keyed on source +
   source_work_id, since ids are only unique within a source) and never hides a
   match — if the lookup fails you get an unlabelled feed, not an empty one.
-- Discover's own tag-picker chips still use the old 18px × — say the word and
-  they can move to `.chip.removable` too.
 
 ## 2026-08-08 — Fix: removed works re-queued for download on every sync (v0.8.58)
 

@@ -299,7 +299,9 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
               <Icon icon="solar:magnifer-linear" size={18} color="var(--text-tertiary)" />
               <input placeholder={`Search ${shelf}…`} value={query} onChange={(e) => setQuery(e.target.value)}
                 autoCapitalize="off" autoCorrect="off" spellCheck={false} />
-              {query && <button className="iconbtn" style={{ width: 22, height: 22 }} onClick={() => setQuery('')}><Icon icon="solar:close-circle-bold" size={16} color="var(--text-tertiary)" /></button>}
+              {/* Same 28px clear as the shared SearchField — this field is hand-rolled
+                  (it sits next to the filter button), so it has to match on purpose. */}
+              {query && <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Clear search" onClick={() => setQuery('')}><Icon icon="solar:close-circle-bold" size={20} color="var(--text-tertiary)" /></button>}
             </div>
             {!isBooks && (
               <button className="iconbtn ghost" onClick={() => setFiltersOpen(true)}

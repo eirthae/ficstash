@@ -157,6 +157,9 @@ input,textarea { font-family:inherit; }
 .appbar .title-sm { font-size:19px; font-weight:700; letter-spacing:-.01em; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .appbar-row { display:flex; align-items:center; gap:12px; }
 .iconbtn { width:40px; height:40px; border-radius:var(--radius-full); display:flex; align-items:center; justify-content:center; color:var(--text-primary); flex:none; transition:background .15s, transform .1s; }
+/* The glyph is a flex item and will happily shrink on a narrow button — a 20px
+   icon was rendering 16×20. Every icon button wants its icon at its real size. */
+.iconbtn svg, .chip-x svg { flex:none; }
 .iconbtn:active { transform:scale(.9); background:var(--surface-2); }
 .iconbtn.ghost:hover { background:var(--surface-2); }
 
@@ -234,7 +237,6 @@ input,textarea { font-family:inherit; }
    chip grows a little so the button can be a real 26px control. */
 .chip.removable { height:30px; padding-right:4px; }
 .chip.removable .chip-x { width:26px; height:26px; border-radius:var(--radius-full); display:flex; align-items:center; justify-content:center; flex:none; color:inherit; transition:background .15s, transform .1s; }
-.chip.removable .chip-x svg { flex:none; } /* else the glyph gets shrunk to a squashed 14×18 */
 .chip.removable .chip-x:active { transform:scale(.9); background:color-mix(in srgb, currentColor 20%, transparent); }
 
 /* status / frozen badges */
