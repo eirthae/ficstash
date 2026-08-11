@@ -969,12 +969,16 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
       />
       <div className="scroll" style={{ padding: '4px 20px 24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 16 }}>
-          <span className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, height: 26 }}>
-            <span className="swatch" style={{ background: c }}></span>{kindLabel}
+          {/* The kind label is decorative, so it's the thing that gives: a long one
+              ("relationship") plus the three controls overran a 375px screen by
+              10px and pushed the sort button off the edge. It truncates now; the
+              controls never shrink. */}
+          <span className="chip" style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c, height: 26, flex: '0 1 auto', minWidth: 0 }}>
+            <span className="swatch" style={{ background: c }}></span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{kindLabel}</span>
           </span>
           {list.length > 0 && (
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <SortDropdown value={sort} options={FEED_SORTS} opts={FEED_SORT_OPTS} onChange={setSort} align="right" />
+            <div style={{ marginLeft: 'auto', flex: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               {[
                 { key: 'ongoing', label: 'Ongoing', icon: 'solar:clock-circle-linear' },
                 { key: 'complete', label: 'Completed', icon: 'solar:check-circle-linear' },
@@ -988,6 +992,11 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
                   </button>
                 );
               })}
+              {/* Sits last in the row, sized to the status pills. A pinned sliders
+                  glyph rather than the active option's icon, so the control keeps
+                  reading as "sorting" instead of changing shape under you. */}
+              <SortDropdown value={sort} options={FEED_SORTS} opts={FEED_SORT_OPTS} onChange={setSort}
+                align="right" icon="solar:tuning-2-linear" compact />
             </div>
           )}
         </div>

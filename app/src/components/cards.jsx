@@ -100,23 +100,26 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => onOpen && onOpen(work)}>
             <div className="story-title" style={{ marginBottom: 2 }}>{work.title}</div>
-            <div className="story-sub">by {work.author}</div>
+            <div className="story-sub" style={{ marginBottom: 7 }}>by {work.author}</div>
           </div>
           <button className="iconbtn" style={{ width: 30, height: 30, marginRight: -4, marginTop: -2 }} onClick={onDismiss} aria-label="Dismiss">
             <Icon icon="solar:close-circle-linear" size={20} color="var(--text-tertiary)" />
           </button>
         </div>
-        <div className="summary" style={{ margin: '7px 0' }}>{work.summary}</div>
+        {/* Status · date · words, directly under the byline — same shape and order
+            as LibraryCard, so a fic reads identically in Discover and the Library.
+            It used to sit at the bottom sharing a row with the buttons, where the
+            word count wrapped onto two lines. The date rides inside StatusBadge
+            exactly as the library's does; omitted when we have no date yet. */}
+        <div className="chiprow" style={{ marginBottom: 8, alignItems: 'center' }}>
+          <StatusBadge status={work.status} updated={updatedLabel || undefined} />
+          {work.words ? <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>· {fmtWords(work.words)}</span> : null}
+        </div>
+        <div className="summary" style={{ marginBottom: 9 }}>{work.summary}</div>
         <div className="chiprow" style={{ marginBottom: 9 }}>
           {pickCardTags(work.tags, excludeTags).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <div className="metarow">
-            <StatusBadge status={work.status} /><span>·</span><span>{fmtWords(work.words)}</span>
-            {/* AO3's last-updated date. Omitted entirely for rows discovered
-                before we captured dates, rather than showing a hollow dash. */}
-            {updatedLabel && <><span>·</span><span title="Last updated on AO3">{updatedLabel}</span></>}
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {onLater && (
             <button className="iconbtn ghost" onClick={() => onLater(work)} aria-label={laterTitle} title={laterTitle}

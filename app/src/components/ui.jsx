@@ -251,14 +251,17 @@ export function useToast() {
 // (icon + label), instead of laying every option out in a row. `opts` maps each
 // option key to { icon, label }; the caller owns its own option set, so Library's
 // shelf sorts and Discover's feed sorts share this one control.
-export function SortDropdown({ value, options, opts, onChange, align = 'right' }) {
+// `icon` pins the button's glyph instead of mirroring the current option — for
+// rows where the control should read as "sorting" at a glance rather than shift
+// its icon underneath you. `compact` matches the 30px pill buttons it sits beside.
+export function SortDropdown({ value, options, opts, onChange, align = 'right', icon, compact = false }) {
   const [open, setOpen] = useState(false);
   const cur = opts[value] || opts[options[0]];
   return (
     <div className="sortdd">
-      <button className="sortdd-btn" onClick={() => setOpen(o => !o)} aria-haspopup="listbox"
+      <button className={`sortdd-btn${compact ? ' compact' : ''}`} onClick={() => setOpen(o => !o)} aria-haspopup="listbox"
         aria-expanded={open} aria-label={`Sort: ${cur.label}`} title={`Sort: ${cur.label}`}>
-        <Icon icon={cur.icon} size={20} />
+        <Icon icon={icon || cur.icon} size={compact ? 16 : 20} />
       </button>
       {open && (
         <>

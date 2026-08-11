@@ -4,6 +4,24 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-08-11 — Discovery cards match the Library (v0.8.61)
+
+### Fixed
+
+- **Discovery cards put status/words at the bottom, Library puts them at the top.**
+  The same fic read differently depending on which screen you were looking at, and
+  in Discover the meta line shared its row with the Save buttons, so the word count
+  wrapped onto two lines. It now sits directly under the byline in the Library's
+  own order — status · date · words — with the date carried inside `StatusBadge`
+  exactly as the Library does it. Save / Save-for-later stay where they were.
+- **The sort control moved to the end of the filter row**, after Ongoing and
+  Completed, sized to match them (30px tall, 8px radius, 16px glyph) instead of
+  40×42. Its icon is now a fixed sliders glyph rather than mirroring the active
+  sort option, so the control keeps its shape as you change the sorting.
+- **The filter row overflowed a 375px screen by 10px.** A long kind label
+  ("relationship") plus the three controls pushed the sort button off the right
+  edge. The label truncates now; the controls never shrink.
+
 ## 2026-08-11 — Every icon button sized properly (v0.8.60)
 
 ### Fixed

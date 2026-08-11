@@ -210,6 +210,9 @@ input,textarea { font-family:inherit; }
    (up-arrow) button so the two controls match and free space for the tabs. */
 .sortdd { position:relative; flex:none; }
 .sortdd-btn { display:flex; align-items:center; justify-content:center; width:40px; height:42px; background:var(--surface-2); border-radius:var(--radius-md); color:var(--accent); }
+/* Sits in a row of 30px status pills (Ongoing / Completed) — same height, same
+   corner radius, same resting colour, so the row reads as one control group. */
+.sortdd-btn.compact { width:34px; height:30px; border-radius:8px; color:var(--text-tertiary); }
 .dd-backdrop { position:fixed; inset:0; z-index:40; }
 .sortdd-menu { position:absolute; top:calc(100% + 6px); right:0; z-index:50; min-width:176px; padding:6px; display:flex; flex-direction:column; gap:2px; background:var(--surface-elevated); border:1px solid var(--border); border-radius:var(--radius-md); box-shadow:var(--shadow-pop); }
 .sortdd-menu.left { left:0; right:auto; }
