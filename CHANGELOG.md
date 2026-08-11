@@ -4,6 +4,27 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-08-08 — Fix: removed works re-queued for download on every sync (v0.8.58)
+
+### Fixed
+
+- **The offline self-heal and the backfill queue disagreed about removed works.**
+  `reset_empty_offline` un-flagged any work marked offline with no stored chapter
+  text, but didn't filter on `hidden` — while `fetch_non_offline_works` only ever
+  queues `hidden = false`. Reclaiming storage purges a removed work's chapter rows,
+  so those works read as "offline but empty" forever: the 2026-08-07 sweep logged
+  `Re-queued 19 work(s) flagged offline but missing text` immediately followed by
+  `0 work(s) need offline copies`, and would have done so every run. A wasted write
+  each sync, and a re-queue count noisy enough to hide a work you actually wanted.
+  `reset_empty_offline` now skips hidden works, matching its sibling
+  `fetch_stale_offline_works`, which already did.
+
+### Added
+
+- `worker/tests/test_reset_empty_offline.py` — a fake client that records `update()`
+  payloads, so the pass is checked on what it *writes*, not just what it returns.
+  Four of the seven tests fail against the old query.
+
 ## 2026-08-07 — Fix: Save runs blocked the nightly sweep, so no new discoveries (v0.8.57)
 
 ### Fixed

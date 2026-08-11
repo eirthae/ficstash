@@ -616,12 +616,19 @@ def reset_empty_offline(client: Client, source: str = "ao3") -> int:
     against the chapters table and resets any with zero fetched chapters back to
     offline=False so the next backfill pass picks them up. DB-only; no AO3 hits.
     Idempotent and safe to run every sync.
+
+    Skips hidden (removed) works, matching fetch_non_offline_works' backfill queue.
+    Reclaiming storage purges a removed work's chapter rows, which left it looking
+    "offline but empty" forever: every sync re-flagged the same rows and the
+    backfill then dropped them for being hidden, so the count never fell and a
+    genuine re-queue would have been lost in the noise.
     """
     flagged = (
         client.table("works")
         .select("id")
         .eq("source", source)
         .eq("offline", True)
+        .eq("hidden", False)
         .execute()
         .data
         or []
