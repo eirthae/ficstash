@@ -4,6 +4,36 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-08-11 — The blank cavern above every summary (v0.8.62)
+
+### Fixed
+
+- **A huge blank gap sat between the byline and the summary on real data.** Not a
+  margin: `.summary` renders with `white-space: pre-line` so authors' paragraph
+  breaks survive, and the worker stores AO3's summary verbatim (ao3-api's
+  `Work.summary`), leading newlines and all. Those rendered literally. It never
+  showed in the sample data, which is single-line strings — only on a real
+  library, which is why it looked like a phone-only bug. `tidySummary` trims the
+  ends, strips per-line trailing spaces and caps runs of blank lines at one,
+  keeping deliberate paragraph breaks. Measured on a realistic summary: 188px →
+  75px, 113px of dead space gone. Applied at render, so it repairs every row
+  already stored — no migration.
+
+### Changed
+
+- Both card actions are now labelled buttons of equal width sharing the card's
+  full row, instead of an unlabelled bookmark icon beside a wide primary. Save is
+  relabelled **Download**.
+- A work already in your library drops "Save for later" entirely and gives
+  **In library** the whole row — there's nothing to set aside.
+- "Save for later" steps down to `--text-secondary` via a new `.btn-quiet`, so it
+  stops competing with Download. Its icon carries no `color` prop, so it inherits
+  `currentColor` and dims with the label. `.btn-surface` itself is unchanged —
+  Library's filter-sheet "Clear" is the only action on its row and wants full
+  strength.
+- Slightly more room between the tags and the button row (9px → 13px), so the
+  actions read as a separate row rather than a third chiprow.
+
 ## 2026-08-11 — Discovery cards match the Library (v0.8.61)
 
 ### Fixed

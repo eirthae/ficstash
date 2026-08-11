@@ -43,3 +43,23 @@ export function pickCardTags(workTags, excludeNames = [], limit = 3) {
   const ordered = [...kept.filter(isPriorityTag), ...kept.filter((t) => !isPriorityTag(t))];
   return ordered.slice(0, limit);
 }
+
+// Tidy a stored summary for display.
+//
+// `.summary` renders with `white-space: pre-line` so an author's paragraph
+// breaks survive — but the worker stores AO3's summary verbatim (ao3-api's
+// Work.summary), and those routinely start with a newline or carry runs of
+// blank lines. Rendered literally that opened a cavern between the byline and
+// the text, which looked like a broken margin. (The on-device parser collapses
+// all whitespace instead, which loses the paragraph breaks entirely — hence
+// fixing it here, at render, where it also repairs every row already stored.)
+//
+// Trims the ends, drops trailing spaces on each line, and caps consecutive
+// blank lines at one. Deliberate paragraph breaks are kept.
+export function tidySummary(text) {
+  return String(text ?? '')
+    .replace(/\r\n?/g, '\n')     // normalise CRLF before counting newlines
+    .replace(/[ \t]+$/gm, '')    // trailing spaces would survive the trim below
+    .replace(/\n{3,}/g, '\n\n')  // 2+ blank lines → one
+    .trim();
+}

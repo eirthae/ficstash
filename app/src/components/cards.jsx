@@ -1,7 +1,7 @@
 import Icon from './Icon.jsx';
 import { Cover, FetchButton, StatusBadge, FrozenBadge, OriginBadges, TagChip, fmtWords } from './ui.jsx';
 import { COVER_PALETTES } from '../data/sample.js';
-import { pickCardTags } from '../lib/cardtags.js';
+import { pickCardTags, tidySummary } from '../lib/cardtags.js';
 import { fmtUpdated } from '../lib/dates.js';
 
 // The chapter total to SHOW. AO3 ongoing works are usually "13/?" (no declared
@@ -32,7 +32,7 @@ export function LibraryCard({ work, onOpen, onDelete }) {
           {work.words ? <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>· {fmtWords(work.words)}</span> : null}
           <OriginBadges bookmarked={work.bookmarked} subscribed={work.subscribed} />
         </div>
-        <div className="summary" style={{ flex: 1 }}>{work.summary}</div>
+        <div className="summary" style={{ flex: 1 }}>{tidySummary(work.summary)}</div>
         {(work.tags && work.tags.length) ? (
           <div className="chiprow" style={{ marginTop: 8, gap: 6 }}>
             {work.tags.slice(0, 3).map((t, i) => (
@@ -92,7 +92,7 @@ export function GridCard({ work, onOpen }) {
 
 // ---- Suggestion card (+ save / dismiss) -----------------------------------
 // saveState: 'idle' → 'queued' (worker will fetch on next sync) → 'saved' (in library)
-export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, onOpenInLibrary, cta = 'Open', onLater, laterIcon = 'solar:bookmark-linear', laterTitle = 'Save for later', excludeTags = [] }) {
+export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, onOpen, onOpenInLibrary, cta = 'Open', onLater, laterIcon = 'solar:bookmark-linear', laterTitle = 'Save for later', laterLabel = 'Save for later', excludeTags = [] }) {
   const updatedLabel = fmtUpdated(work.sourceUpdated);
   return (
     <div className="libcard fade-enter">
@@ -115,16 +115,22 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
           <StatusBadge status={work.status} updated={updatedLabel || undefined} />
           {work.words ? <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>· {fmtWords(work.words)}</span> : null}
         </div>
-        <div className="summary" style={{ marginBottom: 9 }}>{work.summary}</div>
-        <div className="chiprow" style={{ marginBottom: 9 }}>
+        <div className="summary" style={{ marginBottom: 9 }}>{tidySummary(work.summary)}</div>
+        {/* A touch more room before the actions than between the content blocks
+            above, so the buttons read as a separate row rather than a third
+            chiprow. */}
+        <div className="chiprow" style={{ marginBottom: 13 }}>
           {pickCardTags(work.tags, excludeTags).map((t, i) => <TagChip key={i} t={t.t} k={t.k} />)}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Both actions are labelled buttons sharing the card's full width, so the
+            pair reads as one row of equal choices rather than an unlabelled icon
+            next to a wide primary. flex:1 + minWidth:0 keeps them exactly equal
+            however long the labels get. */}
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 8 }}>
           {onLater && (
-            <button className="iconbtn ghost" onClick={() => onLater(work)} aria-label={laterTitle} title={laterTitle}
-              style={{ width: 36, height: 32, background: 'var(--surface-2)', borderRadius: 'var(--radius-md)', flex: 'none' }}>
-              <Icon icon={laterIcon} size={18} />
+            <button className="btn btn-sm btn-surface btn-quiet" onClick={() => onLater(work)} title={laterTitle}
+              style={{ flex: 1, minWidth: 0 }}>
+              <Icon icon={laterIcon} size={16} /> {laterLabel}
             </button>
           )}
           {onSave ? (
@@ -136,20 +142,19 @@ export function SuggestionCard({ work, onSave, saveState = 'idle', onDismiss, on
                 if (saveState === 'saved' && onOpenInLibrary) onOpenInLibrary(work);
               }}
               disabled={saveState === 'queued' || (saveState === 'saved' && !onOpenInLibrary)}
-              style={{ minWidth: 104 }}
+              style={{ flex: 1, minWidth: 0 }}
               title={saveState === 'queued' ? 'Downloading — sync started'
                 : saveState === 'saved' ? 'Already in your library — tap to open it' : undefined}
             >
               {saveState === 'saved' ? <><Icon icon="solar:check-read-linear" size={16} /> In library</>
                 : saveState === 'queued' ? <><Icon icon="solar:clock-circle-linear" size={16} /> Queued</>
-                : <><Icon icon="solar:download-minimalistic-linear" size={16} /> Save</>}
+                : <><Icon icon="solar:download-minimalistic-linear" size={16} /> Download</>}
             </button>
           ) : (
-            <button className="btn btn-sm btn-flat" onClick={() => onOpen && onOpen(work)} style={{ minWidth: 92 }}>
+            <button className="btn btn-sm btn-flat" onClick={() => onOpen && onOpen(work)} style={{ flex: 1, minWidth: 0 }}>
               <Icon icon="solar:arrow-right-linear" size={16} /> {cta}
             </button>
           )}
-          </div>
         </div>
       </div>
     </div>

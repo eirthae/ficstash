@@ -1016,7 +1016,9 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
                 excludeTags={groupTagNames}
                 onSave={isSavableSource(w.source) ? save : null}
                 saveState={saveStateOf(w)}
-                onLater={() => later(w)}
+                // Nothing to set aside for later if it's already yours — the card
+                // gives "In library" the full row instead.
+                onLater={saveStateOf(w) === 'saved' ? null : () => later(w)}
                 onDismiss={() => dismiss(w)}
                 onOpen={() => (w.inLibrary ? openInLibrary(w) : nav.push('detail', { work: w, suggestion: true }))}
                 onOpenInLibrary={w.inLibrary ? openInLibrary : null}
@@ -1090,6 +1092,7 @@ export function LaterScreen({ nav, onLeave }) {
                 onLater={() => putBack(w)}
                 laterIcon="solar:undo-left-round-linear"
                 laterTitle="Send back to Discover"
+                laterLabel="Back to Discover"
                 onDismiss={() => remove(w)}
                 onOpen={() => (w.inLibrary ? openInLibrary(w) : nav.push('detail', { work: w, suggestion: true }))}
                 onOpenInLibrary={w.inLibrary ? openInLibrary : null}

@@ -258,6 +258,11 @@ input,textarea { font-family:inherit; }
 .btn-primary:hover { opacity:.92; }
 .btn-flat { background:var(--accent-soft); color:var(--accent); }
 .btn-surface { background:var(--surface-2); color:var(--text-primary); }
+/* A secondary action sitting beside a primary one. --text-primary is near-white
+   at weight 600, which read as loud as the Download button next to it; stepping
+   the whole button down to --text-secondary settles it. The icon carries no
+   color prop, so it inherits currentColor and dims with the label. */
+.btn-quiet { color:var(--text-secondary); }
 .btn-bordered { background:transparent; color:var(--text-primary); border:1.5px solid var(--border-strong); }
 .btn-block { width:100%; }
 /* flat text action — no fill, no stroke. State is shown by changing the icon,

@@ -37,7 +37,10 @@ export const WORKS = [
   {
     id: 'w2', source: 'ao3', title: 'Offside Hearts', author: 'northern_lights',
     fandom: 'Heated Rivalry – Rachel Reid', pairing: 'Shane Hollander/Ilya Rozanov',
-    summary: 'A retirement, a farmhouse in Vermont, and twenty years of learning how to be loud about something they spent a decade keeping quiet.',
+    // Stored the way the WORKER stores an AO3 summary — verbatim, leading
+    // newlines and all. With .summary's white-space:pre-line that rendered as a
+    // blank cavern under the byline until tidySummary trimmed it.
+    summary: '\n\n\nA retirement, a farmhouse in Vermont, and twenty years of learning how to be loud\n\n\n\nabout something they spent a decade keeping quiet.\n\n  ',
     tags: [T('Shane Hollander/Ilya Rozanov', 'relationship'), T('Established Relationship', 'freeform'), T('Domestic Fluff', 'freeform'), T('Post-Canon', 'freeform')],
     words: 41800, chapters: 9, chaptersTotal: 9, status: 'complete', updated: 'Mar 2',
     progress: 1, lastChapter: 9, palette: 4, inHistory: true, subscribed: true,
