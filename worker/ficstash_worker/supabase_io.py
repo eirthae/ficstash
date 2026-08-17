@@ -337,33 +337,53 @@ def fetch_tracked_groups(client: Client) -> list[dict]:
 
 
 def fetch_dismissed_work_ids(client: Client) -> set:
-    """source_work_ids the user dismissed in ANY tracked group. A dismissal is
-    global: a work that also matches another tracked tag shouldn't reappear there
-    once you've swiped it away once."""
+    """(source, source_work_id) the user dismissed in ANY tracked group. A dismissal
+    is global: a work that also matches another tracked tag shouldn't reappear there
+    once you've swiped it away once.
+
+    Carries the SOURCE, not the id alone. Ids are only unique within a source, so a
+    bare id matched AO3 work 12345 against Royal Road fiction 12345 — dismissing one
+    silently marked the other dismissed, which also dropped it out of the Later
+    stash the user had deliberately put it in. mark_matches_saved has always keyed
+    on both; this now matches it.
+    """
     resp = (
-        client.table("tag_matches").select("source_work_id").eq("dismissed", True).execute()
+        client.table("tag_matches")
+        .select("source, source_work_id")
+        .eq("dismissed", True)
+        .execute()
     )
-    return {r["source_work_id"] for r in (resp.data or []) if r.get("source_work_id")}
+    return {
+        (r.get("source") or "ao3", r["source_work_id"])
+        for r in (resp.data or [])
+        if r.get("source_work_id")
+    }
 
 
 def propagate_dismissals(client: Client) -> int:
     """Spread every dismissal across all tracked groups: a work dismissed in one
     group is marked dismissed in its rows under every OTHER group too, so it stops
-    appearing in those tags' feeds. DB-only, idempotent. Returns rows newly hidden."""
-    ids = list(fetch_dismissed_work_ids(client))
-    if not ids:
+    appearing in those tags' feeds. DB-only, idempotent. Returns rows newly hidden.
+
+    Batched per source, so an id can never match a different source's work.
+    """
+    by_source: dict[str, list[str]] = {}
+    for source, wid in fetch_dismissed_work_ids(client):
+        by_source.setdefault(source, []).append(wid)
+    if not by_source:
         return 0
     total = 0
-    for i in range(0, len(ids), 200):
-        batch = ids[i : i + 200]
-        resp = (
-            client.table("tag_matches")
-            .update({"dismissed": True, "seen": True})
-            .in_("source_work_id", batch)
-            .eq("dismissed", False)
-            .execute()
-        )
-        total += len(resp.data or [])
+    for source, ids in by_source.items():
+        for i in range(0, len(ids), 200):
+            resp = (
+                client.table("tag_matches")
+                .update({"dismissed": True, "seen": True})
+                .eq("source", source)
+                .in_("source_work_id", ids[i : i + 200])
+                .eq("dismissed", False)
+                .execute()
+            )
+            total += len(resp.data or [])
     return total
 
 

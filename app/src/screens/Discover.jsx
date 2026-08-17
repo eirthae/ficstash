@@ -1054,7 +1054,8 @@ export function LaterScreen({ nav, onLeave }) {
   const putBack = (w) => {
     setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
     unmarkLater(w.matchId || w.id).catch(() => {});
-    showToast('Back in Discover', 'solar:undo-left-round-linear');
+    showToast(w.groupId == null ? 'Removed' : 'Back in Discover',
+      w.groupId == null ? 'solar:trash-bin-trash-linear' : 'solar:undo-left-round-linear');
   };
   const save = (w) => {
     setItems((arr) => (arr || []).map((x) => (x.id === w.id ? { ...x, wanted: true } : x)));
@@ -1090,9 +1091,11 @@ export function LaterScreen({ nav, onLeave }) {
                 onSave={isSavableSource(w.source) ? save : null}
                 saveState={saveStateOf(w)}
                 onLater={() => putBack(w)}
-                laterIcon="solar:undo-left-round-linear"
-                laterTitle="Send back to Discover"
-                laterLabel="Back to Discover"
+                {...(w.groupId == null
+                  // Its tag group was deleted; the stash kept it, but there's no
+                  // feed to send it back to — so that action removes it instead.
+                  ? { laterIcon: 'solar:trash-bin-trash-linear', laterTitle: 'Remove from Later', laterLabel: 'Remove' }
+                  : { laterIcon: 'solar:undo-left-round-linear', laterTitle: 'Send back to Discover', laterLabel: 'Back to Discover' })}
                 onDismiss={() => remove(w)}
                 onOpen={() => (w.inLibrary ? openInLibrary(w) : nav.push('detail', { work: w, suggestion: true }))}
                 onOpenInLibrary={w.inLibrary ? openInLibrary : null}

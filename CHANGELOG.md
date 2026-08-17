@@ -4,6 +4,42 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-08-12 — The Later stash is yours, and it stays (v0.8.63)
+
+### Fixed
+
+- **Works set aside for Later could disappear without you deleting or downloading
+  them.** Three separate paths, none of them deliberate:
+  - **Editing a tag group wiped its Later items.** `updateGroup` deleted every
+    `tag_matches` row for the group before re-discovering. The intent was to drop
+    stale suggestions found under the *old* criteria; it took your curated picks
+    with them. Now excludes `later = true`.
+  - **Deleting a tag group cascaded them away** via `group_id ... on delete
+    cascade`. The stash belongs to you, not to the tag that happened to surface
+    the work, so `deleteGroup` now detaches Later rows first (migration `0028`
+    makes `group_id` nullable) and only the un-acted-on suggestions cascade. A
+    detached row has no feed to return to, so its "Back to Discover" action
+    becomes **Remove**, and a partial unique index keeps detached rows
+    one-per-work so the stash can't list the same story twice.
+  - **A cross-source id collision removed them silently.** `propagate_dismissals`
+    matched on the bare `source_work_id` with no source filter, so dismissing AO3
+    work `12345` also flagged Royal Road fiction `12345` as dismissed — and the
+    Later stash reads `dismissed = false`. Now keyed on `(source, id)`, matching
+    `mark_matches_saved` two definitions away, which always did.
+
+  The 30-day suggestion prune was already correct — it has always excluded
+  `later` / `saved` / `wanted` / `failed`, so time alone never removed anything.
+
+### Added
+
+- `worker/tests/test_dismissal_scope.py` — 7 tests; 4 fail against the old query.
+
+### Notes
+
+- **Migration `0028` must be applied** (run the *DB setup* workflow). Until it is,
+  `deleteGroup` logs a warning and falls back to the old behaviour rather than
+  refusing to delete the group.
+
 ## 2026-08-11 — The blank cavern above every summary (v0.8.62)
 
 ### Fixed

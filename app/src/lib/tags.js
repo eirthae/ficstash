@@ -53,6 +53,9 @@ function mapMatch(row) {
     matchId: row.id,
     source: row.source,
     sourceWorkId: row.source_work_id,
+    // null once the tag group that surfaced it was deleted — the row survives in
+    // the Later stash, but it has no feed to be sent back to.
+    groupId: row.group_id ?? null,
     title: row.title,
     author: row.author,
     fandom: row.fandom,
@@ -208,6 +211,29 @@ export async function addTagToGroup(groupId, tag) {
 
 export async function deleteGroup(id) {
   if (!hasSupabase) return;
+  // Detach the Later stash before the group goes, or `on delete cascade` takes it
+  // with the group. Setting them aside was a deliberate choice; untracking a tag
+  // isn't a decision to discard them. Everything un-acted-on still cascades away.
+  //
+  // Any work already detached by an earlier group deletion is dropped first —
+  // a partial unique index keeps the detached rows one-per-work, so the stash
+  // can't list the same story twice.
+  // Detaching needs migration 0028 (group_id nullable). Migrations are applied by
+  // a manual workflow here, so an app build can reach a database that hasn't had
+  // it yet — in that case the update fails and we fall back to the old behaviour
+  // rather than refusing to delete the group at all.
+  const { data: keep } = await supabase
+    .from('tag_matches').select('source, source_work_id')
+    .eq('group_id', id).eq('later', true);
+  if (keep && keep.length) {
+    for (const row of keep) {
+      await supabase.from('tag_matches').delete()
+        .is('group_id', null).eq('source', row.source).eq('source_work_id', row.source_work_id);
+    }
+    const { error: detachErr } = await supabase
+      .from('tag_matches').update({ group_id: null }).eq('group_id', id).eq('later', true);
+    if (detachErr) console.warn('Later stash not detached (migration 0028 pending):', detachErr.message);
+  }
   const { error } = await supabase.from('tracked_groups').delete().eq('id', id);
   if (error) throw error;
 }
@@ -238,7 +264,10 @@ export async function updateGroup(groupId, { label = '', tags, excludedTags = []
     .select()
     .single();
   if (error) throw error;
-  await supabase.from('tag_matches').delete().eq('group_id', groupId);
+  // Drop the un-reviewed suggestions found under the OLD rules — but not the ones
+  // you set aside for Later. Changing a group's criteria is a decision about what
+  // to surface next, not about the stash you already curated.
+  await supabase.from('tag_matches').delete().eq('group_id', groupId).eq('later', false);
   // Re-discover against the new criteria, on-device, so the tile refills now.
   try { await discoverGroup(data); } catch (e) { /* discovery is best-effort */ }
   return mapGroup(data);
@@ -311,8 +340,19 @@ export async function markLater(matchId) {
 }
 
 // Take a match back out of the Later stash (returns it to its group feed).
+//
+// A row detached by a deleted group has no feed to return to — clearing `later`
+// would leave it invisible and un-actionable forever, so it's removed instead.
+// The screen labels that button "Remove" for those, so nothing is a surprise.
 export async function unmarkLater(matchId) {
   if (!hasSupabase) return;
+  const { data } = await supabase
+    .from('tag_matches').select('group_id').eq('id', matchId).maybeSingle();
+  if (data && data.group_id == null) {
+    const { error: delErr } = await supabase.from('tag_matches').delete().eq('id', matchId);
+    if (delErr) throw delErr;
+    return;
+  }
   const { error } = await supabase
     .from('tag_matches')
     .update({ later: false })
