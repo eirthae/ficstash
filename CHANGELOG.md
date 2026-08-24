@@ -4,6 +4,35 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-08-17 — "Unread" sort on the library (v0.8.64)
+
+### Added
+
+- **An Unread sort on every library shelf.** Works you haven't read float to the
+  top under an "Unread · N" rule, newest-added first (what you'd actually reach
+  for next); everything already started sits below under "Already reading" in
+  last-read order. A grouping rather than a plain ordering, so the divider marks
+  where the two halves meet instead of the list just looking shuffled.
+- **Unread means never opened, or opened and abandoned within ~2 paragraphs.**
+  The threshold is an absolute `UNREAD_WORDS = 250`, not a percentage: two
+  paragraphs is ~5% of a 4k one-shot but ~0.25% of an 84k epic, so no single
+  percentage means "barely started" across a real shelf. Estimated words read
+  come from the per-chapter scroll fractions, divided by the work's chapter count
+  — one chapter of twenty reads as ~5%, not 100%. A second guard
+  (`readFraction < 0.5`) keeps a very short work you actually finished from
+  qualifying, since a 200-word drabble read end to end is under the word floor.
+
+### Notes
+
+- **Per-device.** It's built on the local reading positions (`fs-readpos`),
+  because the works table's `progress` / `last_chapter` columns exist but nothing
+  has ever written to them — the reader only saves locally. A fresh install or a
+  second device therefore sees the whole shelf as unread.
+- The unused `works.unread` column is untouched; it means something else and has
+  never been written either.
+- 10 new unit tests in `shelving.test.js` cover the threshold, the chapter-count
+  division, the short-work guard, both sort halves, and the count.
+
 ## 2026-08-12 — The Later stash is yours, and it stays (v0.8.63)
 
 ### Fixed

@@ -31,15 +31,74 @@ export function shelfOf(work) {
   return 'stories';
 }
 
+// ---- "have I actually read this?" ------------------------------------------
+// Built on the LOCAL reading positions (fs-readpos), because the works table's
+// `progress` / `last_chapter` columns exist but nothing ever writes to them —
+// the reader only saves locally. Per-device by nature: a fresh install sees the
+// whole shelf as unread.
+
+// Roughly two paragraphs. An absolute word count, not a percentage: 2 paragraphs
+// is ~5% of a 4k one-shot but ~0.25% of an 84k epic, so no single percentage
+// means "barely started" across a real library.
+export const UNREAD_WORDS = 250;
+
+// Fraction of a work you've read, from the per-chapter scroll fractions.
+// Divides by the chapter count so reading one chapter of twenty reads as ~5%,
+// not 100%. Falls back to the furthest chapter visited when the work's chapter
+// count is missing, so a bad count can't make a barely-read work look finished.
+export function readFraction(work, entry) {
+  const pcts = (entry && entry.chapters) || {};
+  const visited = Object.keys(pcts);
+  if (!visited.length) return 0;
+  const total = Math.max(
+    Number(work && work.chapters) || 0,
+    ...visited.map((n) => Number(n) || 0),
+    1,
+  );
+  const sum = visited.reduce((acc, n) => acc + (Number(pcts[n]) || 0), 0);
+  return Math.min(1, sum / total);
+}
+
+// Estimated words read. `words` is the whole work, so this scales the fraction.
+export function readWords(work, entry) {
+  return readFraction(work, entry) * (Number(work && work.words) || 0);
+}
+
+// Unread = never opened, or opened and abandoned within ~2 paragraphs.
+// The fraction guard keeps a very short work you actually finished from
+// qualifying: a 200-word drabble read end to end is under UNREAD_WORDS but is
+// plainly read.
+export function isUnread(work, entry) {
+  return readWords(work, entry) < UNREAD_WORDS && readFraction(work, entry) < 0.5;
+}
+
 // Sort a list without mutating it. Timestamps are ISO strings (sort as text).
 // 'default' keeps the incoming order.
-export function sortWorks(list, sort, lastRead = {}) {
+//
+// 'unread' is the odd one out: it's a grouping, not an ordering. Unread works
+// float to the top (newest-added first — what you'd actually reach for next) and
+// everything already started keeps its last-read order below.
+export function sortWorks(list, sort, lastRead = {}, readingPos = {}) {
   const arr = [...(list || [])];
   if (sort === 'added') arr.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   else if (sort === 'updated') arr.sort((a, b) => (b.sourceUpdated || '').localeCompare(a.sourceUpdated || ''));
   else if (sort === 'title') arr.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
   else if (sort === 'read') arr.sort((a, b) => (lastRead[b.id] || '').localeCompare(lastRead[a.id] || ''));
+  else if (sort === 'unread') {
+    arr.sort((a, b) => {
+      const au = isUnread(a, readingPos[a.id]);
+      const bu = isUnread(b, readingPos[b.id]);
+      if (au !== bu) return au ? -1 : 1;
+      if (au) return (b.createdAt || '').localeCompare(a.createdAt || '');
+      return (lastRead[b.id] || '').localeCompare(lastRead[a.id] || '');
+    });
+  }
   return arr;
+}
+
+// How many of these you haven't read — for the sort menu's count and the divider.
+export function countUnread(list, readingPos = {}) {
+  return (list || []).reduce((n, w) => n + (isUnread(w, readingPos[w.id]) ? 1 : 0), 0);
 }
 
 // Order section groups by the active sort: A–Z by name, 'default' by size, else

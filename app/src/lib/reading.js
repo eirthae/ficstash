@@ -38,6 +38,16 @@ function entry(m, workId) {
   return { chapters: {}, last: null, at: null };
 }
 
+// Every work's reading entry at once, normalised (legacy shapes migrated), keyed
+// by work id. The library's "Unread" sort needs progress for the WHOLE shelf, and
+// calling getReadingPos per work would re-parse localStorage once per row.
+export function getReadingMap() {
+  const raw = readAll();
+  const out = {};
+  for (const workId of Object.keys(raw)) out[workId] = entry(raw, workId);
+  return out;
+}
+
 // Where to resume the work as a whole (latest chapter touched + its scroll).
 export function getReadingPos(workId) {
   if (!workId) return null;

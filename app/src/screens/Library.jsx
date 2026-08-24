@@ -6,8 +6,8 @@ import { LibraryCard } from '../components/cards.jsx';
 import { syncNow } from '../lib/sync.js';
 import { fetchPendingLinks, removeRequest } from '../lib/links.js';
 import { removeWork, fetchGroupNames, setWorksGroup } from '../lib/library.js';
-import { getLastRead } from '../lib/reading.js';
-import { fandomName, workTagSet, shelfOf, sortWorks, orderGroups, groupFics } from '../lib/shelving.js';
+import { getLastRead, getReadingMap } from '../lib/reading.js';
+import { fandomName, workTagSet, shelfOf, sortWorks, orderGroups, groupFics, isUnread, countUnread } from '../lib/shelving.js';
 
 const SHELVES = [
   { id: 'fics', label: 'Fics' },
@@ -21,6 +21,7 @@ const SHELVES = [
 const SORT_OPTS = {
   default: { icon: 'solar:sort-vertical-linear', label: 'Default order' },
   updated: { icon: 'solar:clock-circle-linear', label: 'Last updated' },
+  unread: { icon: 'solar:bookmark-opened-linear', label: 'Unread' },
   added: { icon: 'solar:leaf-linear', label: 'Last added' },
   read: { icon: 'solar:book-linear', label: 'Last read' },
   title: { icon: 'solar:sort-from-top-to-bottom-linear', label: 'A–Z' },
@@ -30,6 +31,33 @@ const SORT_OPTS = {
 // The sort control itself lives in ui.jsx (Discover's feed uses it too); this
 // screen just supplies SORT_OPTS as its option set.
 const ShelfSort = (props) => <SortDropdown {...props} opts={SORT_OPTS} />;
+
+// A labelled rule where the Unread sort's two groups meet. Returns a header for
+// the first card of each group, null everywhere else — so a shelf that's all
+// unread (or all read) gets one heading, not a stray empty section.
+function SectionRule({ label, count }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 4 }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{label}</span>
+      {count != null && (
+        <span className="chip" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>{count}</span>
+      )}
+      <span style={{ flex: 1, height: 0, borderTop: '1px solid var(--border)' }}></span>
+    </div>
+  );
+}
+
+function unreadDividerBefore(list, i, readingPos, unreadCount) {
+  const mine = isUnread(list[i], readingPos[list[i].id]);
+  const prev = i === 0 ? null : isUnread(list[i - 1], readingPos[list[i - 1].id]);
+  if (i === 0) {
+    return mine
+      ? <SectionRule label="Unread" count={unreadCount} />
+      : <SectionRule label="Already reading" />;
+  }
+  if (prev && !mine) return <SectionRule label="Already reading" />;
+  return null;
+}
 
 // Advanced tag filter: pick tags from the shelf's own pool. Tapping a tag
 // requires it (AND across all required tags); the − button excludes it. A tag
@@ -222,7 +250,12 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
     : status === 'ongoing' ? shelfWorks.filter(w => w.status !== 'complete')
     : shelfWorks;
   const lastRead = getLastRead(); // re-read each render so it stays fresh after reading
-  const shown = sortWorks(statusFiltered, sort, lastRead);
+  // Per-chapter scroll positions, for the Unread sort. Read here (not per card)
+  // so the whole shelf costs one localStorage parse, and re-read each render so
+  // a work you just read drops out of Unread when you come back.
+  const readingPos = getReadingMap();
+  const shown = sortWorks(statusFiltered, sort, lastRead, readingPos);
+  const unreadCount = countUnread(statusFiltered, readingPos);
 
   // Pending link requests show on the shelf matching their source: AO3 links →
   // Fics, Royal Road / Scribble Hub / other → Stories. (They were all dumped on
@@ -263,8 +296,8 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   ) : null;
 
   const SORTS = isBooks
-    ? ['added', 'title', 'read']
-    : ['default', 'updated', 'added', 'read'];
+    ? ['added', 'title', 'read', 'unread']
+    : ['default', 'updated', 'added', 'read', 'unread'];
   // Keep sort valid when switching shelves (books has no 'default'/'updated').
   const activeSort = SORTS.includes(sort) ? sort : SORTS[0];
 
@@ -393,7 +426,17 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
             selectMode={selectMode} selected={selected} toggleIds={toggleIds} startSelect={startSelect} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13, padding: '0 20px 24px' }}>
-            {shown.map(w => <LibraryCard key={w.id} work={w} onOpen={open} onDelete={() => setPendingDelete(w)} />)}
+            {shown.map((w, i) => {
+              // The Unread sort groups rather than orders, so mark where the two
+              // groups meet — otherwise it just looks like an arbitrary shuffle.
+              const divider = sort === 'unread' ? unreadDividerBefore(shown, i, readingPos, unreadCount) : null;
+              return (
+                <div key={w.id} style={{ display: 'contents' }}>
+                  {divider}
+                  <LibraryCard work={w} onOpen={open} onDelete={() => setPendingDelete(w)} />
+                </div>
+              );
+            })}
           </div>
         )}
       </PullToRefresh>

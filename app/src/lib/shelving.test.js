@@ -4,6 +4,7 @@ import {
   fandomName, ficGroupName, workTagSet, shelfOf, sortWorks, orderGroups, groupFics,
   filterWorks, savedTypeOf, statusMatches, seriesWorksFrom, savedWorksFrom,
   passesGlobalPrefs, discoveryShelfForSource, excludedForShelf,
+  isUnread, readWords, readFraction, countUnread, UNREAD_WORDS,
 } from './shelving.js';
 
 // ---- fandomName -----------------------------------------------------------
@@ -208,4 +209,92 @@ test('savedWorksFrom keeps origin=tag, newest first', () => {
     { id: 'c', origin: 'tag', createdAt: '2026-03-01' },
   ];
   assert.deepEqual(savedWorksFrom(works).map((w) => w.id), ['c', 'a']);
+});
+
+// ---- unread ----------------------------------------------------------------
+// Built on the LOCAL per-chapter scroll fractions: the works table's progress /
+// last_chapter columns exist but nothing ever writes to them.
+
+const pos = (chapters) => ({ chapters, last: null, at: null });
+
+test('a work never opened is unread', () => {
+  const w = { id: 'a', words: 4000, chapters: 1 };
+  assert.equal(isUnread(w, undefined), true);
+  assert.equal(readWords(w, undefined), 0);
+});
+
+test('opened and abandoned within ~2 paragraphs is unread', () => {
+  // 5% of a 4k one-shot is ~200 words — about two paragraphs.
+  const w = { id: 'a', words: 4000, chapters: 1 };
+  assert.equal(Math.round(readWords(w, pos({ 1: 0.05 }))), 200);
+  assert.equal(isUnread(w, pos({ 1: 0.05 })), true);
+});
+
+test('one chapter into a long fic is NOT unread', () => {
+  // The bug a percentage threshold would cause: 1 of 22 chapters is only 4.5%
+  // of the work, but it is ~1900 words — plainly started.
+  const w = { id: 'a', words: 84000, chapters: 22 };
+  const read = readWords(w, pos({ 1: 1 }));
+  assert.ok(read > 3000, `expected >3000 words, got ${Math.round(read)}`);
+  assert.equal(isUnread(w, pos({ 1: 1 })), false);
+});
+
+test('a short work read end to end is not unread, despite being under the word floor', () => {
+  // A 200-word drabble read fully is below UNREAD_WORDS; the fraction guard is
+  // what stops it being reported as untouched.
+  const w = { id: 'a', words: 200, chapters: 1 };
+  assert.ok(readWords(w, pos({ 1: 1 })) < UNREAD_WORDS);
+  assert.equal(isUnread(w, pos({ 1: 1 })), false);
+});
+
+test('readFraction divides by chapter count, not by chapters visited', () => {
+  const w = { id: 'a', words: 1000, chapters: 10 };
+  assert.equal(readFraction(w, pos({ 1: 1 })), 0.1);
+  assert.equal(readFraction(w, pos({ 1: 1, 2: 1 })), 0.2);
+});
+
+test('readFraction survives a missing or wrong chapter count', () => {
+  // Falls back to the furthest chapter visited, so a null count cannot make a
+  // barely-read work look finished.
+  const w = { id: 'a', words: 1000, chapters: null };
+  assert.equal(readFraction(w, pos({ 4: 1 })), 0.25);
+  assert.ok(readFraction({ id: 'a', words: 1000, chapters: 1 }, pos({ 1: 1, 2: 1, 3: 1 })) <= 1);
+});
+
+test('unread sort floats unread to the top, newest-added first', () => {
+  const works = [
+    { id: 'read', words: 10000, chapters: 1, createdAt: '2026-01-01' },
+    { id: 'old-unread', words: 10000, chapters: 1, createdAt: '2026-01-02' },
+    { id: 'new-unread', words: 10000, chapters: 1, createdAt: '2026-08-01' },
+  ];
+  const rp = { read: pos({ 1: 0.9 }) };
+  const out = sortWorks(works, 'unread', {}, rp).map((w) => w.id);
+  assert.deepEqual(out, ['new-unread', 'old-unread', 'read']);
+});
+
+test('unread sort orders the already-read tail by last read', () => {
+  const works = [
+    { id: 'x', words: 10000, chapters: 1, createdAt: '2026-01-01' },
+    { id: 'y', words: 10000, chapters: 1, createdAt: '2026-01-01' },
+  ];
+  const rp = { x: pos({ 1: 0.9 }), y: pos({ 1: 0.9 }) };
+  const lastRead = { x: '2026-01-01', y: '2026-08-01' };
+  assert.deepEqual(sortWorks(works, 'unread', lastRead, rp).map((w) => w.id), ['y', 'x']);
+});
+
+test('sortWorks does not mutate, and unread needs no positions to work', () => {
+  const works = [{ id: 'a', words: 100, chapters: 1 }, { id: 'b', words: 100, chapters: 1 }];
+  const before = works.map((w) => w.id);
+  sortWorks(works, 'unread');
+  assert.deepEqual(works.map((w) => w.id), before);
+});
+
+test('countUnread counts only the unread ones', () => {
+  const works = [
+    { id: 'a', words: 10000, chapters: 1 },
+    { id: 'b', words: 10000, chapters: 1 },
+    { id: 'c', words: 10000, chapters: 1 },
+  ];
+  assert.equal(countUnread(works, { a: pos({ 1: 0.9 }) }), 2);
+  assert.equal(countUnread([], {}), 0);
 });
