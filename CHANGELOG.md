@@ -4,6 +4,31 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-09-13 — Fix: one transient Supabase error killed the whole nightly (v0.8.65)
+
+### Fixed
+
+- **The 2026-09-12 nightly died 19 minutes in, before discovery ran.** Supabase
+  answered a one-row `followed_series` UPDATE (`mark_series_checked`) with a
+  `504 Gateway Timeout` — a transient PostgREST hiccup, not a bad request — and
+  the worker had no retry anywhere, so the error propagated straight out of
+  `main()`. Two layers now:
+  - **`retry_transient`** in `supabase_io.py`: 502/503/504 and dropped-connection
+    errors get four attempts with 2s/4s/8s backoff. Deliberately narrow — a 4xx
+    or a constraint violation means the request itself is wrong, so those still
+    fail fast. Applied to the bookkeeping writes that run inside long loops
+    (`mark_series_checked`, `delete_series_follow`, `mark_group_checked`).
+  - **The series pass no longer lets bookkeeping be fatal.** Every other pass
+    already kept its `mark_*_checked` inside the per-item try; the series pass
+    was the one that didn't. The downloads are committed before the stamp, so a
+    failed stamp just means "re-attempt next run" — it now logs and moves on,
+    the same way the discovery pass always has.
+
+### Added
+
+- `worker/tests/test_retry_transient.py` — 12 tests, including the exact 504
+  payload from the failed run, and a check that a 400 is *not* retried.
+
 ## 2026-08-17 — "Unread" sort on the library (v0.8.64)
 
 ### Added

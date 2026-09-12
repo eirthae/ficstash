@@ -28,6 +28,58 @@ def make_client() -> Client:
     return create_client(url, key)
 
 
+# ---- transient-error retry ---------------------------------------------------
+# PostgREST occasionally answers a perfectly good request with a 502/503/504 —
+# the 2026-09-12 nightly died on a 504 "Gateway Timeout" for a one-row UPDATE,
+# nineteen minutes in and before discovery had run. Nothing was wrong with the
+# request; retrying it a moment later would have succeeded. So writes on the hot
+# path go through here: a handful of attempts with a short backoff, and only for
+# errors that are transient by nature. Anything else raises immediately.
+
+_TRANSIENT_HTTP = {502, 503, 504}
+_RETRY_ATTEMPTS = 4
+_RETRY_BASE_SECONDS = 2.0
+
+
+def is_transient_error(exc: BaseException) -> bool:
+    """True for the failures worth retrying: gateway/upstream timeouts and dropped
+    connections. Deliberately narrow — a 4xx or a constraint violation means the
+    request itself is wrong, and retrying it just repeats the mistake."""
+    code = getattr(exc, "code", None)
+    try:
+        if int(code) in _TRANSIENT_HTTP:
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(exc).lower()
+    if any(f'"code":{c}' in text.replace(" ", "") or f"'code': {c}" in text for c in _TRANSIENT_HTTP):
+        return True
+    if "gateway timeout" in text or "bad gateway" in text or "service unavailable" in text:
+        return True
+    name = type(exc).__name__.lower()
+    return any(k in name for k in ("timeout", "connecterror", "remoteprotocol", "readerror", "connectionreset"))
+
+
+def retry_transient(fn, *, what: str = "supabase call", attempts: int = _RETRY_ATTEMPTS, sleep=None):
+    """Run `fn()`, retrying transient failures with a growing pause between tries.
+    `sleep` is injectable so tests don't wait. Re-raises the last error once the
+    attempts are spent, so a real outage still surfaces instead of hiding."""
+    import time as _time
+    do_sleep = sleep or _time.sleep
+    last: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            if not is_transient_error(exc) or attempt == attempts:
+                raise
+            last = exc
+            wait = _RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+            print(f"    {what}: transient error ({type(exc).__name__}), retry {attempt}/{attempts - 1} in {wait:.0f}s")
+            do_sleep(wait)
+    raise last  # pragma: no cover — loop always returns or raises
+
+
 def _relative_label(iso: str | None) -> str | None:
     """Turn an ISO timestamp into a short human label like '3 days ago'."""
     if not iso:
@@ -489,9 +541,12 @@ def upsert_tag_matches(
 
 def mark_group_checked(client: Client, group_id: str) -> None:
     """Record that the worker just searched this group."""
-    client.table("tracked_groups").update(
-        {"last_checked": datetime.now(timezone.utc).isoformat()}
-    ).eq("id", group_id).execute()
+    retry_transient(
+        lambda: client.table("tracked_groups").update(
+            {"last_checked": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", group_id).execute(),
+        what=f"mark_group_checked {group_id}",
+    )
 
 
 def mark_flag(
@@ -858,12 +913,18 @@ def mark_series_checked(
         patch["series_name"] = name
     if count is not None:
         patch["work_count"] = int(count)
-    client.table("followed_series").update(patch).eq("series_id", series_id).execute()
+    retry_transient(
+        lambda: client.table("followed_series").update(patch).eq("series_id", series_id).execute(),
+        what=f"mark_series_checked {series_id}",
+    )
 
 
 def delete_series_follow(client: Client, series_id: str) -> None:
     """Drop a followed_series row (used after a one-shot 'download all')."""
-    client.table("followed_series").delete().eq("series_id", series_id).execute()
+    retry_transient(
+        lambda: client.table("followed_series").delete().eq("series_id", series_id).execute(),
+        what=f"delete_series_follow {series_id}",
+    )
 
 
 # ---- What's New retention (keep the feed to a recent window) ----------------

@@ -457,11 +457,21 @@ def run_ao3_series_pass(db, ao3, space, backoff) -> None:
                 got += 1
             except Exception as exc:  # noqa: BLE001
                 print(f"    series work {wid} skipped ({type(exc).__name__}: {exc})")
-        mark_series_checked(db, sid, name=sname, count=len(works))
+        # Bookkeeping, not the work itself: the downloads above are already
+        # committed. A failure here (the 2026-09-12 nightly died on a Supabase
+        # 504 for exactly this UPDATE) must not take the rest of the sweep with
+        # it — the stamp is simply re-attempted next run.
+        try:
+            mark_series_checked(db, sid, name=sname, count=len(works))
+        except Exception as exc:  # noqa: BLE001
+            print(f"    series {sid}: could not stamp last_checked ({type(exc).__name__}: {exc}); next run will.")
         print(f"    series {sid} '{sname}': +{got} work(s) of {len(works)} total{' (more next run)' if hit_cap else ''}.")
         # A one-shot "download all" drops out once everything's pulled.
         if not srow.get("follow") and not hit_cap:
-            delete_series_follow(db, sid)
+            try:
+                delete_series_follow(db, sid)
+            except Exception as exc:  # noqa: BLE001
+                print(f"    series {sid}: could not drop one-shot row ({type(exc).__name__}: {exc}); next run will.")
 
 
 _run_deadline: float | None = None
