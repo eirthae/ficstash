@@ -377,12 +377,22 @@ def upsert_work(
 
 
 def fetch_tracked_groups(client: Client) -> list[dict]:
-    """Return the user's tracked tag groups (created in-app)."""
+    """Return the user's tracked tag groups (created in-app).
+
+    Least-recently-checked FIRST (never-checked ahead of everything). With no
+    ORDER BY at all, PostgREST returned a stable order, so a budget-truncated
+    discovery pass re-did the same head every night and the tail NEVER updated —
+    17 of 17 groups were identical across two consecutive nightlies, with ~27 of
+    46 groups permanently starved. Stalest-first makes truncation fair: the ones
+    missed this run are the ones that go first next run.
+    """
     resp = (
         client.table("tracked_groups")
         .select(
             "id,label,tags,excluded_tags,match_mode,source,status,last_checked,created_at"
         )
+        .order("last_checked", desc=False, nullsfirst=True)
+        .order("created_at")
         .execute()
     )
     return list(resp.data or [])
@@ -889,10 +899,17 @@ def fetch_stale_offline_works(
 
 # ---- AO3 series (follow / download-all queue) ------------------------------
 def fetch_followed_series(client: Client) -> list[dict]:
-    """Rows in followed_series: series the user asked to download / follow."""
+    """Rows in followed_series: series the user asked to download / follow.
+
+    Least-recently-checked FIRST (never-checked ahead of everything). Ordering by
+    created_at meant a budget-truncated sweep always stopped at the same place,
+    so the tail of the list was never reached at all. Starting with the stalest
+    guarantees rotation: whatever ran out of time last run goes first next run.
+    """
     resp = (
         client.table("followed_series")
         .select("id,series_id,series_name,follow,last_checked,created_at,work_count")
+        .order("last_checked", desc=False, nullsfirst=True)
         .order("created_at")
         .execute()
     )

@@ -1,11 +1,12 @@
 import { supabase, hasSupabase } from './supabase.js';
 import { runSync } from './ondevice.js';
 
-// The PRIMARY sync now: run AO3 discovery + downloads ON-DEVICE (residential IP,
-// which AO3 answers), writing straight to Supabase. This is what pull-to-refresh
-// calls instead of the old worker round-trip — no GitHub Actions dispatch, no 525.
-// The worker still runs on its schedule for non-AO3 sources + ongoing refresh.
-// Never throws (runSync catches); returns { ok, newMatches, saved }.
+// Pull-to-refresh: finish pending downloads ON-DEVICE (residential IP, which AO3
+// answers) — the links you pasted and the works you tapped Save on. That's what
+// a pull is actually for: "I saved this a few minutes ago and it still isn't
+// here." It no longer re-runs discovery, series follows or new-chapter checks;
+// those are the scheduled worker's job, where the time budget and AO3 login are.
+// Never throws (runSync catches); returns { ok, saved, savesFailed }.
 export async function syncNow({ onProgress } = {}) {
   const r = await runSync({ onProgress });
   // Anything the device couldn't download (members-only / adult works a logged-out

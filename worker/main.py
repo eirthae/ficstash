@@ -317,6 +317,24 @@ def _saves_only() -> bool:
     return os.environ.get("SAVES_ONLY", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _series_sweep() -> str:
+    """Which series work this run does: 'full', 'skip', or 'only'.
+
+    Re-enumerating every followed series is the most expensive thing the worker
+    does — 108 follows at RATE_LIMIT_SECONDS apart, plus a download per new work.
+    Run nightly it consumed the entire time budget BEFORE discovery and refresh,
+    so tracked tags stopped updating and new chapters stopped being detected
+    altogether (three nights straight, Oct 14-16 2026).
+
+    So the sweep is split: the nightly run SKIPS series and spends its budget on
+    tags + new chapters, and a weekly run does series ONLY. A tapped "download
+    all" is unaffected — that goes through the saves-only fast lane, which has
+    always enumerated one-shot and never-checked series immediately.
+    """
+    raw = os.environ.get("SERIES_SWEEP", "").strip().lower()
+    return raw if raw in ("full", "skip", "only") else "full"
+
+
 def _reseed_tags() -> bool:
     """One-shot: re-run discovery ALL-TIME for every tracked group (ignore each
     group's last_checked) so existing matches get refreshed metadata — e.g. a
@@ -419,7 +437,16 @@ def run_ao3_series_pass(db, ao3, space, backoff) -> None:
             return
     offline_ids = fetch_offline_ao3_ids(db)
     series_cap = _series_max()
+    done = 0
     for srow in followed:
+        # The one heavy pass that used to run unbounded. Without this it spent the
+        # whole budget and the passes after it — discovery, then refresh — got
+        # nothing, which is how new chapters silently stopped being checked.
+        # Saves-only runs are exempt: that lane is tiny and must not defer a tap.
+        if not _saves_only() and not _within_budget():
+            print(f"  time budget reached — {len(followed) - done} series left for the next sweep.")
+            break
+        done += 1
         sid = (srow.get("series_id") or "").strip()
         if not sid:
             continue
@@ -493,8 +520,29 @@ def _start_run_clock() -> None:
     _run_deadline = time.monotonic() + mins * 60
 
 
-def _within_budget() -> bool:
-    return _run_deadline is None or time.monotonic() < _run_deadline
+def _refresh_reserve_seconds() -> int:
+    """Budget held back for the new-chapter refresh, which runs LAST.
+
+    Checking ongoing works for new chapters is the thing the library is for, but
+    it sits at the end of the sweep, so whenever anything earlier overran it got
+    nothing at all — three consecutive nightlies reported "0 updated, 0 unchanged,
+    0 failed" because it never started. Earlier passes now stop with this much
+    time left, so refresh always gets a turn. Tune with REFRESH_RESERVE_MINUTES.
+    """
+    raw = os.environ.get("REFRESH_RESERVE_MINUTES", "").strip()
+    try:
+        mins = max(0, int(raw)) if raw else 45
+    except ValueError:
+        mins = 45
+    return mins * 60
+
+
+def _within_budget(reserve_s: int = 0) -> bool:
+    """True while there's budget left. `reserve_s` holds time back for a later
+    pass, so an earlier one can't consume the whole run."""
+    if _run_deadline is None:
+        return True
+    return time.monotonic() < (_run_deadline - reserve_s)
 
 
 def main() -> None:
@@ -731,7 +779,17 @@ def main() -> None:
     # Part of the FAST lane: a "Download all works" tap should start fetching now,
     # like a Save — so this runs before the saves-only early-return below (and
     # therefore in saves-only runs too), not buried at the end of the full sweep.
-    run_ao3_series_pass(db, ao3, space, _with_backoff)
+    # The nightly run skips it (SERIES_SWEEP=skip) so its budget goes to tags and
+    # new chapters; the weekly run does series only. Saves-only runs always pass
+    # through, since that lane is what makes a "Download all" tap feel immediate.
+    if _saves_only() or _series_sweep() != "skip":
+        run_ao3_series_pass(db, ao3, space, _with_backoff)
+    else:
+        print("\n== AO3 series ==\nSkipped (weekly sweep handles follows; taps still run in the fast lane).")
+
+    if _series_sweep() == "only" and not _saves_only():
+        print("\n== Series-only run: follows swept; leaving tags + chapters to the nightly. ==")
+        return
 
     # ---- Repair stale "downloaded but empty" works -------------------------
     # Re-download OTHER works that got flagged offline before their chapter bodies
@@ -932,7 +990,7 @@ def main() -> None:
     if reseed:
         print("  RESEED_TAGS set → re-fetching ALL discover tags all-time (refreshes metadata; keeps your saved/seen/dismissed).")
     for g in groups:
-        if not _within_budget():
+        if not _within_budget(_refresh_reserve_seconds()):
             print("  time budget reached — stopping discovery; resumes next run.")
             break
         # First run (never checked) SEEDS the tag's whole back-catalogue: since
@@ -1089,7 +1147,7 @@ def main() -> None:
     print(f"{len(pending)} work(s) need offline copies (max {backfill_max or 'no cap'}).")
     bf_done = bf_failed = 0
     for row in pending:
-        if not _within_budget():
+        if not _within_budget(_refresh_reserve_seconds()):
             print("    time budget reached — stopping backfill; resumes next run.")
             break
         wid = row["source_work_id"]
@@ -1156,7 +1214,7 @@ def main() -> None:
     )
     rf_done = rf_failed = 0
     for wid in reflow_ids:
-        if not _within_budget():
+        if not _within_budget(_refresh_reserve_seconds()):
             print("    time budget reached — stopping reflow; resumes next run.")
             break
         if wid in have_offline:

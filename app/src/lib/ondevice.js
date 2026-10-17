@@ -523,27 +523,34 @@ export async function processFollowedSeries({ onProgress } = {}) {
 // The full on-device pass: discover across tracked AO3 groups, fetch pending AO3
 // links + wanted saves, pull followed series, and refresh ongoing works for new
 // chapters — all on the phone, written to Supabase. Returns a small summary.
+// Pull-to-refresh: finish what YOU just asked for, and nothing else.
+//
+// This used to run the entire nightly sweep on the phone — every tracked group
+// re-searched, all ~108 followed series re-enumerated, every ongoing work
+// re-checked — which is minutes of hammering AO3 from a handset, usually on
+// mobile data. But a pull-to-refresh is almost always "I tapped Save a few
+// minutes ago and it still isn't here", so now it only completes pending
+// downloads: links you pasted and works you saved from a tag.
+//
+// Discovery, series follows and new-chapter checks belong to the scheduled
+// worker, which has the time budget, the rate-limit spacing and an AO3 login.
+// They're still exported for the paths that genuinely need them (creating or
+// editing a group re-discovers that one group; series.js drives a "download
+// all" tap), just not from a pull.
 export async function runSync({ onProgress } = {}) {
   if (!hasSupabase) return { ok: false, error: 'Not connected' };
-  let newMatches = 0, saved = 0, savesFailed = 0, seriesAdded = 0, newChaptersCount = 0;
+  let saved = 0, savesFailed = 0;
   try {
-    // Downloads FIRST — pending links + tapped Saves — so a pull-to-refresh rescues
-    // works you saved against a fresh AO3, before the heavy discovery sweep hammers
-    // it. (Discovery used to run first, pre-throttling AO3 so the retry then failed.)
     const links = await processAo3Links({ onProgress });
     const dl = await downloadWanted({ onProgress });
     saved = links.done + dl.saved;
     // Works the device couldn't get (empty — likely members-only/adult that a
     // logged-out fetch can't read). syncNow escalates these to the logged-in worker.
     savesFailed = (links.failed || 0) + (dl.failed || 0);
-    const d = await discoverAll({ onProgress });
-    newMatches = d.newMatches;
-    const ser = await processFollowedSeries({ onProgress });
-    seriesAdded = ser.seriesAdded;
-    const ref = await refreshOngoing({ onProgress });
-    newChaptersCount = ref.newChapters;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
-  return { ok: true, newMatches, saved, savesFailed, seriesAdded, newChapters: newChaptersCount };
+  // newMatches/seriesAdded/newChapters stay in the shape for callers that read
+  // them; a pull no longer produces any, by design.
+  return { ok: true, newMatches: 0, saved, savesFailed, seriesAdded: 0, newChapters: 0 };
 }

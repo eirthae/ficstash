@@ -15,15 +15,26 @@ on:
         description: "Fast path: fetch only requested links + saves, then stop (real-time Save)"
         type: boolean
         default: false
+      series_sweep:
+        description: "AO3 series follows: full (with everything), skip (nightly), or only (weekly sweep)"
+        type: choice
+        options: ["full", "skip", "only"]
+        default: "full"
       reseed_tags:
         description: "Re-fetch ALL discover tags all-time (refresh metadata e.g. descriptions; keeps saved/seen/dismissed)"
         type: boolean
         default: false
   schedule:
-    # Daily at 03:00 Japan time (JST = UTC+9), i.e. 18:00 UTC. Moved earlier from
-    # 04:00 to give the (now all-time first-run) tag fetch more overnight headroom.
-    # AO3 is a volunteer nonprofit — keep this to once a day.
+    # NIGHTLY — tracked tags + new chapters. 03:00 Japan time (JST = UTC+9).
+    # Skips the AO3 series sweep: re-enumerating 108 follows every night ate the
+    # whole time budget before discovery and refresh ran, so tags stopped
+    # updating and new chapters stopped being detected entirely.
     - cron: "0 18 * * *"
+    # WEEKLY — AO3 series follows only. Friday 09:00 Japan time = Friday 00:00 UTC.
+    # The expensive pass gets its own long run instead of starving the nightly.
+    # A tapped "Download all" never waits for this: that goes through the
+    # saves-only fast lane, which enumerates new/one-shot series immediately.
+    - cron: "0 0 * * 5"
 
 # Don't let a scheduled run and a manual run hammer AO3 at the same time.
 # Saves-only (real-time Save) runs in their OWN lane so they fire immediately
@@ -38,11 +49,11 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Safety net so a genuinely wedged run can't hang to GitHub's 6-hour default,
-    # but generous enough that a heavy nightly full sweep (discovery + backfill of
-    # a big library) always finishes — a too-tight cap was cancelling the sweep
-    # mid-discovery, leaving some tracked tags empty. A healthy run is now minutes.
-    timeout-minutes: 180
+    # Safety net so a genuinely wedged run can't hang to GitHub's 6-hour default.
+    # Raised 180 -> 330: the library keeps growing, and the old cap meant the last
+    # passes (discovery, then new-chapter refresh) were simply dropped when time
+    # ran out. MAX_RUN_MINUTES below stops work cleanly well before this.
+    timeout-minutes: 330
     defaults:
       run:
         working-directory: worker
@@ -68,6 +79,14 @@ jobs:
           # "Re-check ALL works" toggle on a manual run → full library revamp.
           FULL_REFRESH: ${{ inputs.full_refresh && '1' || '' }}
           SAVES_ONLY: ${{ inputs.saves_only && '1' || '' }}
+          # Which series work this run does. The Friday 00:00 UTC schedule sweeps
+          # series ONLY; every other scheduled run skips them. A manual run
+          # defaults to 'full' (everything), matching the old behaviour.
+          SERIES_SWEEP: ${{ github.event_name == 'schedule' && (github.event.schedule == '0 0 * * 5' && 'only' || 'skip') || inputs.series_sweep || 'full' }}
+          # Clean-exit budget: the worker stops STARTING new work at this point so
+          # it shuts down tidily instead of being killed by timeout-minutes above.
+          # Tune via the repo variable MAX_RUN_MINUTES with no code change.
+          MAX_RUN_MINUTES: ${{ vars.MAX_RUN_MINUTES || '300' }}
           # One-shot: re-fetch every discover tag all-time so existing matches get
           # refreshed metadata (e.g. backfilled descriptions). Keeps saved/seen flags.
           RESEED_TAGS: ${{ inputs.reseed_tags && '1' || '' }}

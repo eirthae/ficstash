@@ -4,6 +4,58 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-17 — Fix: the series sweep was starving tags and new chapters (v0.8.66)
+
+### Fixed
+
+- **New chapters hadn't been checked for three nights, and most tracked tags had
+  stopped updating entirely.** The AO3 series pass was the only heavy pass with
+  no `_within_budget()` check. With 108 followed series re-enumerated every
+  night — plus a download per new work — it spent the whole 165-minute budget
+  before discovery and refresh ran. Oct 14-16 all logged
+  `Refresh ongoing: 0 updated, 0 unchanged, 0 failed`: the new-chapter check
+  never started. AO3 being slower after its outage is what tipped it from "just
+  fits" (Oct 13: 49 groups + refresh ran) to "doesn't fit at all".
+- **Roughly 27 of 46 tracked groups could never update, however often you
+  synced.** `fetch_tracked_groups` had no `ORDER BY`, so a budget-truncated
+  discovery pass re-did the same head of the list every run — Oct 15 and Oct 16
+  shared 17 of 17 groups, with zero new ones reached. Both groups and followed
+  series now come back **least-recently-checked first**, so truncation rotates
+  instead of cutting at the same place forever.
+- **The series pass now respects the time budget** and reports what it deferred.
+- **New-chapter checks are protected by a reserve.** Discovery, backfill and
+  reflow now stop with `REFRESH_RESERVE_MINUTES` (default 45) left, so the
+  refresh that runs last can never be squeezed out to nothing again.
+
+### Changed
+
+- **The sweep is split in two.** The nightly run (03:00 JST) does tracked tags +
+  new chapters and **skips series**. A new weekly run (**Friday 09:00 JST** =
+  Friday 00:00 UTC) sweeps **series only**. A tapped "Download all" is
+  unaffected — that has always gone through the saves-only fast lane, which
+  enumerates new and one-shot series immediately.
+- **Ceilings raised for headroom:** job `timeout-minutes` 180 → 330, and the
+  worker's clean-exit budget 165 → 300 (`MAX_RUN_MINUTES`, overridable as a repo
+  variable). The old cap silently dropped the *last* passes as the library grew.
+- **Pull-to-refresh only finishes what you asked for.** It used to run the whole
+  nightly sweep on the phone — every tracked group re-searched, all ~108 series
+  re-enumerated, every ongoing work re-checked — minutes of hammering AO3 from a
+  handset. A pull is almost always "I tapped Save and it still isn't here", so it
+  now completes pending links + saves and stops. Discovery, series and
+  new-chapter checks belong to the scheduled worker, which has the budget, the
+  spacing and the AO3 login.
+
+### Added
+
+- `worker/tests/test_run_budget.py` — 11 tests over the sweep modes and the
+  budget reserve.
+
+### Notes
+
+- GitHub delays scheduled workflows under load: over the audited week the
+  nightly actually started between 20:19 and 23:59 UTC against an 18:00 cron.
+  Nothing to fix there, but it's why a run can land hours later than expected.
+
 ## 2026-09-13 — Fix: one transient Supabase error killed the whole nightly (v0.8.65)
 
 ### Fixed
