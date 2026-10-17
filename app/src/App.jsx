@@ -14,6 +14,7 @@ import { LoginScreen } from './screens/Login.jsx';
 import { WORKS, NEW_CHAPTERS, NEW_MATCHES } from './data/sample.js';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { fetchWorks } from './lib/library.js';
+import { initReadingStore, absorbRemoteReadingTime } from './lib/reading.js';
 import { notifySavedAvailable, ensureNotifyPermission } from './lib/notify.js';
 import { supabase, hasSupabase } from './lib/supabase.js';
 
@@ -122,14 +123,28 @@ export default function App() {
     knownSaved.current = ids;
     if (fresh.length) notifySavedAvailable(fresh);
   };
+  // Reading history is hydrated from Capacitor Preferences (localStorage alone
+  // gets dropped by Android's WebView between cold starts, which was silently
+  // wiping what you'd read). Bumping this state after hydration re-renders the
+  // library so it sorts on the durable copy rather than the mirror.
+  // A revision counter, not a boolean: it has to re-render the tree EVERY time
+  // the reading store changes, not just the first time.
+  const [, bumpReading] = useState(0);
+  const refreshReading = () => bumpReading(n => n + 1);
+  useEffect(() => { initReadingStore().finally(refreshReading); }, []);
+
+  // works.read_seconds is the copy that survives a reinstall or a new device;
+  // fold it back into the device store whenever the library loads.
+  const absorb = (list) => { if (absorbRemoteReadingTime(list)) refreshReading(); };
+
   const reloadWorks = () => fetchWorks()
-    .then(r => { const list = r ?? WORKS; setWorks(list); noteSavedArrivals(list); })
+    .then(r => { const list = r ?? WORKS; setWorks(list); noteSavedArrivals(list); absorb(list); })
     .catch(() => setWorks(WORKS));
   useEffect(() => {
     if (!authed) { setWorks(null); return; } // wait until signed in to query
     let alive = true;
     fetchWorks()
-      .then(r => { if (alive) { const list = r ?? WORKS; setWorks(list); noteSavedArrivals(list); } })
+      .then(r => { if (alive) { const list = r ?? WORKS; setWorks(list); noteSavedArrivals(list); absorb(list); } })
       .catch(() => { if (alive) setWorks(WORKS); });
     // Ask for notification permission once, up front — otherwise the prompt only
     // appears the first time a saved work happens to arrive, which may be never.

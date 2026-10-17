@@ -4,7 +4,7 @@ import {
   fandomName, ficGroupName, workTagSet, shelfOf, sortWorks, orderGroups, groupFics,
   filterWorks, savedTypeOf, statusMatches, seriesWorksFrom, savedWorksFrom,
   passesGlobalPrefs, discoveryShelfForSource, excludedForShelf,
-  isUnread, readWords, readFraction, countUnread, UNREAD_WORDS,
+  isUnread, readWords, readFraction, countUnread, UNREAD_WORDS, UNREAD_SECONDS, readingStateFor,
 } from './shelving.js';
 
 // ---- fandomName -----------------------------------------------------------
@@ -219,7 +219,7 @@ const pos = (chapters) => ({ chapters, last: null, at: null });
 
 test('a work never opened is unread', () => {
   const w = { id: 'a', words: 4000, chapters: 1 };
-  assert.equal(isUnread(w, undefined), true);
+  assert.equal(isUnread(w, { entry: undefined }), true);
   assert.equal(readWords(w, undefined), 0);
 });
 
@@ -227,7 +227,7 @@ test('opened and abandoned within ~2 paragraphs is unread', () => {
   // 5% of a 4k one-shot is ~200 words — about two paragraphs.
   const w = { id: 'a', words: 4000, chapters: 1 };
   assert.equal(Math.round(readWords(w, pos({ 1: 0.05 }))), 200);
-  assert.equal(isUnread(w, pos({ 1: 0.05 })), true);
+  assert.equal(isUnread(w, { entry: pos({ 1: 0.05 }) }), true);
 });
 
 test('one chapter into a long fic is NOT unread', () => {
@@ -236,7 +236,7 @@ test('one chapter into a long fic is NOT unread', () => {
   const w = { id: 'a', words: 84000, chapters: 22 };
   const read = readWords(w, pos({ 1: 1 }));
   assert.ok(read > 3000, `expected >3000 words, got ${Math.round(read)}`);
-  assert.equal(isUnread(w, pos({ 1: 1 })), false);
+  assert.equal(isUnread(w, { entry: pos({ 1: 1 }) }), false);
 });
 
 test('a short work read end to end is not unread, despite being under the word floor', () => {
@@ -244,7 +244,7 @@ test('a short work read end to end is not unread, despite being under the word f
   // what stops it being reported as untouched.
   const w = { id: 'a', words: 200, chapters: 1 };
   assert.ok(readWords(w, pos({ 1: 1 })) < UNREAD_WORDS);
-  assert.equal(isUnread(w, pos({ 1: 1 })), false);
+  assert.equal(isUnread(w, { entry: pos({ 1: 1 }) }), false);
 });
 
 test('readFraction divides by chapter count, not by chapters visited', () => {
@@ -267,8 +267,7 @@ test('unread sort floats unread to the top, newest-added first', () => {
     { id: 'old-unread', words: 10000, chapters: 1, createdAt: '2026-01-02' },
     { id: 'new-unread', words: 10000, chapters: 1, createdAt: '2026-08-01' },
   ];
-  const rp = { read: pos({ 1: 0.9 }) };
-  const out = sortWorks(works, 'unread', {}, rp).map((w) => w.id);
+  const out = sortWorks(works, 'unread', {}, { readingPos: { read: pos({ 1: 0.9 }) } }).map((w) => w.id);
   assert.deepEqual(out, ['new-unread', 'old-unread', 'read']);
 });
 
@@ -277,9 +276,9 @@ test('unread sort orders the already-read tail by last read', () => {
     { id: 'x', words: 10000, chapters: 1, createdAt: '2026-01-01' },
     { id: 'y', words: 10000, chapters: 1, createdAt: '2026-01-01' },
   ];
-  const rp = { x: pos({ 1: 0.9 }), y: pos({ 1: 0.9 }) };
+  const stores = { readingPos: { x: pos({ 1: 0.9 }), y: pos({ 1: 0.9 }) } };
   const lastRead = { x: '2026-01-01', y: '2026-08-01' };
-  assert.deepEqual(sortWorks(works, 'unread', lastRead, rp).map((w) => w.id), ['y', 'x']);
+  assert.deepEqual(sortWorks(works, 'unread', lastRead, stores).map((w) => w.id), ['y', 'x']);
 });
 
 test('sortWorks does not mutate, and unread needs no positions to work', () => {
@@ -295,6 +294,71 @@ test('countUnread counts only the unread ones', () => {
     { id: 'b', words: 10000, chapters: 1 },
     { id: 'c', words: 10000, chapters: 1 },
   ];
-  assert.equal(countUnread(works, { a: pos({ 1: 0.9 }) }), 2);
+  assert.equal(countUnread(works, { readingPos: { a: pos({ 1: 0.9 }) } }), 2);
   assert.equal(countUnread([], {}), 0);
+});
+
+// ---- unread by TIME SPENT --------------------------------------------------
+// Time is the primary rule: scroll depth can't tell reading from flicking to the
+// bottom, and it disappears when the device drops localStorage.
+
+test('two minutes of reading marks a work read, whatever the scroll says', () => {
+  const w = { id: 'a', words: 84000, chapters: 22 };
+  assert.equal(isUnread(w, { seconds: UNREAD_SECONDS, tracked: true }), false);
+  assert.equal(isUnread(w, { seconds: 600, tracked: true, entry: pos({ 1: 0.01 }) }), false);
+});
+
+test('under two minutes with no real progress stays unread', () => {
+  const w = { id: 'a', words: 84000, chapters: 22 };
+  assert.equal(isUnread(w, { seconds: 119, tracked: true, entry: pos({ 1: 0.001 }) }), true);
+});
+
+test('a quick skim to the bottom does not count as read', () => {
+  // 20 seconds, scrolled far into chapter 1 of 22 — the case time exists to catch.
+  const w = { id: 'a', words: 84000, chapters: 22 };
+  assert.equal(isUnread(w, { seconds: 20, tracked: true, entry: pos({ 1: 0.02 }) }), true);
+});
+
+test('scroll still rescues a work whose time was never recorded', () => {
+  // Read before time tracking existed, but its positions survived.
+  const w = { id: 'a', words: 84000, chapters: 22 };
+  assert.equal(isUnread(w, { seconds: 0, tracked: false, entry: pos({ 1: 1, 2: 1 }) }), false);
+});
+
+test('opened before time tracking, with no surviving scroll, counts as read', () => {
+  // The backlog case: re-listing an entire library as unread is the worse error.
+  const w = { id: 'a', words: 84000, chapters: 22 };
+  assert.equal(isUnread(w, { seconds: 0, tracked: false, openedAt: '2026-01-01T00:00:00Z' }), false);
+});
+
+test('opened SINCE time tracking and bounced is unread, not excused', () => {
+  // tracked:true is what separates "bounced today" from "read last year".
+  const w = { id: 'a', words: 84000, chapters: 22 };
+  assert.equal(isUnread(w, { seconds: 4, tracked: true, openedAt: '2026-08-01T00:00:00Z' }), true);
+});
+
+test('never opened at all is unread', () => {
+  assert.equal(isUnread({ id: 'a', words: 4000, chapters: 1 }, {}), true);
+});
+
+// ---- readingStateFor -------------------------------------------------------
+
+test('readingStateFor prefers whichever time source is higher', () => {
+  // The device may have read more since the last push to the work row, and the
+  // row may hold history this device has never seen. Neither wins outright.
+  const w = { id: 'a', readSeconds: 300 };
+  assert.equal(readingStateFor(w, { readingTime: { a: 90 } }).seconds, 300);
+  assert.equal(readingStateFor({ id: 'a', readSeconds: 10 }, { readingTime: { a: 90 } }).seconds, 90);
+});
+
+test('readingStateFor reports tracked from either source', () => {
+  assert.equal(readingStateFor({ id: 'a' }, { readingTime: { a: 0 } }).tracked, true);
+  assert.equal(readingStateFor({ id: 'a', readSeconds: 30 }, {}).tracked, true);
+  assert.equal(readingStateFor({ id: 'a' }, {}).tracked, false);
+});
+
+test('a work read on another device is not listed as unread here', () => {
+  // works.read_seconds arrives with the library; the local store knows nothing.
+  const w = { id: 'a', words: 84000, chapters: 22, readSeconds: 900 };
+  assert.equal(isUnread(w, readingStateFor(w, {})), false);
 });

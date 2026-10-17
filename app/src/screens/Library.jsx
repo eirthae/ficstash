@@ -6,8 +6,8 @@ import { LibraryCard } from '../components/cards.jsx';
 import { syncNow } from '../lib/sync.js';
 import { fetchPendingLinks, removeRequest } from '../lib/links.js';
 import { removeWork, fetchGroupNames, setWorksGroup } from '../lib/library.js';
-import { getLastRead, getReadingMap } from '../lib/reading.js';
-import { fandomName, workTagSet, shelfOf, sortWorks, orderGroups, groupFics, isUnread, countUnread } from '../lib/shelving.js';
+import { getLastRead, getReadingMap, getReadingTime } from '../lib/reading.js';
+import { fandomName, workTagSet, shelfOf, sortWorks, orderGroups, groupFics, isUnread, countUnread, readingStateFor } from '../lib/shelving.js';
 
 const SHELVES = [
   { id: 'fics', label: 'Fics' },
@@ -47,9 +47,9 @@ function SectionRule({ label, count }) {
   );
 }
 
-function unreadDividerBefore(list, i, readingPos, unreadCount) {
-  const mine = isUnread(list[i], readingPos[list[i].id]);
-  const prev = i === 0 ? null : isUnread(list[i - 1], readingPos[list[i - 1].id]);
+function unreadDividerBefore(list, i, stores, unreadCount) {
+  const mine = isUnread(list[i], readingStateFor(list[i], stores));
+  const prev = i === 0 ? null : isUnread(list[i - 1], readingStateFor(list[i - 1], stores));
   if (i === 0) {
     return mine
       ? <SectionRule label="Unread" count={unreadCount} />
@@ -253,9 +253,9 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
   // Per-chapter scroll positions, for the Unread sort. Read here (not per card)
   // so the whole shelf costs one localStorage parse, and re-read each render so
   // a work you just read drops out of Unread when you come back.
-  const readingPos = getReadingMap();
-  const shown = sortWorks(statusFiltered, sort, lastRead, readingPos);
-  const unreadCount = countUnread(statusFiltered, readingPos);
+  const stores = { readingPos: getReadingMap(), readingTime: getReadingTime(), lastRead };
+  const shown = sortWorks(statusFiltered, sort, lastRead, stores);
+  const unreadCount = countUnread(statusFiltered, stores);
 
   // Pending link requests show on the shelf matching their source: AO3 links →
   // Fics, Royal Road / Scribble Hub / other → Stories. (They were all dumped on
@@ -429,7 +429,7 @@ export function LibraryScreen({ works, layout = 'fandom', connected = true, onRe
             {shown.map((w, i) => {
               // The Unread sort groups rather than orders, so mark where the two
               // groups meet — otherwise it just looks like an arbitrary shuffle.
-              const divider = sort === 'unread' ? unreadDividerBefore(shown, i, readingPos, unreadCount) : null;
+              const divider = sort === 'unread' ? unreadDividerBefore(shown, i, stores, unreadCount) : null;
               return (
                 <div key={w.id} style={{ display: 'contents' }}>
                   {divider}

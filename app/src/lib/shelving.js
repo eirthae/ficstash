@@ -32,10 +32,16 @@ export function shelfOf(work) {
 }
 
 // ---- "have I actually read this?" ------------------------------------------
-// Built on the LOCAL reading positions (fs-readpos), because the works table's
-// `progress` / `last_chapter` columns exist but nothing ever writes to them —
-// the reader only saves locally. Per-device by nature: a fresh install sees the
-// whole shelf as unread.
+// Three signals, in decreasing order of trust:
+//   1. time spent reading   — the honest one, and what the rule keys on
+//   2. per-chapter scroll   — how far you got; can't tell reading from skimming
+//   3. last-opened stamp    — only useful for works that predate time tracking
+//
+// Time lives on the device (Capacitor Preferences) AND on the work row
+// (works.read_seconds), so it survives a cold start, a reinstall, and a move to
+// another device. The device copy used to be localStorage alone, which Android's
+// WebView drops between cold starts — that is why already-read works kept
+// reappearing as unread.
 
 // Roughly two paragraphs. An absolute word count, not a percentage: 2 paragraphs
 // is ~5% of a 4k one-shot but ~0.25% of an 84k epic, so no single percentage
@@ -64,12 +70,43 @@ export function readWords(work, entry) {
   return readFraction(work, entry) * (Number(work && work.words) || 0);
 }
 
-// Unread = never opened, or opened and abandoned within ~2 paragraphs.
-// The fraction guard keeps a very short work you actually finished from
-// qualifying: a 200-word drabble read end to end is under UNREAD_WORDS but is
-// plainly read.
-export function isUnread(work, entry) {
-  return readWords(work, entry) < UNREAD_WORDS && readFraction(work, entry) < 0.5;
+// Two minutes of actual reading. Time is the honest signal — scroll depth can't
+// tell reading from flicking to the bottom — so it decides whenever we have it.
+export const UNREAD_SECONDS = 120;
+
+// Unread = you haven't really read it. `state` carries every signal we hold:
+//   seconds  — active reading time (the primary rule)
+//   tracked  — whether this work has a time record at all
+//   entry    — per-chapter scroll positions (the fallback)
+//   openedAt — last-opened timestamp
+//
+// Any ONE signal saying "read" is enough. They fail in different directions:
+// time misses a work read before we tracked it, scroll misses a work whose
+// positions were lost, so requiring both would under-report badly.
+export function isUnread(work, state = {}) {
+  const { seconds = 0, tracked = false, entry = undefined, openedAt = null } = state || {};
+  if (seconds >= UNREAD_SECONDS) return false;               // read it, by the clock
+  if (readWords(work, entry) >= UNREAD_WORDS) return false;   // got meaningfully far
+  if (readFraction(work, entry) >= 0.5) return false;         // short work, read through
+  // Opened before we recorded time, with no surviving scroll data: we genuinely
+  // cannot tell. Treat it as read — re-listing a whole back catalogue as unread
+  // is a far worse answer than quietly missing one you actually bounced off.
+  if (openedAt && !tracked) return false;
+  return true;
+}
+
+// Pull the signals for one work out of the three stores the library holds.
+export function readingStateFor(work, { readingPos = {}, readingTime = {}, lastRead = {} } = {}) {
+  const id = work && work.id;
+  const local = Number(readingTime[id]) || 0;
+  // works.read_seconds is the durable copy; whichever is higher is the truth.
+  const seconds = Math.max(local, Number(work && work.readSeconds) || 0);
+  return {
+    seconds,
+    tracked: readingTime[id] !== undefined || (Number(work && work.readSeconds) || 0) > 0,
+    entry: readingPos[id],
+    openedAt: lastRead[id] || null,
+  };
 }
 
 // Sort a list without mutating it. Timestamps are ISO strings (sort as text).
@@ -78,7 +115,7 @@ export function isUnread(work, entry) {
 // 'unread' is the odd one out: it's a grouping, not an ordering. Unread works
 // float to the top (newest-added first — what you'd actually reach for next) and
 // everything already started keeps its last-read order below.
-export function sortWorks(list, sort, lastRead = {}, readingPos = {}) {
+export function sortWorks(list, sort, lastRead = {}, stores = {}) {
   const arr = [...(list || [])];
   if (sort === 'added') arr.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   else if (sort === 'updated') arr.sort((a, b) => (b.sourceUpdated || '').localeCompare(a.sourceUpdated || ''));
@@ -86,8 +123,8 @@ export function sortWorks(list, sort, lastRead = {}, readingPos = {}) {
   else if (sort === 'read') arr.sort((a, b) => (lastRead[b.id] || '').localeCompare(lastRead[a.id] || ''));
   else if (sort === 'unread') {
     arr.sort((a, b) => {
-      const au = isUnread(a, readingPos[a.id]);
-      const bu = isUnread(b, readingPos[b.id]);
+      const au = isUnread(a, readingStateFor(a, stores));
+      const bu = isUnread(b, readingStateFor(b, stores));
       if (au !== bu) return au ? -1 : 1;
       if (au) return (b.createdAt || '').localeCompare(a.createdAt || '');
       return (lastRead[b.id] || '').localeCompare(lastRead[a.id] || '');
@@ -97,8 +134,8 @@ export function sortWorks(list, sort, lastRead = {}, readingPos = {}) {
 }
 
 // How many of these you haven't read — for the sort menu's count and the divider.
-export function countUnread(list, readingPos = {}) {
-  return (list || []).reduce((n, w) => n + (isUnread(w, readingPos[w.id]) ? 1 : 0), 0);
+export function countUnread(list, stores = {}) {
+  return (list || []).reduce((n, w) => n + (isUnread(w, readingStateFor(w, stores)) ? 1 : 0), 0);
 }
 
 // Order section groups by the active sort: A–Z by name, 'default' by size, else

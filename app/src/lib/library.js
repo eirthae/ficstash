@@ -33,6 +33,8 @@ function mapWork(row) {
     updated: row.updated_label,
     progress: row.progress,
     lastChapter: row.last_chapter,
+    readSeconds: Number(row.read_seconds) || 0, // durable copy of time spent reading
+
     palette: row.palette,
     frozen: row.frozen,
     frozenDate: row.frozen_date,
@@ -247,4 +249,21 @@ export async function fetchChapters(workId) {
     .order('n', { ascending: true });
   if (error) throw error;
   return (data || []).map(mapChapter);
+}
+
+// Push reading state to the work row, so "have I read this?" survives a
+// reinstall or a move to another device.
+//
+// The device copy (Capacitor Preferences) is the fast, offline, authoritative
+// one during a session; this is the durable backup, written when you leave the
+// reader rather than on every scroll. Best-effort by design: a failed write must
+// never interrupt reading, and the local copy still has the value.
+export async function saveReadingState(workId, { seconds, progress, lastChapter } = {}) {
+  if (!hasSupabase || !workId) return;
+  const patch = {};
+  if (Number.isFinite(seconds)) patch.read_seconds = Math.round(Math.max(0, seconds));
+  if (Number.isFinite(progress)) patch.progress = Math.max(0, Math.min(1, progress));
+  if (Number.isFinite(lastChapter)) patch.last_chapter = Math.max(0, Math.round(lastChapter));
+  if (!Object.keys(patch).length) return;
+  try { await supabase.from('works').update(patch).eq('id', workId); } catch { /* local copy stands */ }
 }

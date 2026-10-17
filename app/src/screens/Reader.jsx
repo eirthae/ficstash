@@ -4,7 +4,8 @@ import { Sheet, fmtWords } from '../components/ui.jsx';
 import { WORKS, CHAPTERS, READER_PARAS } from '../data/sample.js';
 import { fetchChapters, fetchSeriesWorks } from '../lib/library.js';
 import { hasSupabase } from '../lib/supabase.js';
-import { markRead, getReadingPos, getChapterPos, saveReadingPos } from '../lib/reading.js';
+import { markRead, getReadingPos, getChapterPos, saveReadingPos, addReadingTime, getReadingTime } from '../lib/reading.js';
+import { saveReadingState } from '../lib/library.js';
 import { sanitizeWorkSkin, chapterUsesSkin, neutralizeRemoteImages } from '../lib/workskin.js';
 
 export const READER_FONTS = [
@@ -35,10 +36,53 @@ function ChapterSkeleton() {
   );
 }
 
+// How often the reading clock banks time, and how long without a scroll or tap
+// before we stop counting. 3 minutes is generous enough for a slow reader on a
+// full screen, while still refusing to credit a phone left face-up.
+const READ_TICK_MS = 5000;
+const READ_IDLE_MS = 180000;
+
 export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterTitle, settings, setSettings, nav }) {
   const work = propWork || WORKS.find(w => w.id === workId) || WORKS[0];
   // Stamp this work as just-read (drives the library's "Last read" sort).
   useEffect(() => { markRead(work.id); }, [work.id]);
+
+  // ---- time actually spent reading ---------------------------------------
+  // What the library's Unread sort keys on, because it's the only honest answer
+  // to "did you read this?" — scroll depth can't tell reading from skimming to
+  // the bottom. Only counts while the screen is VISIBLE and you've interacted
+  // recently, so backgrounding the app or leaving the phone face-up banks
+  // nothing. Accumulates across sessions; flushed to the work row on exit so it
+  // survives a reinstall.
+  const activity = useRef(Date.now());       // last scroll/tap — drives the idle cutoff
+  const progressRef = useRef(0);             // overall fraction through the work
+  const chapterRef = useRef(chapterN || 1);  // chapter we're on, for the durable copy
+  useEffect(() => {
+    let last = Date.now();
+    addReadingTime(work.id, 0); // create the record: "opened since we track time"
+    const flush = () => {
+      const now = Date.now();
+      const active = document.visibilityState === 'visible'
+        && (now - activity.current) < READ_IDLE_MS;
+      // Cap the credit so a device waking from sleep can't bank the whole nap.
+      if (active) {
+        const secs = Math.min((now - last) / 1000, READ_TICK_MS / 1000 * 3);
+        banked.current += secs;
+        addReadingTime(work.id, secs);
+      }
+      last = now;
+    };
+    const onVis = () => { if (document.visibilityState === 'visible') { last = Date.now(); activity.current = Date.now(); } else flush(); };
+    const id = setInterval(flush, READ_TICK_MS);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+      flush(); // bank the tail, so even a short visit records real seconds
+      const totalSeconds = Number(getReadingTime()[work.id]) || 0;
+      saveReadingState(work.id, { seconds: totalSeconds, progress: progressRef.current, lastChapter: chapterRef.current });
+    };
+  }, [work.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Saved resume position (read once on mount): which chapter + how far down it.
   // An explicit chapterN (e.g. tapped a specific chapter) wins; otherwise resume.
   const savedPos = useRef(getReadingPos(work.id));
@@ -120,14 +164,24 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
       if (pct > 0 && max < 80 && tries < 25) { tries++; setTimeout(apply, 40); return; }
       node.scrollTop = max > 0 ? pct * max : 0;
       setScrollPct(pct);
+      // A chapter that fits the viewport fires no scroll event, so nothing would
+      // ever be recorded for it — it stayed "0% read" however long you looked at
+      // it. It's fully visible, so bank it as read on placement instead.
+      if (max <= 0) saveReadingPos(work.id, { chapter: cur, pct: 1 });
     };
     setTimeout(apply, 0);
   }, [cur, chapters, hasReal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScroll = (e) => {
     const el = e.target; const max = el.scrollHeight - el.clientHeight;
-    const pct = max > 0 ? Math.min(1, el.scrollTop / max) : 0;
+    // A chapter shorter than the viewport can't scroll — it's entirely on screen,
+    // so it's fully read, not 0% read. Reporting 0 made short chapters (drabbles,
+    // notes) look untouched forever.
+    const pct = max > 0 ? Math.min(1, el.scrollTop / max) : 1;
     setScrollPct(pct);
+    activity.current = Date.now();
+    progressRef.current = total > 0 ? Math.min(1, (cur - 1 + pct) / total) : pct;
+    chapterRef.current = cur;
     if (chrome) setChrome(false);
     // Persist where we are (throttled) so reopening resumes here.
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -135,6 +189,8 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
   };
   const goCh = (n) => {
     if (n < 1 || n > total) return;
+    activity.current = Date.now();
+    chapterRef.current = n;
     // Bank where we are in the chapter we're leaving, so returning restores it.
     saveReadingPos(work.id, { chapter: cur, pct: scrollPct });
     // Move the resume pointer to the new chapter without losing any scroll it
@@ -143,7 +199,7 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
     setCur(n);
   };
 
-  const onTS = (e) => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+  const onTS = (e) => { activity.current = Date.now(); touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
   const onTE = (e) => {
     if (!touch.current) return;
     const dx = e.changedTouches[0].clientX - touch.current.x;
