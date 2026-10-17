@@ -67,7 +67,6 @@ export function ReaderScreen({ work: propWork, workId, chapterN = null, chapterT
       // Cap the credit so a device waking from sleep can't bank the whole nap.
       if (active) {
         const secs = Math.min((now - last) / 1000, READ_TICK_MS / 1000 * 3);
-        banked.current += secs;
         addReadingTime(work.id, secs);
       }
       last = now;
