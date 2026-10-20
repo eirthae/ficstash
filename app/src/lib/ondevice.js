@@ -68,9 +68,11 @@ async function readDismissedKeys() {
 // ---- discovery -------------------------------------------------------------
 
 // Search AO3 for one group on-device and upsert its matches to Supabase. Returns
-// the number of rows written (0 on a miss — and no last_checked burn, since
-// on-device always fetches newest, never a date window). AO3-only; other sources
-// are skipped (the worker still handles them).
+// the number of rows written. A failed search throws out of searchTags and we
+// return BEFORE stamping last_checked — the comment here used to claim there was
+// "no last_checked burn", but the stamp ran unconditionally, so an unreadable AO3
+// marked the group checked anyway and a brand-new group lost its all-time seed.
+// AO3-only; other sources are skipped (the worker still handles them).
 export async function discoverGroup(group, prefs, dismissed) {
   if (!hasSupabase) return 0;
   const g = normGroup(group);
@@ -118,6 +120,12 @@ export async function discoverGroup(group, prefs, dismissed) {
       .upsert(rows, { onConflict: 'group_id,source,source_work_id' });
     if (error) throw error;
   }
+  // Stamp the group as checked ONLY because AO3 actually answered. searchTags
+  // throws when it didn't, so reaching here means an empty result is a real
+  // empty result. Stamping unconditionally is what silently broke newly added
+  // tags: a failed first search still marked the group checked, which turned its
+  // all-time back-catalogue seed into a one-day incremental window, and the tag
+  // then stayed at 0 forever.
   try { await supabase.from('tracked_groups').update({ last_checked: new Date().toISOString() }).eq('id', g.id); } catch (e) {}
   return rows.length;
 }

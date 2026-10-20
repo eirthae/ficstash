@@ -264,25 +264,28 @@ export function parseSearchResults(html) {
 export async function searchTags(include, exclude = [], page = 1) {
   const inc = (include || []).map((t) => String(t).trim()).filter(Boolean);
   if (!inc.length) return [];
-  try {
-    const r = await fetchHtml(searchUrl(inc, exclude, page));
-    if (!r || r.status !== 200) return [];
-    return parseSearchResults(r.html);
-  } catch (e) {
-    return [];
+  // THROWS when AO3 could not be read, and returns [] only when AO3 genuinely
+  // answered with no works. They used to be indistinguishable — both came back
+  // as [] — so a Cloudflare 525 looked exactly like "this tag has nothing", and
+  // the caller then stamped the group as checked. That turned a brand-new
+  // group's all-time back-catalogue seed into a one-day incremental window, and
+  // the tag stayed empty for good.
+  const r = await fetchHtml(searchUrl(inc, exclude, page));
+  if (!r || r.status !== 200) {
+    throw new Error(`AO3 unavailable (status ${r ? r.status : 'no response'})`);
   }
+  return parseSearchResults(r.html);
 }
 
 // Browse a whole AO3 language (newest first) — for "Browse by language" groups.
 export async function searchLanguage(code, page = 1) {
   if (!code) return [];
-  try {
-    const r = await fetchHtml(languageSearchUrl(code, page));
-    if (!r || r.status !== 200) return [];
-    return parseSearchResults(r.html);
-  } catch (e) {
-    return [];
+  // Throws on an unreadable AO3, [] only on a genuine empty result — see searchTags.
+  const r = await fetchHtml(languageSearchUrl(code, page));
+  if (!r || r.status !== 200) {
+    throw new Error(`AO3 unavailable (status ${r ? r.status : 'no response'})`);
   }
+  return parseSearchResults(r.html);
 }
 
 // AO3 tag autocomplete (the JSON endpoint), for the tracker's tag picker.

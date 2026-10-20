@@ -4,11 +4,69 @@ import Icon from '../components/Icon.jsx';
 import { StatusBadge, fmtWords, useToast, PullToRefresh, TagChip } from '../components/ui.jsx';
 import { totalLabel } from '../components/cards.jsx';
 import { fetchNewChapters, markChapterUpdateSeen } from '../lib/tags.js';
-import { fetchSavedWorks, removeWork } from '../lib/library.js';
+import { fetchSavedWorks, fetchSeriesUpdates, removeWork } from '../lib/library.js';
 import { syncNow } from '../lib/sync.js';
 import { savedTypeOf } from '../lib/shelving.js';
+import { hasSupabase } from '../lib/supabase.js';
+import { SERIES_UPDATES } from '../data/sample.js';
 
 const SAVED_TYPES = [{ id: 'all', label: 'All' }, { id: 'ao3', label: 'AO3' }, { id: 'stories', label: 'Stories' }, { id: 'books', label: 'Books' }];
+
+
+// A series that gained new works, with its works nested beneath it. The header
+// owns the works visually (one bordered card, tinted head, divided rows) so when
+// two series both update the same day there's no guessing which work is whose —
+// and the whole header is the tap target into that series.
+function SeriesUpdateGroup({ group, onOpenSeries, onOpenWork }) {
+  return (
+    <div className="seriesgroup">
+      <button className="seriesgroup-head pressable" onClick={() => onOpenSeries(group)}>
+        <Icon icon="solar:layers-minimalistic-bold" size={17} color="var(--accent)" />
+        <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+          <span className="seriesgroup-name">{group.seriesName}</span>
+          <span className="seriesgroup-sub">{group.items.length} new · {group.seriesTotal} works</span>
+        </span>
+        <Icon icon="solar:alt-arrow-right-linear" size={16} color="var(--accent)" />
+      </button>
+      {group.items.map((u) => (
+        <div key={u.id} className="seriesgroup-item pressable" onClick={() => onOpenWork(u)}>
+          {u.fresh && <span className="unew"></span>}
+          {/* Same shape as SavedWorkRow: a gapped flex column with the content
+              nudged clear of the .unew bar, rather than per-child margins. */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, paddingLeft: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span className="chip" style={{ background: 'var(--accent-soft)', color: 'var(--accent)', height: 20 }}>
+                Part {u.part}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginLeft: 'auto' }}>{u.time}</span>
+            </div>
+            <div className="story-title" style={{ fontSize: 14.5 }}>{u.title}</div>
+            <div className="story-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>by {u.author}</div>
+            {u.summary && <div className="summary" style={{ WebkitLineClamp: 2 }}>{u.summary}</div>}
+            <div className="metarow" style={{ marginTop: 4 }}>
+              <StatusBadge status={u.status} /><span>·</span><span>{fmtWords(u.words)}</span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Group a day's series updates by series, preserving feed order.
+function bySeries(items) {
+  const out = [];
+  const byId = new Map();
+  for (const u of items) {
+    let g = byId.get(u.seriesId);
+    if (!g) {
+      g = { seriesId: u.seriesId, seriesName: u.seriesName, seriesTotal: u.seriesTotal, items: [] };
+      byId.set(u.seriesId, g);
+      out.push(g);
+    }
+    g.items.push(u);
+  }
+  return out;
+}
 
 // shared row: a new chapter on a followed work
 function ChapterUpdateRow({ u, onOpen }) {
@@ -112,6 +170,18 @@ export function WhatsNewScreen({ chapters, nav }) {
   }, [bump]);
   const savedList = savedWorks || [];
 
+  // "In Series" feed: works that newly appeared in a series you follow. null
+  // until the fetch resolves (and when Supabase isn't configured), which is how
+  // the sample fallback stays confined to the demo build.
+  const [seriesRaw, setSeriesRaw] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetchSeriesUpdates()
+      .then((r) => { if (alive) setSeriesRaw(r); })
+      .catch(() => { if (alive) setSeriesRaw([]); });
+    return () => { alive = false; };
+  }, [bump]);
+
   // Pull-to-refresh: run the quick saves-only sync, held to completion so the
   // spinner stays until it's done, then re-fetch both feeds.
   const doSync = async () => { try { await syncNow(); } finally { setBump((b) => b + 1); } };
@@ -136,16 +206,23 @@ export function WhatsNewScreen({ chapters, nav }) {
     return order.filter(d => groups[d]).map(d => ({ day: d, items: groups[d] }));
   };
 
-  const active = tab === 'chapters' ? chapterList : filteredSaved;
+  // Real feed from Supabase; the sample set is the demo-build fallback ONLY —
+  // fetchSeriesUpdates returns null when Supabase isn't configured. Defaulting to
+  // the sample unconditionally would have put invented works in a real library.
+  const seriesList = seriesRaw ?? (hasSupabase ? [] : SERIES_UPDATES);
+  const active = tab === 'chapters' ? chapterList : tab === 'series' ? seriesList : filteredSaved;
   return (
     <div className="screen">
-      <Appbar large title="What's New" sub={`${chapterList.length + savedList.length} updates`} />
+      <Appbar large title="What's New" sub={`${chapterList.length + savedList.length + seriesList.length} updates`} />
       <div className="wn-seg" style={{ marginBottom: 16 }}>
         <button className={tab === 'saved' ? 'on' : ''} onClick={() => setTab('saved')}>
-          New works <span className="pill">{savedList.length}</span>
+          Works <span className="pill">{savedList.length}</span>
         </button>
         <button className={tab === 'chapters' ? 'on' : ''} onClick={() => setTab('chapters')}>
-          New chapters <span className="pill">{chapterList.length}</span>
+          Chapters <span className="pill">{chapterList.length}</span>
+        </button>
+        <button className={tab === 'series' ? 'on' : ''} onClick={() => setTab('series')}>
+          In Series <span className="pill">{seriesList.length}</span>
         </button>
       </div>
       <PullToRefresh className="scroll fade-enter" key={tab} onRefresh={doSync} style={{ padding: '0 20px 24px' }}>
@@ -161,16 +238,24 @@ export function WhatsNewScreen({ chapters, nav }) {
 
         {active.length === 0 && (
           <div style={{ padding: '28px 8px', textAlign: 'center', fontSize: 13, lineHeight: 1.55, color: 'var(--text-tertiary)' }}>
-            {tab === 'chapters' ? 'No new chapters.' : 'Nothing saved yet.'}
+            {tab === 'chapters' ? 'No new chapters.'
+              : tab === 'series' ? 'No new works in the series you follow.'
+              : 'Nothing saved yet.'}
           </div>
         )}
         {days(active).map(g => (
           <div key={g.day} style={{ marginBottom: 18 }}>
             <div className="daygroup" style={{ marginBottom: 10 }}>{g.day}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {g.items.map(u => tab === 'chapters'
-                ? <ChapterUpdateRow key={u.id} u={u} onOpen={openChapter} />
-                : <SavedWorkRow key={u.id} w={u} onOpen={openSaved} onRemove={removeSaved} />)}
+              {tab === 'series'
+                ? bySeries(g.items).map(grp => (
+                    <SeriesUpdateGroup key={grp.seriesId} group={grp}
+                      onOpenSeries={(x) => nav.push('series', { seriesId: x.seriesId, seriesName: x.seriesName, onReload: () => setBump((b) => b + 1) })}
+                      onOpenWork={(u) => nav.push('reader', { work: u.work, workId: u.workId })} />
+                  ))
+                : g.items.map(u => tab === 'chapters'
+                  ? <ChapterUpdateRow key={u.id} u={u} onOpen={openChapter} />
+                  : <SavedWorkRow key={u.id} w={u} onOpen={openSaved} onRemove={removeSaved} />)}
             </div>
           </div>
         ))}

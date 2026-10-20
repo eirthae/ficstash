@@ -4,6 +4,50 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-20 — "In Series" tab; newly tracked tags stuck at zero (v0.8.68)
+
+### Added
+
+- **A third What's New tab: [Works] [Chapters] [In Series].** Works that newly
+  appeared in a series you follow, grouped under a tappable series header
+  ("2 new · 9 works") that opens the Series screen. Each work shows its part
+  number, so reading order is obvious. No new table or worker pass was needed —
+  the series sweep already stores these with `origin='series'` and the AO3 series
+  id/name/part, so "new in series" is just "recently added by that pass".
+- The feed window is **8 days** (`SERIES_FEED_DAYS`), not the Saved feed's 5,
+  because the series sweep now runs **weekly** (Friday 09:00 JST). At 5 days the
+  tab would be empty from Wednesday until the next sweep.
+
+### Fixed
+
+- **A newly tracked tag could sit at 0 matches forever.** `searchTags` returned
+  `[]` for both "AO3 says no works" and "AO3 was unreadable", so a Cloudflare 525
+  looked exactly like an empty tag — and `discoverGroup` stamped
+  `last_checked` **unconditionally**. That turned a brand-new group's all-time
+  back-catalogue seed into a one-day incremental window, permanently. (The code
+  comment claimed there was "no last_checked burn"; there was.) `searchTags` and
+  `searchLanguage` now **throw** when AO3 can't be read and return `[]` only for a
+  genuine empty result, and the stamp is reached only when AO3 actually answered.
+  Migration `0031` repairs existing damage by clearing `last_checked` on any group
+  with zero matches, so the worker re-seeds it all-time.
+- **The fresh-work marker never rendered in the new tab.** `.unew` was scoped
+  `.update .unew`, so the span inside a series row was unstyled and invisible.
+  The rule is now shared rather than duplicated.
+
+### Notes
+
+- UI audited against the existing rows rather than eyeballed: the series card's
+  computed radius, shadow, surface and border are **identical** to `.update`, and
+  the row body reuses `SavedWorkRow`'s structure (gapped flex column, `paddingLeft:4`
+  to clear the fresh bar) and its chip / timestamp / title / summary treatments.
+  Four drifts were corrected along the way — a border instead of the card shadow,
+  off-scale padding (`10px 13px` → `12px`), `11px` + `opacity:.8` on the subtitle
+  (→ `11.5px` and a colour token, since opacity produced a shade outside the token
+  set that drifts between light and dark), and a `9px` gap (→ `10px`).
+- On a multi-tag "any" group, one failing tag now discards that run's partial
+  results — but the group isn't stamped, so it retries with the same window.
+  Previously the partial results were kept AND stamped, losing the rest for good.
+
 ## 2026-10-20 — Fix: most ongoing works were never checked for new chapters (v0.8.67)
 
 ### Fixed

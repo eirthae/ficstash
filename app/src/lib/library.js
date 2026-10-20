@@ -267,3 +267,56 @@ export async function saveReadingState(workId, { seconds, progress, lastChapter 
   if (!Object.keys(patch).length) return;
   try { await supabase.from('works').update(patch).eq('id', workId); } catch { /* local copy stands */ }
 }
+
+// Works that newly appeared in a series you follow — the What's New "In Series"
+// feed. No new table or worker pass is needed: the series sweep already stores
+// these with origin 'series' and the AO3 series id/name/part, so "new in series"
+// is just "recently added by that pass".
+//
+// The window is 8 DAYS, not the 5 the Saved feed uses, because the series sweep
+// now runs WEEKLY (Friday 09:00 JST). A 5-day window would leave this tab empty
+// from Wednesday until the next sweep; 8 keeps a sweep's results visible right
+// up to the following one.
+//
+// fetchSavedWorks deliberately excludes origin 'series', so nothing here is
+// double-counted in the Works tab.
+export const SERIES_FEED_DAYS = 8;
+
+export async function fetchSeriesUpdates() {
+  if (!hasSupabase) return null; // demo build falls back to sample data
+  const since = new Date(Date.now() - SERIES_FEED_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('works')
+    .select('*')
+    .eq('hidden', false)
+    .eq('origin', 'series')
+    .not('ao3_series_id', 'is', null)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data || []).map((row) => {
+    const w = mapWork(row);
+    const { day, time } = dayBucketLocal(row.created_at);
+    return {
+      id: w.id,
+      workId: w.id,
+      // The full mapped work: ReaderScreen resolves a bare workId against the
+      // SAMPLE WORKS array and falls back to WORKS[0], so passing only an id
+      // would open an invented story in a real library. ChapterUpdateRow passes
+      // the object for the same reason.
+      work: w,
+      seriesId: w.ao3SeriesId,
+      seriesName: w.ao3SeriesName || 'Untitled series',
+      part: w.ao3SeriesIndex,
+      title: w.customTitle || w.title,
+      author: w.author,
+      summary: w.summary,
+      words: w.words,
+      status: w.status,
+      day,
+      time,
+      fresh: !!w.unread,
+    };
+  });
+}

@@ -202,3 +202,34 @@ export const READER_PARAS = [
   'There was a list. Shane had never told him about the list, but of course Ilya knew. Ilya knew the shape of every secret Shane kept, because most of them were the same secret wearing different cities like coats. Montreal. Boston. A hotel in Denver with a view of the mountains neither of them had looked at. The places where, for a few hours, no one knew his name well enough to need anything from it.',
   'He stood. His knees complained — twenty-nine felt older in the spring than it had any right to — and he crossed the ice in his shoes, which you were never supposed to do, which was somehow the most reckless thing he had done all season and also the least.',
 ];
+
+
+// New works that appeared in a series you follow — the What's New "In series"
+// feed. Grouped by series in the UI, newest first, with each work's part number
+// so the reading order is obvious.
+export const SERIES_UPDATES = [
+  {
+    id: 'su1', day: 'Today', seriesId: '6180456', seriesName: 'Everyone Finds Out Eventually',
+    seriesTotal: 9, workId: 'w1', work: WORKS[0], title: 'the one where cliff finds the ring',
+    author: 'allyasavedtheday', part: 9, words: 4200, status: 'complete', time: '3h ago', fresh: true,
+    summary: 'Cliff has known for three years. He is not going to be the one to say it first.',
+  },
+  {
+    id: 'su2', day: 'Today', seriesId: '6180456', seriesName: 'Everyone Finds Out Eventually',
+    seriesTotal: 9, workId: 'w2', work: WORKS[1], title: 'a reasonable amount of pining',
+    author: 'allyasavedtheday', part: 8, words: 1800, status: 'ongoing', time: '5h ago', fresh: true,
+    summary: '',
+  },
+  {
+    id: 'su3', day: 'Today', seriesId: '6221826', seriesName: 'First-Time Dads Hollanov',
+    seriesTotal: 4, workId: 'w3', work: WORKS[2], title: 'three in the morning, again',
+    author: 'kelly0v0', part: 4, words: 2600, status: 'ongoing', time: '11h ago', fresh: false,
+    summary: 'Nobody warned them about the part where neither of them sleeps.',
+  },
+  {
+    id: 'su4', day: 'Yesterday', seriesId: '5995576', seriesName: 'Everyone Wants Shane Hollander',
+    seriesTotal: 12, workId: 'w4', work: WORKS[3], title: 'the trade deadline problem',
+    author: 'northern_lights', part: 12, words: 9100, status: 'complete', time: '1d ago', fresh: false,
+    summary: '',
+  },
+];
