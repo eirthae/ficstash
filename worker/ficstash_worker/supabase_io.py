@@ -203,7 +203,14 @@ def fetch_ongoing_offline_works(
     """Return downloaded works that are still ONGOING, to re-check for new
     chapters. Any saved work (any source) that isn't complete is a candidate;
     the refresh pass re-reads it and pulls only the chapters it doesn't have.
-    Newest-activity first, capped by `limit` so the re-check stays polite.
+
+    LEAST-RECENTLY-CHECKED first (never-checked ahead of everything), with the
+    work's own activity as the tiebreak. This used to be newest-activity first,
+    which is a fine heuristic only while the pass finishes — and it stopped
+    finishing: with 498 ongoing works the budget cut it after ~174, and since
+    the order never varied it was the same newest 174 every night while ~324
+    were never checked at all. Stalest-first makes truncation rotate, so every
+    ongoing work is covered within a few nights instead of some never being.
     """
     query = (
         client.table("works")
@@ -211,6 +218,7 @@ def fetch_ongoing_offline_works(
         .eq("offline", True)
         .eq("hidden", False)
         .neq("status", "complete")
+        .order("last_refreshed", desc=False, nullsfirst=True)
         .order("source_updated", desc=True)
     )
     if limit:
@@ -914,6 +922,26 @@ def fetch_followed_series(client: Client) -> list[dict]:
         .execute()
     )
     return list(resp.data or [])
+
+
+def mark_work_refreshed(client: Client, work_uuid: str) -> None:
+    """Stamp a work as just re-checked for new chapters.
+
+    Drives the rotation in fetch_ongoing_offline_works. Stamped whether or not
+    new chapters were found — "we looked" is the fact that matters; stamping
+    only on success would leave an unchanged work first in line forever.
+    Best-effort: the re-check itself already happened, so a failed stamp must
+    not fail the run (it just means the work is re-checked sooner than needed).
+    """
+    try:
+        retry_transient(
+            lambda: client.table("works")
+            .update({"last_refreshed": datetime.now(timezone.utc).isoformat()})
+            .eq("id", work_uuid).execute(),
+            what=f"mark_work_refreshed {work_uuid}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"    could not stamp last_refreshed for {work_uuid} ({type(exc).__name__}).")
 
 
 def mark_series_checked(

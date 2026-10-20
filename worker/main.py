@@ -89,6 +89,7 @@ from ficstash_worker.supabase_io import (
     mark_not_offline,
     mark_request,
     mark_series_checked,
+    mark_work_refreshed,
     propagate_dismissals,
     prune_chapter_updates,
     record_chapter_updates,
@@ -1151,10 +1152,15 @@ def main() -> None:
 
       # One retry round, after a pause — by now the run has stopped hammering
       # AO3, which is usually all these groups needed.
-      if not failed or round_no >= 1 or not _within_budget(_refresh_reserve_seconds()):
+      out_of_time = not _within_budget(_refresh_reserve_seconds())
+      if not failed or round_no >= 1 or out_of_time:
           if failed:
               names = ", ".join(str(x.get("label") or x.get("id")) for x in failed[:5])
-              print(f"  {len(failed)} group(s) still refused by AO3 ({names}) — "
+              # Say which it was: "AO3 kept refusing" and "we ran out of time
+              # before retrying" need different responses from a human reading
+              # this, and conflating them sent me down the wrong path once.
+              why = "no time left to retry them" if out_of_time else "still refused by AO3"
+              print(f"  {len(failed)} group(s) {why} ({names}) — "
                     "their windows are untouched, so they go first next run.")
           break
       print(f"  {len(failed)} group(s) hit AO3 errors — one retry pass after a 90s pause.")
@@ -1371,7 +1377,18 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001
             rc_failed += 1
             print(f"    refresh {src_id}:{wid} skipped ({type(exc).__name__}: {exc})")
+        finally:
+            # Stamp that we LOOKED, pass or fail, so the rotation moves on. Only
+            # stamping successes would park a work that AO3 keeps refusing at the
+            # head of the queue forever, re-blocking everything behind it — the
+            # starvation this ordering exists to prevent.
+            if row.get("id"):
+                mark_work_refreshed(db, row["id"])
     print(f"Refresh ongoing: {rc_updated} updated, {rc_same} unchanged, {rc_failed} failed.")
+    if len(ongoing) > (rc_updated + rc_same + rc_failed):
+        done = rc_updated + rc_same + rc_failed
+        print(f"  {len(ongoing) - done} of {len(ongoing)} not reached this run — "
+              "they are the stalest next time, so the whole library rotates.")
 
     # (AO3 series download now runs early — see run_ao3_series_pass, before the
     # saves-only return — so it's part of the fast lane, not the full sweep tail.)

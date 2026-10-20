@@ -4,40 +4,51 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
-## 2026-10-20 — Tag groups were being silently skipped, not empty (v0.8.67)
+## 2026-10-20 — Fix: most ongoing works were never checked for new chapters (v0.8.67)
 
 ### Fixed
 
-- **"0 matches" on a tag you know has new works was usually a crash, not an
-  empty result.** AO3 intermittently answers a search with a page that is
-  neither a results list nor its "No results found" notice — a throttle/error
-  page under load. `ao3-api` then dies on `results.find_all(...)`
-  (`AO3/search.py:106`), which reaches us as an `AttributeError` and the group
-  is skipped for the whole run. On the 2026-10-17 catch-up, **5 of 46 groups**
-  failed this way — including `Shane Hollander/Ilya Rozanov`, the largest one.
-  It is transient, not tag-specific: `Supportive Montreal Voyageurs` failed on
-  Oct 15 and returned matches on Oct 17.
-  `_with_backoff` already retried 30/60/120s and AO3 still refused, so discovery
-  now makes **one more pass over the failed groups at the end of the run**, after
-  a 90s pause — by then the run has stopped hammering AO3, which is usually all
-  they needed.
-- Genuine zeros were verified as genuine: groups logging a plain `0 match(es)`
-  with no filter note prove `ao3-api`'s no-results path still matches AO3's
-  wording, so an empty result really is empty.
+- **The new-chapter check had the same starvation bug the tag groups had.**
+  `fetch_ongoing_offline_works` ordered by `source_updated DESC` with nothing
+  tracking what had actually been re-checked. Fine while the pass completes — but
+  it stopped completing: the 2026-10-19 nightly had **498 ongoing works** and the
+  budget cut the pass after **174**. Because the order never varied it was the
+  *same* newest 174 every night, and the other ~324 were never checked at all.
+  Self-reinforcing, too: a work that misses a check slides further down the
+  ordering. Now ordered **least-recently-checked first** (migration `0030` adds
+  `works.last_refreshed`), so truncation rotates and the whole library is covered
+  within a few nights. The stamp is written pass *or* fail — stamping only
+  successes would park a work AO3 keeps refusing at the head of the queue
+  forever, re-creating the blockage.
+- **Tag groups AO3 refuses now get a second attempt in the same run.** AO3
+  intermittently answers a search with a page that is neither a results list nor
+  its "No results found" notice, and `ao3-api` dies on `results.find_all(...)`
+  (`AO3/search.py:106`). `_with_backoff` already retried 30/60/120s and AO3 still
+  refused. Discovery now takes one more pass over the failed groups at the end of
+  the run, after a 90s pause, once it has stopped pressuring AO3.
+- The end-of-discovery log now distinguishes "AO3 kept refusing" from "ran out of
+  time before retrying" — they need different responses and conflating them is
+  misleading.
 
 ### Changed
 
 - **The nightly moved to 19:00 JST (10:00 UTC), from 03:00 JST.** GitHub delays
   scheduled runs by hours under load — against an 18:00 UTC cron the last week
-  actually started between 20:19 and 23:59 UTC — and a sweep can run up to 5h,
-  so results were landing mid-morning to mid-afternoon. Starting in the evening
-  JST means even a delayed, long run finishes overnight.
+  started between 20:19 and 23:59 UTC — and a sweep can run the full 5h, so
+  results were landing mid-morning at best. An evening JST start finishes
+  overnight even when delayed and long.
 
 ### Notes
 
+- Measured on the 2026-10-19 nightly (first full night on the v0.8.66 fixes):
+  series correctly skipped, **42 of 46** groups searched, **241 matches** found,
+  11 works picked up new chapters. Four groups hit the AO3 parse crash — which is
+  what the retry pass above addresses.
 - Nothing is lost when a group fails: `mark_group_checked` only runs after a
-  successful upsert, so the group keeps its old window and (ordered
-  stalest-first since v0.8.66) goes to the front of the queue next run.
+  successful upsert, so its window stays put and it goes first next run.
+- **Migration `0030` must be applied** (run the *DB setup* workflow) before the
+  rotation takes effect; until then `last_refreshed` is absent and the query
+  falls back to erroring, so apply it with this release.
 
 ## 2026-10-17 — Fix: the series sweep was starving tags and new chapters (v0.8.66)
 
