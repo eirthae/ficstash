@@ -989,7 +989,23 @@ def main() -> None:
     reseed = _reseed_tags()  # one-shot: force all-time for every group this run
     if reseed:
         print("  RESEED_TAGS set → re-fetching ALL discover tags all-time (refreshes metadata; keeps your saved/seen/dismissed).")
-    for g in groups:
+    # AO3 intermittently answers a search with a page that is neither a results
+    # list nor its "No results found" notice — a throttle/error page under load.
+    # ao3-api then dies on `results.find_all(...)`, which surfaces here as an
+    # AttributeError. _with_backoff already retries (30/60/120s) and the tag can
+    # STILL be refused for minutes at a time, so a group gets skipped for the
+    # whole run. It varies run to run — 'Supportive Montreal Voyageurs' failed on
+    # Oct 15 and returned matches on Oct 17 — so one more attempt at the end,
+    # once the run has stopped hammering AO3, usually succeeds.
+    #
+    # Nothing is lost when a group fails: mark_group_checked only runs after a
+    # successful upsert, so its window stays put and (ordered stalest-first) it
+    # goes to the front next run. This just saves waiting a day for that.
+    pending = list(groups)
+    failed: list[dict] = []
+    round_no = 0
+    while True:
+      for g in pending:
         if not _within_budget(_refresh_reserve_seconds()):
             print("  time budget reached — stopping discovery; resumes next run.")
             break
@@ -1034,6 +1050,7 @@ def main() -> None:
                 print(f"    '{label}' (language): {written} match(es).")
             except Exception as exc:  # noqa: BLE001
                 print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
+                failed.append(g)
             continue
 
         tag_names = [
@@ -1084,6 +1101,7 @@ def main() -> None:
                 print(f"    '{label}': {written} match(es).{note}")
             except Exception as exc:  # noqa: BLE001
                 print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
+                failed.append(g)
             continue
 
         # ---- non-AO3 sources (Royal Road, Scribble Hub, …) -----------------
@@ -1129,6 +1147,20 @@ def main() -> None:
             print(f"    '{label}' ({source_id}): {written} match(es).{note}")
         except Exception as exc:  # noqa: BLE001
             print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
+            failed.append(g)
+
+      # One retry round, after a pause — by now the run has stopped hammering
+      # AO3, which is usually all these groups needed.
+      if not failed or round_no >= 1 or not _within_budget(_refresh_reserve_seconds()):
+          if failed:
+              names = ", ".join(str(x.get("label") or x.get("id")) for x in failed[:5])
+              print(f"  {len(failed)} group(s) still refused by AO3 ({names}) — "
+                    "their windows are untouched, so they go first next run.")
+          break
+      print(f"  {len(failed)} group(s) hit AO3 errors — one retry pass after a 90s pause.")
+      time.sleep(90)
+      pending, failed = failed, []
+      round_no += 1
 
     # ---- Pass 5: offline backfill → full copies for everything else --------
     # The app is offline-first, so every work should be a full offline copy.

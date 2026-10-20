@@ -4,6 +4,41 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-20 — Tag groups were being silently skipped, not empty (v0.8.67)
+
+### Fixed
+
+- **"0 matches" on a tag you know has new works was usually a crash, not an
+  empty result.** AO3 intermittently answers a search with a page that is
+  neither a results list nor its "No results found" notice — a throttle/error
+  page under load. `ao3-api` then dies on `results.find_all(...)`
+  (`AO3/search.py:106`), which reaches us as an `AttributeError` and the group
+  is skipped for the whole run. On the 2026-10-17 catch-up, **5 of 46 groups**
+  failed this way — including `Shane Hollander/Ilya Rozanov`, the largest one.
+  It is transient, not tag-specific: `Supportive Montreal Voyageurs` failed on
+  Oct 15 and returned matches on Oct 17.
+  `_with_backoff` already retried 30/60/120s and AO3 still refused, so discovery
+  now makes **one more pass over the failed groups at the end of the run**, after
+  a 90s pause — by then the run has stopped hammering AO3, which is usually all
+  they needed.
+- Genuine zeros were verified as genuine: groups logging a plain `0 match(es)`
+  with no filter note prove `ao3-api`'s no-results path still matches AO3's
+  wording, so an empty result really is empty.
+
+### Changed
+
+- **The nightly moved to 19:00 JST (10:00 UTC), from 03:00 JST.** GitHub delays
+  scheduled runs by hours under load — against an 18:00 UTC cron the last week
+  actually started between 20:19 and 23:59 UTC — and a sweep can run up to 5h,
+  so results were landing mid-morning to mid-afternoon. Starting in the evening
+  JST means even a delayed, long run finishes overnight.
+
+### Notes
+
+- Nothing is lost when a group fails: `mark_group_checked` only runs after a
+  successful upsert, so the group keeps its old window and (ordered
+  stalest-first since v0.8.66) goes to the front of the queue next run.
+
 ## 2026-10-17 — Fix: the series sweep was starving tags and new chapters (v0.8.66)
 
 ### Fixed

@@ -25,11 +25,16 @@ on:
         type: boolean
         default: false
   schedule:
-    # NIGHTLY — tracked tags + new chapters. 03:00 Japan time (JST = UTC+9).
+    # NIGHTLY — tracked tags + new chapters. 19:00 Japan time (JST = UTC+9).
+    # Moved from 18:00 UTC (03:00 JST): GitHub delays scheduled runs by hours
+    # under load (observed 20:19-23:59 UTC against an 18:00 cron), and a sweep
+    # can take up to 5h, so results were landing mid-morning to mid-afternoon.
+    # Starting in the evening JST means even a delayed, long run finishes
+    # overnight and there is something new to read by morning.
     # Skips the AO3 series sweep: re-enumerating 108 follows every night ate the
     # whole time budget before discovery and refresh ran, so tags stopped
     # updating and new chapters stopped being detected entirely.
-    - cron: "0 18 * * *"
+    - cron: "0 10 * * *"
     # WEEKLY — AO3 series follows only. Friday 09:00 Japan time = Friday 00:00 UTC.
     # The expensive pass gets its own long run instead of starving the nightly.
     # A tapped "Download all" never waits for this: that goes through the
