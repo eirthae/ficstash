@@ -20,12 +20,18 @@ scheme yet, so entries are dated and reference the commit that shipped them.
   within a few nights. The stamp is written pass *or* fail — stamping only
   successes would park a work AO3 keeps refusing at the head of the queue
   forever, re-creating the blockage.
-- **Tag groups AO3 refuses now get a second attempt in the same run.** AO3
-  intermittently answers a search with a page that is neither a results list nor
-  its "No results found" notice, and `ao3-api` dies on `results.find_all(...)`
-  (`AO3/search.py:106`). `_with_backoff` already retried 30/60/120s and AO3 still
-  refused. Discovery now takes one more pass over the failed groups at the end of
-  the run, after a 90s pause, once it has stopped pressuring AO3.
+- **An AO3 outage now reads as an AO3 outage.** Reproduced live: AO3 was serving
+  Cloudflare **525 "SSL handshake failed"** and its own **"Page Responding Too
+  Slowly"** pages. `ao3-api` looks for a results list, then for AO3's exact
+  "No results found" notice, and seeing neither falls through to
+  `results.find_all(...)` on `None` (`AO3/search.py:106`) — so the worker logged
+  `AttributeError: 'NoneType' object has no attribute 'find_all'`, which reads as
+  "that tag is broken". It wasn't: `Hurt/Comfort` and `Fluff` failed identically
+  and the "broken" tag succeeded on the very next attempt. Those pages now raise
+  `AO3Unavailable` (a `RateLimitError` subclass, so every existing backoff path
+  retries it) with a message that names the real cause.
+- **Tag groups AO3 refuses also get a second attempt at the end of the run**,
+  after a 90s pause, once discovery has stopped pressuring AO3.
 - The end-of-discovery log now distinguishes "AO3 kept refusing" from "ran out of
   time before retrying" — they need different responses and conflating them is
   misleading.
@@ -40,6 +46,8 @@ scheme yet, so entries are dated and reference the commit that shipped them.
 
 ### Notes
 
+- `worker/tests/test_ao3_unavailable.py` — 5 tests pinning the retry behaviour
+  and that the message names AO3 rather than a NoneType.
 - Measured on the 2026-10-19 nightly (first full night on the v0.8.66 fixes):
   series correctly skipped, **42 of 46** groups searched, **241 matches** found,
   11 works picked up new chapters. Four groups hit the AO3 parse crash — which is

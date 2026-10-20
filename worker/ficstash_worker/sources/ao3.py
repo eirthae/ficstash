@@ -69,6 +69,23 @@ class RateLimitError(Exception):
     """AO3 returned HTTP 429 — caller should back off and retry."""
 
 
+class AO3Unavailable(RateLimitError):
+    """AO3 served an error page instead of results — a Cloudflare 5xx (525 "SSL
+    handshake failed" is the common one) or AO3's own "Page Responding Too
+    Slowly". Transient; subclasses RateLimitError so every existing backoff path
+    already retries it.
+
+    Worth naming, because ao3-api's Search.update() reacts to these pages by
+    crashing on `results.find_all(...)` (AO3/search.py:106) — the soup has no
+    results list AND no "No results found" notice, so it falls through. That
+    surfaced as a bare `AttributeError: 'NoneType' object has no attribute
+    'find_all'`, which looks like a parser bug in OUR code and reads as "this
+    tag is broken". It isn't: verified live on 2026-10-20, where
+    'Hurt/Comfort' and 'Fluff' failed the same way and the "broken" tag
+    succeeded on the next attempt.
+    """
+
+
 def _hash_str(s: str) -> int:
     """Port of the app's hashStr(): h = (h*31 + charCode) >>> 0."""
     h = 0
@@ -701,7 +718,13 @@ class AO3Source(Source):
         for page in range(1, max_pages + 1):
             try:
                 search = _make_search(page)
-                search.update()
+                try:
+                    search.update()
+                except AttributeError as exc:  # AO3 error page, not a results page
+                    raise AO3Unavailable(
+                        "AO3 served an error page instead of search results "
+                        "(Cloudflare 5xx / overloaded) — retrying"
+                    ) from exc
             except Exception as exc:  # noqa: BLE001
                 if _is_rate_limited(exc):
                     raise RateLimitError(str(exc)) from exc
@@ -761,7 +784,13 @@ class AO3Source(Source):
         for page in range(1, max_pages + 1):
             try:
                 search = _make_search(page)
-                search.update()
+                try:
+                    search.update()
+                except AttributeError as exc:  # AO3 error page, not a results page
+                    raise AO3Unavailable(
+                        "AO3 served an error page instead of search results "
+                        "(Cloudflare 5xx / overloaded) — retrying"
+                    ) from exc
             except Exception as exc:  # noqa: BLE001
                 if _is_rate_limited(exc):
                     raise RateLimitError(str(exc)) from exc
