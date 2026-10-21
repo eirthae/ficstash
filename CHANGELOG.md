@@ -4,6 +4,35 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-21 — Consistency audit after the retention + schedule changes (v0.8.70)
+
+### Fixed
+
+- **The chapter feed's row cap, not its retention window, decided what you saw.**
+  `fetchNewChapters` capped at 100 rows while the prune now keeps 8 days — and
+  nightly runs produce 11-17 chapter notices each, so 8 days is ~90-140 rows and
+  a busy week is more. The oldest were being dropped silently, defeating the
+  window that was just widened. Cap raised to **300**. (Works and In Series sit
+  at 200, which covers their observed ~14/day and ~70/week comfortably.)
+- **`WHATS_NEW_DAYS` fell back to `1` if the repo variable were ever removed** —
+  reinstating the 24-hour DELETE that destroyed chapter notices before they could
+  be read. Fallback is now `8`, matching the app's windows.
+- **`MAX_RUN_MINUTES` still defaulted to 165 in code**, with a docstring claiming
+  it sat "comfortably under the 180-minute job timeout". Both were raised in
+  v0.8.66 but only in the workflow, so a run without the env var set would have
+  quietly used the old, too-tight budget. Now 300, and the docstring names the
+  real 330-minute timeout.
+- **Three different numbers were in play for one concept** (1 in the workflow, 5
+  in `DEFAULT_WHATS_NEW_DAYS` and in `expire_chapter_updates` /
+  `age_out_saved_matches` defaults, 8 in the repo variable). All aligned to 8, so
+  the fallbacks agree with the configured value instead of contradicting it.
+
+### Notes
+
+- Verified clean: both cron strings are referenced in exactly one other place —
+  the `SERIES_SWEEP` selector — and it matches the weekly cron. App copy carries
+  no stale timing claims. 149 app + 153 worker tests pass.
+
 ## 2026-10-21 — Retention windows; schedules off the hour (v0.8.69)
 
 ### Changed

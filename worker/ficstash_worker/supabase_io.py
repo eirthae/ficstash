@@ -973,7 +973,7 @@ def delete_series_follow(client: Client, series_id: str) -> None:
 
 
 # ---- What's New retention (keep the feed to a recent window) ----------------
-def expire_chapter_updates(client: Client, *, older_than_days: int = 5) -> int:
+def expire_chapter_updates(client: Client, *, older_than_days: int = 8) -> int:
     """Delete 'new chapter' feed entries older than the window. Only removes the
     What's New NOTICE — the chapter text stays in `chapters`, fully readable."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
@@ -1031,7 +1031,7 @@ def prune_chapter_updates(client: Client) -> int:
     return len(ids)
 
 
-def age_out_saved_matches(client: Client, *, older_than_days: int = 5) -> int:
+def age_out_saved_matches(client: Client, *, older_than_days: int = 8) -> int:
     """Age recently-added works out of the 'New works' feed after the window by
     flipping origin -> 'bookmark'. Covers every lane the user can add a work
     through: 'tag' (saved from Discovery), 'link' (added by URL) and 'upload'

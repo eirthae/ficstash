@@ -125,7 +125,7 @@ DEFAULT_REFLOW_MAX = None
 DEFAULT_REFRESH_ONGOING_MAX = None
 # How many days an item stays in What's New before it ages out (it remains in the
 # library either way). Override with WHATS_NEW_DAYS.
-DEFAULT_WHATS_NEW_DAYS = 5
+DEFAULT_WHATS_NEW_DAYS = 8
 # A "new chapter" notice is only surfaced for a genuine incremental update. A jump
 # larger than this (or any jump up from a zero/blank stored count) is a first
 # download or a corrected count — not real updates — so we store the chapters but
@@ -519,14 +519,14 @@ def _start_run_clock() -> None:
     backfill, reflow, refresh) check _within_budget() and stop starting new work
     as the deadline nears — so a big library's unbounded backfill exits CLEANLY
     and resumes next run, instead of being killed by the workflow timeout (which
-    showed up as a cancelled ~3h nightly). Tune with MAX_RUN_MINUTES; default 165,
-    comfortably under the 180-minute job timeout."""
+    showed up as a cancelled ~3h nightly). Tune with MAX_RUN_MINUTES; default 300,
+    comfortably under the 330-minute job timeout in sync.yml."""
     global _run_deadline
     raw = os.environ.get("MAX_RUN_MINUTES", "").strip()
     try:
-        mins = max(5, int(raw)) if raw else 165
+        mins = max(5, int(raw)) if raw else 300
     except ValueError:
-        mins = 165
+        mins = 300
     _run_deadline = time.monotonic() + mins * 60
 
 

@@ -104,10 +104,13 @@ jobs:
           # One-shot: re-fetch every discover tag all-time so existing matches get
           # refreshed metadata (e.g. backfilled descriptions). Keeps saved/seen flags.
           RESEED_TAGS: ${{ inputs.reseed_tags && '1' || '' }}
-          # How long works/new chapters live in What's New (days). Defaults to 1
-          # (24h); change the repo variable WHATS_NEW_DAYS in Settings → Variables
-          # to re-tune (e.g. 3 or 5) with no code change. Library keeps everything.
-          WHATS_NEW_DAYS: ${{ vars.WHATS_NEW_DAYS || '1' }}
+          # How long works/new chapters stay in What's New (days). This prune is
+          # a DELETE, not a hide, so too low means a chapter notice is destroyed
+          # before you ever see it — at the old default of 1, missing a single
+          # day meant never learning a chapter had landed. The fallback is 8 to
+          # match the app's feed windows; override with the repo variable
+          # WHATS_NEW_DAYS. The library itself keeps everything regardless.
+          WHATS_NEW_DAYS: ${{ vars.WHATS_NEW_DAYS || '8' }}
           # Optional AO3 login: when these secrets are set the worker logs in so it
           # can fetch members-only / registered-users-only works (e.g. series works
           # a guest can't get). If unset, it runs logged-out on public pages. The

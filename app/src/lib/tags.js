@@ -555,7 +555,11 @@ export async function fetchNewChapters() {
     .from('chapter_updates')
     .select('*, works(*)')
     .order('created_at', { ascending: false })
-    .limit(100);
+    // 300, not 100: the worker's prune now keeps 8 days (WHATS_NEW_DAYS) and
+    // nightly runs have produced 11-17 chapter notices each, so 8 days is
+    // ~90-140 rows — and a busy week more. At 100 the row cap, not the
+    // retention window, decided what you saw, silently dropping the oldest.
+    .limit(300);
   if (error) throw error;
   return (data || [])
     .filter((row) => row.works && !row.works.hidden)
