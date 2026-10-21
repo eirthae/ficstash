@@ -4,6 +4,35 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-21 — Members-only saves reach your AO3 account (v0.8.71)
+
+### Fixed
+
+- **Saved works that silently never appeared.** On-device fetching is logged
+  OUT, so a members-only work can't be read there — and `saveMatchNow` treated
+  that as a DEFINITIVE failure, the same bucket as "removed from AO3". That set
+  `wanted = false`, which took the work out of the queue the **worker** reads —
+  and the worker signs in with your AO3 account and *could* have fetched it. The
+  save then sat in the Failed stash, so unless you went looking there, a work you
+  saved simply never showed up. Restricted saves now stay `wanted` with a reason
+  that says who will fetch them, so the next worker run picks them up; the device
+  stops re-attempting them, since it can only ever fail.
+- **Re-fetch did nothing on exactly the works that needed it.** The Detail
+  screen's re-fetch runs on-device, so for a members-only work it hit the same
+  logged-out wall every time and reported "Members-only — can't re-fetch". It now
+  hands the work to the worker (clears `offline`, re-queues the match, kicks the
+  fast lane) and says so.
+
+### Notes
+
+- "Restricted" was never a definitive failure — only a failure *for the
+  logged-out fetcher*. Conflating it with "removed at the source" is what made
+  both bugs. A removed work is genuinely terminal and still goes to Failed.
+- Verified the worker queues line up with what these write: Pass 2 reads
+  `wanted = true, saved = false`; the backfill reads `offline = false,
+  hidden = false`. Worker logins confirmed working in recent runs
+  ("AO3: logged in as *** — members-only / adult works are fetchable").
+
 ## 2026-10-21 — Consistency audit after the retention + schedule changes (v0.8.70)
 
 ### Fixed

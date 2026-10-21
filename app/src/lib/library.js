@@ -324,3 +324,31 @@ export async function fetchSeriesUpdates() {
     };
   });
 }
+
+// Ask the WORKER to re-fetch a work the device can't read.
+//
+// On-device fetching is logged out, so a members-only work fails there every
+// time no matter how often you retry. The worker signs in with your AO3 account
+// (AO3_USERNAME/AO3_PASSWORD) and can read it — so instead of telling you
+// "can't re-fetch", we clear the offline flag and queue it, which is exactly
+// what the worker's backfill pass looks for. Then kick the fast lane so it
+// doesn't wait for the nightly.
+export async function requestWorkerRefetch(sourceWorkId, source = 'ao3') {
+  if (!hasSupabase || !sourceWorkId) return { ok: false };
+  try {
+    await supabase.from('works')
+      .update({ offline: false })
+      .eq('source', source)
+      .eq('source_work_id', String(sourceWorkId));
+    await supabase.from('tag_matches')
+      .update({ wanted: true, failed: false,
+                fail_reason: 'Members-only — waiting for the worker to fetch it with your AO3 account' })
+      .eq('source', source)
+      .eq('source_work_id', String(sourceWorkId));
+    const { kickSave } = await import('./sync.js'); // lazy: sync.js imports ondevice.js
+    kickSave().catch(() => {});
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}

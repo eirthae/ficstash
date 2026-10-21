@@ -7,6 +7,7 @@ import { fetchChapters, removeWork, updateWorkFields, fetchSeriesNames, fetchWor
 import { hasSupabase } from '../lib/supabase.js';
 import { requestSave } from '../lib/tags.js';
 import { refetchWork } from '../lib/ondevice.js';
+import { requestWorkerRefetch } from '../lib/library.js';
 import { getSeriesFollow, requestSeriesDownload, setSeriesFollow } from '../lib/series.js';
 import { TagGroupBuilder } from './Discover.jsx';
 import { getReadingPos } from '../lib/reading.js';
@@ -118,7 +119,15 @@ export function StoryDetailScreen({ work: workProp, suggestion, onSaved, onRemov
         showToast('Re-fetched — open it to read the updated copy', 'solar:check-circle-bold');
         onReload?.();
       }
-      else if (r && r.restricted) showToast('Members-only — can’t re-fetch', 'solar:danger-triangle-bold');
+      else if (r && r.restricted) {
+        // The on-device fetch is logged OUT, so it can never read a members-only
+        // work — this branch used to just say "can't re-fetch" and stop, which is
+        // why re-fetch appeared to do nothing on exactly the works that needed
+        // it. The worker signs in with your AO3 account, so hand it over.
+        await requestWorkerRefetch(work.sourceWorkId, work.source);
+        showToast('Members-only — your AO3 account will fetch it on the next sync',
+          'solar:clock-circle-bold');
+      }
       else showToast('AO3 didn’t answer — try again', 'solar:danger-triangle-bold');
     } catch { showToast('Re-fetch failed — try again', 'solar:danger-triangle-bold'); }
     finally { setRefetching(false); }

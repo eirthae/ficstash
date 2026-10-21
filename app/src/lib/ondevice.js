@@ -260,6 +260,30 @@ export async function refetchWork(sourceWorkId, source = 'ao3') {
   return downloadWork(sourceWorkId, { origin: null, source });
 }
 
+// Hand a members-only work to the WORKER instead of failing it.
+//
+// A logged-out on-device fetch can never read a restricted work, but the worker
+// signs in with your AO3 account and can. Marking it failed was wrong twice
+// over: it set wanted=false, so the worker's saves pass never saw it, and it
+// parked the work in the Failed stash — where a save you made simply never
+// appeared unless you went looking. It stays WANTED, with a reason explaining
+// who will fetch it, and the device stops retrying it itself.
+export async function markMatchNeedsAccount(sourceWorkId, source = 'ao3') {
+  try {
+    await supabase
+      .from('tag_matches')
+      .update({
+        wanted: true,
+        failed: false,
+        fail_reason: 'Members-only — waiting for the worker to fetch it with your AO3 account',
+      })
+      .eq('source', source)
+      .eq('source_work_id', String(sourceWorkId));
+  } catch (e) { /* non-fatal */ }
+}
+
+const NEEDS_ACCOUNT = /members-only|restricted/i;
+
 // Flag a match as failed (across every group it matched) so it leaves the wanted-
 // retry loop and shows in the app's Failed stash. Only DEFINITIVE failures call this.
 async function markMatchFailed(sourceWorkId, source, reason) {
@@ -280,7 +304,7 @@ async function markMatchFailed(sourceWorkId, source, reason) {
 export async function saveMatchNow(sourceWorkId, source = 'ao3') {
   const r = await downloadWork(sourceWorkId, { origin: 'tag', source });
   if (r.ok) await markMatchesSaved(sourceWorkId, source);
-  else if (r.restricted) await markMatchFailed(sourceWorkId, source, 'Restricted — members-only at the source');
+  else if (r.restricted) await markMatchNeedsAccount(sourceWorkId, source);
   else if (r.notFound) await markMatchFailed(sourceWorkId, source, 'Removed at the source (not found)');
   return r;
 }
@@ -333,7 +357,7 @@ export async function downloadWanted({ onProgress } = {}) {
   try {
     const { data } = await supabase
       .from('tag_matches')
-      .select('source, source_work_id')
+      .select('source, source_work_id, fail_reason')
       .in('source', ['ao3', 'scribblehub'])
       .eq('wanted', true)
       .eq('saved', false);
@@ -350,6 +374,10 @@ export async function downloadWanted({ onProgress } = {}) {
     i += 1;
     if (onProgress) onProgress({ done: i, total: wanted.length, title: w.source_work_id });
     try {
+      // Already known to need the AO3 account: re-fetching it here would fail
+      // identically every time. Counted as failed so syncNow escalates once to
+      // the worker, which is the only thing that CAN read it.
+      if (NEEDS_ACCOUNT.test(w.fail_reason || '')) { failed += 1; continue; }
       const r = await saveMatchNow(w.source_work_id, w.source);
       if (r.ok) saved += 1; else failed += 1;
     } catch (e) { failed += 1; }
