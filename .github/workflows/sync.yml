@@ -111,6 +111,13 @@ jobs:
           # match the app's feed windows; override with the repo variable
           # WHATS_NEW_DAYS. The library itself keeps everything regardless.
           WHATS_NEW_DAYS: ${{ vars.WHATS_NEW_DAYS || '8' }}
+          # How long an UNTOUCHED discovery suggestion survives. The prune only
+          # removes matches you never acted on (not saved / Later / wanted /
+          # failed), but at 30 days that quietly erodes a quiet tag's backlog —
+          # its one all-time seed is never re-fetched, so once those rows age out
+          # the group reads as empty even though the tag has works. Raised to 90;
+          # override with the repo variable MATCH_RETENTION_DAYS.
+          MATCH_RETENTION_DAYS: ${{ vars.MATCH_RETENTION_DAYS || '90' }}
           # Optional AO3 login: when these secrets are set the worker logs in so it
           # can fetch members-only / registered-users-only works (e.g. series works
           # a guest can't get). If unset, it runs logged-out on public pages. The
