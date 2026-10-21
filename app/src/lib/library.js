@@ -113,12 +113,12 @@ function dayBucketLocal(iso) {
 // you chose, now downloaded — not the raw discovery match stream.
 export async function fetchSavedWorks() {
   if (!hasSupabase) return null;
-  // Rolling display window so the "Saved" feed self-clears (matches the New-chapters
-  // feed, which the worker prunes at DEFAULT_WHATS_NEW_DAYS = 5). It must be 5 days,
-  // NOT 1: non-AO3 stories only download via the daily worker sweep (each run is
-  // 1-3h), so a 24h window let them age out — or never appear — before the download
-  // landed. This is a DISPLAY window only; works stay in the library permanently.
-  const SAVED_FEED_DAYS = 5;
+  // Rolling display window so the "Saved" feed self-clears. Matched to the
+  // worker's own prune (repo variable WHATS_NEW_DAYS, now 8): at 5 the app hid
+  // three days of rows the worker was still keeping, so saved works vanished
+  // from the feed while their chapter notices were still listed. This is a
+  // DISPLAY window only; works stay in the library permanently.
+  const SAVED_FEED_DAYS = 8;
   const since = new Date(Date.now() - SAVED_FEED_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from('works')
@@ -273,14 +273,18 @@ export async function saveReadingState(workId, { seconds, progress, lastChapter 
 // these with origin 'series' and the AO3 series id/name/part, so "new in series"
 // is just "recently added by that pass".
 //
-// The window is 8 DAYS, not the 5 the Saved feed uses, because the series sweep
-// now runs WEEKLY (Friday 09:00 JST). A 5-day window would leave this tab empty
-// from Wednesday until the next sweep; 8 keeps a sweep's results visible right
-// up to the following one.
+// The window is 14 DAYS — two full sweeps' worth. The series sweep runs WEEKLY
+// (Friday 09:19 JST), so 8 days would only ever show the latest sweep: miss a
+// week and you'd never learn what was added. Holding two weeks means a series
+// addition is still listed even if you don't open the app for one of them.
+//
+// Nothing prunes these rows server-side — works are permanent in the library and
+// only chapter_updates / tag_matches age out — so this is purely how far back
+// the tab looks.
 //
 // fetchSavedWorks deliberately excludes origin 'series', so nothing here is
 // double-counted in the Works tab.
-export const SERIES_FEED_DAYS = 8;
+export const SERIES_FEED_DAYS = 14;
 
 export async function fetchSeriesUpdates() {
   if (!hasSupabase) return null; // demo build falls back to sample data

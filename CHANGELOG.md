@@ -4,6 +4,49 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-21 — Retention windows; schedules off the hour (v0.8.69)
+
+### Changed
+
+- **What's New kept items for 24 hours, and the prune is a DELETE.** The repo
+  variable `WHATS_NEW_DAYS` was `1`, so `expire_chapter_updates` removed chapter
+  notices a day after they appeared — miss a day and you never knew a chapter had
+  landed. Raised to **8**, which also matters for any move toward weekly chapter
+  checks: a weekly sweep's notices would otherwise be deleted by the very next
+  nightly. Repo variable, so it took effect without a release.
+- **Feed windows now line up with that prune**: Works `SAVED_FEED_DAYS` 5 → **8**
+  (at 5 the app hid three days of rows the worker was still keeping), and
+  **In Series 8 → 14** — two full sweeps, so a series addition is still listed
+  even if you skip a week. Display windows only; the library keeps everything.
+- **Both crons moved off the hour.** GitHub's docs: *"The schedule event can be
+  delayed during periods of high loads... High load times include the start of
+  every hour. To decrease the chance of delay, schedule your workflow to run at a
+  different time of the hour."* Both sat at `:00`, so the 2-6 hour delays we
+  measured were partly self-inflicted. Nightly → **09:37 UTC (18:37 JST)**,
+  weekly series → **00:19 UTC Friday (09:19 JST)**. The `SERIES_SWEEP` selector
+  matches on the cron string and moved with it; a stale match there would have
+  run the weekly series sweep as an ordinary nightly.
+
+### Fixed
+
+- **The series pass could still starve tags on a manual run.** Its budget check
+  used the bare deadline, so a `workflow_dispatch` (which defaults
+  `SERIES_SWEEP=full`) could spend the whole 300-minute budget on 108 followed
+  series before discovery ran — the same starvation as v0.8.66, through a
+  different entry point. It now stops with room left when the run also does tags
+  and chapters, and keeps the full budget when `SERIES_SWEEP=only`.
+
+### Notes
+
+- **2026-10-20 had no scheduled run, and that was self-inflicted.** The cron was
+  moved from 18:00 to 10:00 UTC *at 11:17 UTC* — the new slot had already passed
+  and the old one no longer existed, so the day fell through the gap. Changing a
+  cron needs a manual dispatch to cover the current day; both moves since have
+  been checked against the clock first.
+- GitHub also documents that queued scheduled jobs *"may be dropped"* under
+  sufficient load, and offers no timing guarantee. Public repositories get
+  scheduled workflows disabled after 60 days of inactivity (not a risk here).
+
 ## 2026-10-20 — "In Series" tab; newly tracked tags stuck at zero (v0.8.68)
 
 ### Added
