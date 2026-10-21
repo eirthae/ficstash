@@ -443,9 +443,18 @@ def run_ao3_series_pass(db, ao3, space, backoff) -> None:
         # The one heavy pass that used to run unbounded. Without this it spent the
         # whole budget and the passes after it — discovery, then refresh — got
         # nothing, which is how new chapters silently stopped being checked.
-        # Saves-only runs are exempt: that lane is tiny and must not defer a tap.
-        if not _saves_only() and not _within_budget():
-            print(f"  time budget reached — {len(followed) - done} series left for the next sweep.")
+        #
+        # On a run that ALSO does tags and chapters (a manual 'full' dispatch),
+        # it has to stop early enough to leave them room — otherwise 108 series
+        # re-create exactly the starvation this check exists to prevent, just via
+        # a different entry point. A series-ONLY run (the Friday sweep) is the
+        # whole point of that run, so it gets the full budget. Saves-only runs
+        # are exempt either way: that lane is tiny and must not defer a tap.
+        reserve = 0 if _series_sweep() == "only" else _refresh_reserve_seconds() * 2
+        if not _saves_only() and not _within_budget(reserve):
+            left = len(followed) - done
+            why = "budget" if reserve == 0 else "its share of the budget (tags + chapters get the rest)"
+            print(f"  series pass reached {why} — {left} series left for the next sweep.")
             break
         done += 1
         sid = (srow.get("series_id") or "").strip()
