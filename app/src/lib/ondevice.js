@@ -68,11 +68,10 @@ async function readDismissedKeys() {
 // ---- discovery -------------------------------------------------------------
 
 // Search AO3 for one group on-device and upsert its matches to Supabase. Returns
-// the number of rows written. A failed search throws out of searchTags and we
-// return BEFORE stamping last_checked — the comment here used to claim there was
-// "no last_checked burn", but the stamp ran unconditionally, so an unreadable AO3
-// marked the group checked anyway and a brand-new group lost its all-time seed.
-// AO3-only; other sources are skipped (the worker still handles them).
+// the number of rows written. ONE page (~20 newest-updated works), for instant
+// results when a group is created or edited — it never touches last_checked, so
+// the worker's all-time seed still happens. AO3-only; other sources are skipped
+// (the worker still handles them).
 export async function discoverGroup(group, prefs, dismissed) {
   if (!hasSupabase) return 0;
   const g = normGroup(group);
@@ -98,36 +97,131 @@ export async function discoverGroup(group, prefs, dismissed) {
       metas = await searchTags(g.include, excludeNames);
     }
   } catch (e) {
-    return 0;
+    // Let it out instead of returning 0. searchTags/searchLanguage already throw
+    // only when AO3 could not be READ (and return [] for a genuinely empty
+    // result), and swallowing that here made "AO3 is 525ing" look identical to
+    // "nothing new" — which the per-group Sync button has to tell apart to say
+    // anything true. Every other caller (createGroup / createLanguageGroup /
+    // updateGroup / discoverAll) already wraps this in its own try/catch and
+    // treats discovery as best-effort, so nothing else changes.
+    const err = new Error('AO3 did not answer');
+    err.code = 'source_unavailable';
+    err.cause = e;
+    throw err;
   }
 
-  // De-dupe by work id, then the group's completion-status filter + the global
-  // language/exclude prefs (language groups are exempt — the search IS the filter).
-  const seen = new Set();
-  metas = metas.filter((m) => {
-    if (!m.sourceId || seen.has(m.sourceId)) return false;
-    seen.add(m.sourceId);
-    return true;
-  });
-  metas = metas.filter((m) => statusMatches(m, g.status));
-  metas = metas.filter((m) => passesGlobalPrefs(m, { excludedTags: shelfExcl, languages: prefs.languages }, !!g.langCode));
-  if (dismissed && dismissed.size) metas = metas.filter((m) => !dismissed.has(`ao3:${m.sourceId}`));
+  const written = await writeAo3Matches(g, metas, prefs, shelfExcl, dismissed, new Set());
+  // Deliberately does NOT stamp last_checked. This fetch is ONE page — the ~20
+  // most recently updated works — purely so a new group opens with something in
+  // it. last_checked is the worker's window anchor, and stamping it here told the
+  // worker "already checked", which killed the all-time back-catalogue seed: an
+  // app-created group was capped at those 20 works forever, because the worker's
+  // first-run branch never ran for it. It also defeated updateGroup, which
+  // explicitly nulls last_checked so the worker re-seeds against new criteria,
+  // only for this to immediately set it again.
+  //
+  // The split is: the app gives instant results, the worker owns the window.
+  return written;
+}
 
-  const rows = metas.map((m) => matchRow(g.id, m));
-  if (rows.length) {
+// De-dupe a batch of AO3 blurbs, drop the ones this group doesn't want, and write
+// what's left. `seen` is passed in so a multi-page run shares one de-dupe set
+// across pages. Returns the number of rows written.
+//
+// Shared by the one-page discover and the all-time catch-up on purpose: "what
+// counts as a match for this group" is one rule, and having it written twice is
+// how the two would quietly start disagreeing.
+async function writeAo3Matches(g, metas, prefs, shelfExcl, dismissed, seen) {
+  const keep = [];
+  for (const m of metas) {
+    if (!m.sourceId || seen.has(m.sourceId)) continue;
+    seen.add(m.sourceId);
+    // The group's completion-status filter, then the global language/exclude
+    // prefs (language groups are exempt — there the search IS the filter), then
+    // the dismissed tombstone so a swiped-away work never comes back.
+    if (!statusMatches(m, g.status)) continue;
+    if (!passesGlobalPrefs(m, { excludedTags: shelfExcl, languages: prefs.languages }, !!g.langCode)) continue;
+    if (dismissed && dismissed.has(`ao3:${m.sourceId}`)) continue;
+    keep.push(matchRow(g.id, m));
+  }
+  if (keep.length) {
     const { error } = await supabase
       .from('tag_matches')
-      .upsert(rows, { onConflict: 'group_id,source,source_work_id' });
+      .upsert(keep, { onConflict: 'group_id,source,source_work_id' });
     if (error) throw error;
   }
-  // Stamp the group as checked ONLY because AO3 actually answered. searchTags
-  // throws when it didn't, so reaching here means an empty result is a real
-  // empty result. Stamping unconditionally is what silently broke newly added
-  // tags: a failed first search still marked the group checked, which turned its
-  // all-time back-catalogue seed into a one-day incremental window, and the tag
-  // then stayed at 0 forever.
-  try { await supabase.from('tracked_groups').update({ last_checked: new Date().toISOString() }).eq('id', g.id); } catch (e) {}
-  return rows.length;
+  return keep.length;
+}
+
+// AO3 serves 20 works per search page, so a short page is the last page.
+const AO3_PAGE_SIZE = 20;
+// Hard ceiling on an all-time catch-up: 25 pages ≈ 500 works per query. At the
+// 1.5s politeness gap that's ~40 seconds of fetching, which is about as long as
+// anyone will hold a phone still — and it keeps a 40,000-work fandom tag from
+// turning one tap into an hour of hammering a volunteer-run site.
+const ALLTIME_MAX_PAGES = 25;
+
+// Walk a group's search back through the pages instead of taking only the newest
+// one — the back catalogue, not today's updates.
+//
+// This is the seed the WORKER is supposed to do on a group's first run, and
+// can't: AO3 Cloudflare-525s its datacenter IP, so a group can sit on the ~20
+// works the app grabbed at creation for weeks. Running it here, from the phone's
+// residential IP, is the only way it reliably happens at all.
+//
+// Reports progress per page and checks shouldStop() between pages so a long run
+// stays interruptible. Partial progress is kept: everything written before a
+// stop or an AO3 failure stays written, and the result says where it ended.
+// Returns { written, pages, failed, stopped, capped } — `capped` meaning it ran
+// into ALLTIME_MAX_PAGES rather than reaching the end, so there IS more back
+// there. Worth telling the user, because a second run starts from page 1 again:
+// there's no resume, and pretending otherwise would be a lie.
+export async function discoverGroupAllTime(group, { onProgress, shouldStop } = {}) {
+  const idle = { written: 0, pages: 0, failed: false, stopped: false, capped: false };
+  if (!hasSupabase) return idle;
+  const g = normGroup(group);
+  if (g.source !== 'ao3') return idle;
+  if (!g.langCode && !g.include.length) return idle;
+
+  const prefs = await readPrefs();
+  const dismissed = await readDismissedKeys();
+  const shelfExcl = excludedForShelf(prefs, 'ao3');
+  const excludeNames = [...g.excluded, ...shelfExcl.map((t) => (t && t.name) || t)]
+    .filter((n, i, a) => n && a.indexOf(n) === i);
+
+  // An "any" group is several searches, not one — AO3 has no OR — so each of its
+  // tags gets its own page walk. One shared `seen` set means a work tagged with
+  // two of them is still only written once.
+  const queries = g.langCode ? [null]
+    : (g.matchMode === 'any' && g.include.length > 1 ? g.include.map((t) => [t]) : [g.include]);
+  const seen = new Set();
+  let written = 0;
+  let pages = 0;
+  let capped = false;
+
+  for (const q of queries) {
+    for (let page = 1; page <= ALLTIME_MAX_PAGES; page++) {
+      if (shouldStop && shouldStop()) return { written, pages, failed: false, stopped: true, capped };
+      let metas;
+      try {
+        metas = q === null ? await searchLanguage(g.langCode, page) : await searchTags(q, excludeNames, page);
+      } catch (e) {
+        // Keep what we already wrote and say where it stopped — a catch-up that
+        // got 300 of 500 works is worth far more than a thrown-away run.
+        return { written, pages, failed: true, stopped: false, capped };
+      }
+      pages += 1;
+      written += await writeAo3Matches(g, metas, prefs, shelfExcl, dismissed, seen);
+      onProgress && onProgress({ pages, written });
+      if (metas.length < AO3_PAGE_SIZE) break; // short page = end of the results
+      if (page === ALLTIME_MAX_PAGES) { capped = true; break; }
+      await sleep(SPACE_MS);
+    }
+  }
+  // Same rule as discoverGroup: no last_checked stamp. Even a full back-catalogue
+  // walk is not the worker's incremental window, and claiming it would stop the
+  // nightly run from ever looking at this group again.
+  return { written, pages, failed: false, stopped: false, capped };
 }
 
 // Discover one romance.io Books group on-device: query the site's books API by the
@@ -154,7 +248,8 @@ async function discoverRomanceGroup(g, prefs, dismissed) {
       .upsert(rows, { onConflict: 'group_id,source,source_work_id' });
     if (error) throw error;
   }
-  try { await supabase.from('tracked_groups').update({ last_checked: new Date().toISOString() }).eq('id', g.id); } catch (e) {}
+  // Same as discoverGroup: one page for instant results, no stamp — the worker
+  // owns last_checked and therefore the all-time seed.
   return rows.length;
 }
 
