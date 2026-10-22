@@ -338,6 +338,9 @@ input,textarea { font-family:inherit; }
 .reader-skel span.gap { background:none; height:0; margin-bottom:20px; animation:none; }
 @keyframes shimmer { 0% { background-position:100% 50%; } 100% { background-position:0 50%; } }
 .fetch.busy .ring { animation:spin 1.1s linear infinite; }
+/* An Appbar icon action that's mid-flight — spins its own glyph in place, so a
+   header button can show it's working without borrowing room for a spinner. */
+.iconbtn.busy svg { animation:spin .9s linear infinite; }
 
 /* ============================================================================
    CHAPTER ROW (TOC)

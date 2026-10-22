@@ -1,5 +1,21 @@
 import Icon from './Icon.jsx';
 
+// One Appbar action: an icon-only button, the form every header action in the app
+// takes. `icon` + `onClick` are all most of them pass; the rest are for actions
+// that DO something slow — `label` names it for the tooltip and screen readers,
+// `disabled` dims it and blocks a second tap, and `busy` spins the glyph while
+// it runs (Discover's per-group Sync is the first that needed any of them).
+// Shared by the large and compact headers so the two can't drift apart.
+function Action({ a }) {
+  return (
+    <button className={`iconbtn ghost${a.busy ? ' busy' : ''}`} onClick={a.onClick}
+      disabled={a.disabled} aria-label={a.label} title={a.label}
+      style={a.disabled ? { opacity: .5 } : undefined}>
+      <Icon icon={a.icon} size={23} />
+    </button>
+  );
+}
+
 // ---- App header (shared) --------------------------------------------------
 export function Appbar({ title, large, sub, back, actions, onTitleClick, titleExpanded }) {
   if (large) {
@@ -9,7 +25,7 @@ export function Appbar({ title, large, sub, back, actions, onTitleClick, titleEx
           <div className="appbar-row">
             {back && <button className="iconbtn" onClick={back}><Icon icon="solar:arrow-left-linear" size={23} /></button>}
             <div style={{ flex: 1 }}></div>
-            {actions && actions.map((a, i) => <button key={i} className="iconbtn ghost" onClick={a.onClick}><Icon icon={a.icon} size={23} /></button>)}
+            {actions && actions.map((a, i) => <Action key={i} a={a} />)}
           </div>
         )}
         <div>
@@ -35,7 +51,7 @@ export function Appbar({ title, large, sub, back, actions, onTitleClick, titleEx
         )}
         {sub && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
       </div>
-      {actions && actions.map((a, i) => <button key={i} className="iconbtn ghost" onClick={a.onClick}><Icon icon={a.icon} size={23} /></button>)}
+      {actions && actions.map((a, i) => <Action key={i} a={a} />)}
     </div>
   );
 }

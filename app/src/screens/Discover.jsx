@@ -8,6 +8,7 @@ import {
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch, fetchStashCounts,
 } from '../lib/tags.js';
+import { discoverGroup, discoverGroupAllTime } from '../lib/ondevice.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
 import { syncNow } from '../lib/sync.js';
 import { fetchWorkById } from '../lib/library.js';
@@ -888,7 +889,10 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   const [items, setItems] = useState(null); // null = loading
   const [statusFilter, setStatusFilter] = useState('all'); // all | ongoing | complete — quick filter over the results
   const [sort, setSort] = useState('newest');              // newest | oldest | longest | shortest
-  const [titleExpanded, setTitleExpanded] = useState(false); // tap title to see full tag-group name
+  const [menuOpen, setMenuOpen] = useState(false);           // tap the title → this group's actions
+  const [syncing, setSyncing] = useState(false);             // quick sync in flight
+  const [deep, setDeep] = useState(null);                    // all-time catch-up: {pages, written} | null
+  const stopDeep = useRef(false);                            // set by the Stop button, read between pages
   const [toast, showToast] = useToast();
   const c = TAG_COLOR[tag.kind] || 'var(--accent)';
   const kindLabel = { relationship: 'relationship', fandom: 'fandom', freeform: 'tag', character: 'character', group: 'tag group', language: 'language', genre: 'genre' }[tag.kind] || 'tag';
@@ -942,6 +946,89 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     leave();
   };
 
+  // ---- the two syncs -------------------------------------------------------
+  // Both run ON THE PHONE, and that's the whole point: the nightly worker asks AO3
+  // from a GitHub Actions datacenter address that AO3 Cloudflare-525s, which is why
+  // a tag can sit empty for days while everything else works. From here, over your
+  // own connection, AO3 answers. Neither stamps last_checked — the worker owns its
+  // window, and claiming it would stop the nightly run looking at this group again.
+  const busy = syncing || !!deep;
+
+  // Re-read the list and count what's actually NEW to it. Never report rows
+  // written: the upsert rewrites works you already have, so that number would
+  // claim a full page of new works every single time.
+  const refreshAfter = async (before) => {
+    const rows = await fetchMatches(tag.id);
+    if (rows) setItems(rows);
+    // They're on screen now, so don't leave a "N new" badge on the tile for them.
+    markGroupSeen(tag.id).catch(() => {});
+    return (rows || []).filter((w) => !before.has(w.id)).length;
+  };
+
+  const plural = (n) => `${n} new ${n === 1 ? 'work' : 'works'}`;
+  const failToast = (e) => showToast(e && e.code === 'source_unavailable'
+    ? "AO3 didn't answer — try again"
+    : "Couldn't save the results — try again", 'solar:danger-triangle-bold');
+
+  // Quick: one search page, the ~20 newest-updated works. Seconds. Closes the
+  // sheet straight away so the toast lands over the list you came to look at.
+  const syncGroup = async () => {
+    if (busy) return;
+    setSyncing(true);
+    setMenuOpen(false);
+    const before = new Set((items || []).map((w) => w.id));
+    try {
+      await discoverGroup(tag);
+      const added = await refreshAfter(before);
+      if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
+      else showToast('Nothing new', 'solar:check-circle-bold');
+    } catch (e) {
+      failToast(e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // All-time: walk the tag's search back through the pages for the back catalogue,
+  // not just today. This is the seed the worker is meant to do on a group's first
+  // run and can't, which is why a group can be stuck on the handful of works the
+  // app grabbed when you made it. It takes about a minute, so the sheet stays open
+  // with live progress and the button turns into Stop.
+  const syncAllTime = async () => {
+    if (busy) return;
+    stopDeep.current = false;
+    setDeep({ pages: 0, written: 0 });
+    const before = new Set((items || []).map((w) => w.id));
+    try {
+      const r = await discoverGroupAllTime(tag, {
+        onProgress: setDeep,
+        shouldStop: () => stopDeep.current,
+      });
+      const added = await refreshAfter(before);
+      setMenuOpen(false);
+      // Say what actually happened, including the half-finished cases — a run that
+      // died at page 9 still kept everything it wrote.
+      if (r.failed) {
+        showToast(added ? `AO3 stopped answering — kept ${plural(added)}` : "AO3 didn't answer — try again",
+          'solar:danger-triangle-bold');
+      } else if (r.stopped) {
+        showToast(added ? `Stopped — ${plural(added)}` : 'Stopped', 'solar:check-circle-bold');
+      } else if (!added) {
+        showToast('Nothing new — you already had it all', 'solar:check-circle-bold');
+      } else {
+        // `capped` means it hit the page ceiling, so there IS more further back.
+        // There's no resume — a second run starts at page 1 — so don't imply one.
+        showToast(r.capped ? `${plural(added)} — as far back as one run goes` : plural(added),
+          'solar:magic-stick-3-bold');
+      }
+    } catch (e) {
+      setMenuOpen(false);
+      failToast(e);
+    } finally {
+      setDeep(null);
+    }
+  };
+
   const list = items || [];
   // Quick complete/ongoing filter over the loaded results (client-side — separate
   // from the group's own status setting in its tag settings).
@@ -960,12 +1047,10 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         back={leave}
         title={tag.name}
         sub={`${tag.count ?? list.length} works · ${kindLabel}`}
-        actions={[
-          ...(onEdit && tag.kind !== 'language' ? [{ icon: 'solar:pen-2-linear', onClick: () => { onEdit(tag); nav.pop(); } }] : []),
-          { icon: 'solar:trash-bin-trash-linear', onClick: removeGroup },
-        ]}
-        onTitleClick={() => setTitleExpanded((v) => !v)}
-        titleExpanded={titleExpanded}
+        // No header icons any more: sync, edit and delete all live behind the
+        // title. Three glyphs in a row made the two destructive ones sit a
+        // thumb-width from each other, and left nowhere to put a second sync.
+        onTitleClick={() => setMenuOpen(true)}
       />
       <div className="scroll" style={{ padding: '4px 20px 24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 16 }}>
@@ -1028,7 +1113,90 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         )}
         {toast}
       </div>
+
+      <GroupActionsSheet
+        open={menuOpen}
+        // A catch-up is a minute of fetching — don't let a stray tap on the scrim
+        // drop the sheet showing its progress and leave it running unseen.
+        onClose={() => { if (!deep) setMenuOpen(false); }}
+        // Same count the header shows — the group's size, not however many
+        // matches happen to be loaded into this list right now.
+        tag={tag} kindLabel={kindLabel} srcLabel={srcLabel} count={tag.count ?? list.length}
+        syncing={syncing} deep={deep} busy={busy}
+        onSync={syncGroup}
+        onSyncAllTime={syncAllTime}
+        onStopAllTime={() => { stopDeep.current = true; }}
+        onEdit={onEdit && tag.kind !== 'language' ? () => { setMenuOpen(false); onEdit(tag); nav.pop(); } : null}
+        onRemove={() => { setMenuOpen(false); removeGroup(); }}
+      />
     </div>
+  );
+}
+
+// Everything you can do TO a tag group, one tap behind its title: the two syncs
+// as proper full-width buttons, and the two that change or end the group as
+// quiet icons in the corner. The split is deliberate — syncing is the thing you
+// came for and is safe to repeat; editing rebuilds the group and deleting ends
+// it, so neither should sit under your thumb in the header.
+function GroupActionsSheet({
+  open, onClose, tag, kindLabel, srcLabel, count,
+  syncing, deep, busy, onSync, onSyncAllTime, onStopAllTime, onEdit, onRemove,
+}) {
+  // AO3 only. It's the one source the worker gets blocked from, and the only one
+  // whose search tells "couldn't read it" apart from "nothing there" — so it's
+  // the only one these buttons could report honestly about.
+  const canSync = (tag.source || 'ao3') === 'ao3';
+  const note = { fontSize: 12, lineHeight: 1.45, color: 'var(--text-tertiary)', margin: '8px 2px 0' };
+  return (
+    <Sheet open={open} onClose={onClose} title={
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* The full name, wrapped. The header truncates it, and tapping the
+              title used to expand it in place — now that the tap opens this, the
+              sheet is where you read the long ones. */}
+          <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3 }}>{tag.name}</div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-tertiary)', marginTop: 3 }}>
+            {count} {count === 1 ? 'work' : 'works'} · {kindLabel} · {srcLabel}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 2, flex: 'none', marginTop: -4, marginRight: -8 }}>
+          {onEdit && (
+            <button className="iconbtn ghost" onClick={onEdit} disabled={busy}
+              aria-label="Edit this group" title="Edit this group" style={busy ? { opacity: .4 } : undefined}>
+              <Icon icon="solar:pen-2-linear" size={21} />
+            </button>
+          )}
+          <button className="iconbtn ghost" onClick={onRemove} disabled={busy}
+            aria-label="Stop tracking this group" title="Stop tracking this group"
+            style={busy ? { opacity: .4 } : undefined}>
+            <Icon icon="solar:trash-bin-trash-linear" size={21} />
+          </button>
+        </div>
+      </div>
+    }>
+      {canSync ? (
+        // No explainer text under either button — the labels carry it, and the
+        // Stop button says where a catch-up has got to while it runs.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button className="btn btn-lg btn-primary btn-block" onClick={onSync} disabled={busy}
+            style={busy ? { opacity: .6 } : undefined}>
+            <Icon icon="solar:refresh-circle-linear" size={19} />
+            {syncing ? 'Checking AO3…' : 'Check for new works'}
+          </button>
+          <button className="btn btn-lg btn-surface btn-block"
+            onClick={deep ? onStopAllTime : onSyncAllTime} disabled={syncing}
+            style={syncing ? { opacity: .6 } : undefined}>
+            <Icon icon={deep ? 'solar:stop-circle-linear' : 'solar:history-linear'} size={19} />
+            {deep ? `Stop — page ${deep.pages}, ${deep.written} found` : 'Catch up all-time'}
+          </button>
+        </div>
+      ) : (
+        <div style={{ ...note, margin: '2px 2px 4px' }}>
+          On-device sync is AO3-only. The worker reaches {srcLabel} fine, so this
+          group is covered by the nightly run.
+        </div>
+      )}
+    </Sheet>
   );
 }
 
