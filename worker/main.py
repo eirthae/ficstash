@@ -344,6 +344,31 @@ def _series_sweep() -> str:
     return raw if raw in ("full", "skip", "only") else "full"
 
 
+def _skip_if_checked_within_hours() -> int:
+    """Hours of "discovery already ran recently" that make this run a no-op.
+
+    GitHub does not guarantee scheduled runs. It delays them for hours under
+    load and drops them outright: this repo got nothing on 2026-10-20, 10-21 or
+    10-22 against crons that were in place, after months of runs landing 2-4
+    hours late. Three missed nights is three nights of no tag updates, and
+    nobody finds out until they go looking.
+
+    So the schedule now fires several times a day and the runs sort it out
+    between themselves: the first one to find stale windows does the work, and
+    the later ones see a recent last_checked and exit in seconds. One dropped
+    slot stops costing a night.
+
+    Deliberately keyed on last_checked rather than "did a run happen": a run
+    that happened and got refused by AO3 the whole way through has advanced
+    nothing, and the next slot SHOULD try again.
+    """
+    raw = os.environ.get("SKIP_IF_CHECKED_WITHIN_HOURS", "").strip()
+    try:
+        return max(0, int(raw)) if raw else 0
+    except ValueError:
+        return 0
+
+
 def _only_group() -> str:
     """One tracked group, discovery only — the app's per-group Sync buttons.
 
@@ -586,9 +611,31 @@ def main() -> None:
     check_env()
     _start_run_clock()
 
+    db = make_client()
+
+    # Several schedule slots a day, so a dropped one costs nothing: whichever
+    # slot finds stale windows does the work, and the rest exit here in seconds.
+    # Saves-only and one-group runs are explicit requests and are never skipped.
+    skip_hours = _skip_if_checked_within_hours()
+    if skip_hours and not _saves_only() and not _only_group():
+        try:
+            newest = max(
+                (_parse_ts(g.get("last_checked")) for g in fetch_tracked_groups(db)),
+                default=None,
+            )
+        except Exception as exc:  # noqa: BLE001 — never let this block a run
+            newest = None
+            print(f"Freshness check skipped ({type(exc).__name__}: {exc}); running anyway.")
+        if newest is not None:
+            age_h = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
+            if age_h < skip_hours:
+                print(f"Discovery last advanced {age_h:.1f}h ago (< {skip_hours}h) — "
+                      "another slot already covered this. Nothing to do.")
+                return
+            print(f"Discovery last advanced {age_h:.1f}h ago (>= {skip_hours}h) — running.")
+
     ao3 = get_source("ao3")
     _maybe_login_ao3(ao3)
-    db = make_client()
 
     # Only import works in languages the user can read; everything else is
     # dropped before it ever reaches the library or tag-match discovery.
@@ -1200,7 +1247,12 @@ def main() -> None:
       # One retry round, after a pause — by now the run has stopped hammering
       # AO3, which is usually all these groups needed.
       out_of_time = not _within_budget(_refresh_reserve_seconds())
-      if not failed or round_no >= 1 or out_of_time:
+      # A one-group run is a person holding a spinner, so it gets no second
+      # round: the first round's ladder is already 95s, and adding a 90s pause
+      # plus another ladder turned one tag into a 23-minute wait. They can tap
+      # again. The nightly, which nobody is watching, still gets its retry.
+      max_rounds = 0 if _only_group() else 1
+      if not failed or round_no >= max_rounds or out_of_time:
           if failed:
               names = ", ".join(str(x.get("label") or x.get("id")) for x in failed[:5])
               # Say which it was: "AO3 kept refusing" and "we ran out of time

@@ -45,7 +45,15 @@ on:
     # Skips the AO3 series sweep: re-enumerating 108 follows every night ate the
     # whole time budget before discovery and refresh ran, so tags stopped
     # updating and new chapters stopped being detected entirely.
+    # THREE slots, not one. GitHub does not guarantee scheduled runs — it
+    # delays them for hours under load and drops them entirely: nothing fired on
+    # 2026-10-20, 10-21 or 10-22 against crons that were in place. Whichever slot
+    # lands first does the work; the others see a recent last_checked
+    # (SKIP_IF_CHECKED_WITHIN_HOURS below) and exit in seconds. A dropped slot
+    # now costs nothing instead of a whole night of tag updates.
     - cron: "37 9 * * *"
+    - cron: "47 13 * * *"
+    - cron: "23 17 * * *"
     # WEEKLY — AO3 series follows only. Friday 09:19 JST = Friday 00:19 UTC.
     # Off the hour for the same reason as the nightly; midnight UTC on the hour
     # is the worst slot on the clock.
@@ -113,6 +121,12 @@ jobs:
           # logged out and has never once succeeded, while this worker is logged
           # in and searches fine. With reseed_tags it's the all-time catch-up.
           ONLY_GROUP: ${{ inputs.only_group || '' }}
+          # On a SCHEDULED run only: if discovery already advanced within this
+          # many hours, exit immediately — another of the day's slots covered it.
+          # Manual runs always do the work. Keyed on last_checked, so a run that
+          # was refused by AO3 all the way through advances nothing and the next
+          # slot correctly tries again.
+          SKIP_IF_CHECKED_WITHIN_HOURS: ${{ github.event_name == 'schedule' && '10' || '' }}
           # How long works/new chapters stay in What's New (days). This prune is
           # a DELETE, not a hide, so too low means a chapter notice is destroyed
           # before you ever see it — at the old default of 1, missing a single

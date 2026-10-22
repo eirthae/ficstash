@@ -51,7 +51,7 @@ export async function triggerSync(opts = {}) {
 // 'queued' | 'running' so the button can say which.
 //
 // Returns { ok, conclusion, alreadyRunning?, timedOut?, error? }.
-export async function syncGroupViaWorker(groupId, { allTime = false, onPhase, timeoutMs = 420000 } = {}) {
+export async function syncGroupViaWorker(groupId, { allTime = false, onPhase, timeoutMs = 240000 } = {}) {
   if (!hasSupabase) return { ok: false, error: 'Not connected' };
   onPhase && onPhase('dispatching');
   const started = Date.now();
