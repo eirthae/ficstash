@@ -4,6 +4,82 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-22 — Sync a tag yourself, and the seed bug that kept groups empty (v0.8.72)
+
+### Fixed
+
+- **A new tag group was capped at ~20 works, forever.** When you create or edit
+  a group the app immediately fetches one page of results so the group doesn't
+  open empty — and it then stamped `last_checked`. That field is the *worker's*
+  window anchor, and setting it told the worker "already checked", so the
+  worker's first-run branch — the one that searches **all-time** and seeds the
+  tag's whole back catalogue — never ran for any group the app had touched. The
+  group was left with the ~20 newest works it got at creation and nothing else.
+  It also defeated editing: `updateGroup` deliberately nulls `last_checked` so
+  the worker re-seeds against the new criteria, and the app set it straight back.
+  The app no longer stamps it, from either sync. The split is now: the app gives
+  instant results, the worker owns the window.
+- **A flaky AO3 cost the whole nightly run instead of a few tags.** Retry waits
+  were 30/60/120s — 210 seconds burned per failed search. The 2026-10-21 reseed
+  logged 89 retries and 21 AO3 error pages and spent almost its entire five-hour
+  budget *waiting*, getting through 3 of 43 groups. These are Cloudflare 5xx
+  pages that clear in seconds, not rate limits that need minutes, so the ladder
+  is now 10/25/60s. A genuine 429 still gets the full ladder plus the 6-second
+  spacing between every request.
+- **Untouched tag matches now survive 90 days, not 30.** The prune only removes
+  suggestions you never acted on, which sounds safe — but a group's all-time
+  seed happened once and was never re-fetched, so a quiet tag's backlog aged out
+  and the group read as empty even though the tag had plenty of works. Recent
+  nightlies were deleting 14-33 rows each. `MATCH_RETENTION_DAYS` is also wired
+  through from the workflow now, so it's tunable as a repo variable.
+
+### Added
+
+- **Sync one tag group yourself, from the group's own screen.** Both syncs run
+  **on the phone**, and that's the entire point: the nightly worker asks AO3
+  from a GitHub Actions datacenter address that AO3 Cloudflare-525s, which is
+  why a tag can sit empty for days while everything else works. Over your own
+  connection, AO3 answers.
+  - **Check for new works** — one search page, the newest ~20. Seconds.
+  - **Catch up all-time** — walks the tag back through its pages, 20 works a
+    page, up to 500, with the usual 1.5s gap between requests. This is the seed
+    the worker is meant to do on a group's first run and can't. It takes about a
+    minute, reports live progress, and the button becomes **Stop** while it runs;
+    stopping keeps everything already written.
+  - Outcomes are reported honestly, including the ugly ones: *AO3 didn't answer*,
+    *AO3 stopped answering — kept 31 new works*, *Stopped — 12 new works*,
+    *Nothing new — you already had it all*, and when a catch-up hits the
+    500-work ceiling, *as far back as one run goes* (there's no resume — a second
+    run starts at page 1).
+  - The counts are a real before/after diff of the list, never rows written: the
+    upsert rewrites works you already have, so that number would claim a full
+    page of new works every single time.
+
+### Changed
+
+- **A tag group's actions moved out of the header and behind its title.** Sync,
+  edit and delete were three icons in a row, which put the two destructive ones
+  a thumb-width apart and left nowhere to put a second sync. Tapping the title
+  now opens the standard sheet: the two syncs as full-width buttons, edit and
+  delete as quiet icons in its corner, both disabled while a sync is running.
+  With the icons gone the header stops truncating, so long group names read in
+  full — and the sheet shows the whole name too, which is what tapping the title
+  used to do.
+
+### Notes
+
+- `discoverGroup` used to swallow a failed AO3 search and return 0, making a
+  Cloudflare 525 indistinguishable from "nothing new". It now rethrows with
+  `code: 'source_unavailable'`; every existing caller already treated discovery
+  as best-effort inside its own try/catch, so nothing else changed.
+- Neither sync stamps `last_checked` — not even the all-time walk. A full back
+  catalogue is still not the worker's incremental window, and claiming it would
+  stop the nightly run ever looking at that group again.
+- Checked against the schedules: the Friday series-only run returns before the
+  tag pass starts, so none of this touches it, and the nightly's new-chapter
+  refresh is protected by its 45-minute reserve, so a longer tag pass gives way
+  to chapters rather than starving them.
+
 ## 2026-10-21 — Members-only saves reach your AO3 account (v0.8.71)
 
 ### Fixed
