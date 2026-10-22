@@ -24,6 +24,10 @@ on:
         description: "Re-fetch ALL discover tags all-time (refresh metadata e.g. descriptions; keeps saved/seen/dismissed)"
         type: boolean
         default: false
+      only_group:
+        description: "Discovery for ONE tracked group id, skipping every other pass (the app's per-group Sync buttons)"
+        type: string
+        default: ""
   schedule:
     # NIGHTLY — tracked tags + new chapters. 18:37 Japan time (JST = UTC+9).
     #
@@ -104,6 +108,11 @@ jobs:
           # One-shot: re-fetch every discover tag all-time so existing matches get
           # refreshed metadata (e.g. backfilled descriptions). Keeps saved/seen flags.
           RESEED_TAGS: ${{ inputs.reseed_tags && '1' || '' }}
+          # One tracked group, discovery only — dispatched by the app's per-group
+          # Sync buttons. The phone can't do this itself: on-device AO3 search is
+          # logged out and has never once succeeded, while this worker is logged
+          # in and searches fine. With reseed_tags it's the all-time catch-up.
+          ONLY_GROUP: ${{ inputs.only_group || '' }}
           # How long works/new chapters stay in What's New (days). This prune is
           # a DELETE, not a hide, so too low means a chapter notice is destroyed
           # before you ever see it — at the old default of 1, missing a single

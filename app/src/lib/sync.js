@@ -23,10 +23,63 @@ export async function triggerSync(opts = {}) {
   // savesOnly → a fast, real-time run that fetches just the requested links/saves
   // in its own workflow lane, so a tapped Save downloads now instead of waiting
   // behind the full sweep.
-  const body = opts.savesOnly ? { savesOnly: true } : {};
+  // savesOnly → a fast, real-time run that fetches just the requested links/saves
+  // in its own workflow lane, so a tapped Save downloads now instead of waiting
+  // behind the full sweep.
+  // groupId → discovery for ONE group, skipping every other pass (allTime adds
+  // the back-catalogue walk). See syncGroupViaWorker below for why this goes to
+  // the worker rather than being fetched here.
+  const body = opts.savesOnly ? { savesOnly: true }
+    : opts.groupId ? { groupId: opts.groupId, allTime: !!opts.allTime }
+      : {};
   const { data, error } = await supabase.functions.invoke('trigger-sync', { method: 'POST', body });
   if (error) return { ok: false, error: error.message || String(error) };
   return data || { ok: true };
+}
+
+// Sync ONE tracked group by asking the worker to do it, and wait for the answer.
+//
+// Why the worker and not this device: on-device AO3 search is logged out, and it
+// has never once succeeded. Every match in the database — across every group,
+// for the four months since on-device discovery shipped — was written by a
+// worker run hours after the group was created, never by the app at creation.
+// AO3 refuses the logged-out phone and answers the logged-in worker, from the
+// datacenter IP we'd long blamed for the opposite. So the phone asks.
+//
+// The cost is honesty about time: GitHub has to start a runner, so this is a
+// minute or two, not a moment. `onPhase` is called with 'dispatching' |
+// 'queued' | 'running' so the button can say which.
+//
+// Returns { ok, conclusion, alreadyRunning?, timedOut?, error? }.
+export async function syncGroupViaWorker(groupId, { allTime = false, onPhase, timeoutMs = 420000 } = {}) {
+  if (!hasSupabase) return { ok: false, error: 'Not connected' };
+  onPhase && onPhase('dispatching');
+  const started = Date.now();
+  const r = await triggerSync({ groupId, allTime });
+  if (!r.ok) return { ok: false, error: r.error || 'Could not reach the worker' };
+  // Someone else's run holds the lane; ours wasn't dispatched. Say so rather
+  // than spinning for seven minutes on a run that isn't ours.
+  if (r.alreadyRunning) return { ok: false, alreadyRunning: true };
+
+  // Poll the workflow's latest run. It settles into queued → in_progress →
+  // completed. Note this reads the newest run of the whole workflow, not ours by
+  // id, so a run someone starts alongside this one can be what we end up
+  // watching — acceptable for a progress spinner, not something to trust for
+  // correctness. The list refresh afterwards is what actually tells the truth.
+  let sawRunning = false;
+  while (Date.now() - started < timeoutMs) {
+    await new Promise((res) => setTimeout(res, 5000));
+    const run = await syncStatus();
+    if (!run) continue;
+    if (run.status === 'queued') onPhase && onPhase('queued');
+    if (run.status === 'in_progress') { sawRunning = true; onPhase && onPhase('running'); }
+    // Only trust a 'completed' we reached THROUGH a running state; the first
+    // poll can still be showing the previous run, already finished.
+    if (run.status === 'completed' && sawRunning) {
+      return { ok: run.conclusion === 'success', conclusion: run.conclusion };
+    }
+  }
+  return { ok: false, timedOut: true };
 }
 
 // Latest sync run status, for showing "last synced / running".

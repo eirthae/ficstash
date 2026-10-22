@@ -344,6 +344,24 @@ def _series_sweep() -> str:
     return raw if raw in ("full", "skip", "only") else "full"
 
 
+def _only_group() -> str:
+    """One tracked group, discovery only — the app's per-group Sync buttons.
+
+    The app cannot do this itself. On-device discovery has never once written a
+    row: every match in the database arrived from a worker run, hours after the
+    group was created, for every group since on-device discovery landed in June.
+    AO3 answers THIS worker (logged in) and refuses the logged-out phone, so the
+    honest fix is to let the phone ask the worker instead of pretending it can
+    fetch for itself.
+
+    A run in this mode skips series, repair, backfill, reflow and refresh and
+    does exactly one group's discovery, so it finishes in a minute or two rather
+    than hours — the app is waiting on it with a spinner. Combine with
+    RESEED_TAGS for the all-time catch-up (ignores that group's last_checked).
+    """
+    return os.environ.get("ONLY_GROUP", "").strip()
+
+
 def _reseed_tags() -> bool:
     """One-shot: re-run discovery ALL-TIME for every tracked group (ignore each
     group's last_checked) so existing matches get refreshed metadata — e.g. a
@@ -800,7 +818,9 @@ def main() -> None:
     # The nightly run skips it (SERIES_SWEEP=skip) so its budget goes to tags and
     # new chapters; the weekly run does series only. Saves-only runs always pass
     # through, since that lane is what makes a "Download all" tap feel immediate.
-    if _saves_only() or _series_sweep() != "skip":
+    if _only_group():
+        print("\n== AO3 series ==\nSkipped (one-group run — discovery only).")
+    elif _saves_only() or _series_sweep() != "skip":
         run_ao3_series_pass(db, ao3, space, _with_backoff)
     else:
         print("\n== AO3 series ==\nSkipped (weekly sweep handles follows; taps still run in the fast lane).")
@@ -819,7 +839,7 @@ def main() -> None:
     print("\n== Repair stale downloads ==")
     rs_done = rs_failed = 0
     try:
-        stale = [] if _saves_only() else fetch_stale_offline_works(db, limit=_repair_stale_max())
+        stale = [] if (_saves_only() or _only_group()) else fetch_stale_offline_works(db, limit=_repair_stale_max())
         print(f"{len(stale)} stale 'downloaded-but-empty' work(s) to re-fetch.")
         for w in stale:
             src_id = w["source"]
@@ -923,7 +943,7 @@ def main() -> None:
     # but blank on the library page). Re-fetch their metadata — now soup-backed —
     # a capped batch at a time. Metadata only; no chapter re-download.
     print("\n== Repair blank metadata ==")
-    repair_ids = fetch_untitled_works(db, limit=_repair_max())
+    repair_ids = [] if _only_group() else fetch_untitled_works(db, limit=_repair_max())
     print(f"{len(repair_ids)} work(s) with blank metadata to repair.")
     repaired = repair_failed = 0
     for wid in repair_ids:
@@ -950,6 +970,16 @@ def main() -> None:
     # ---- Pass 4: tracked tag groups → discover new matches -----------------
     print("\n== Tracked tag groups ==")
     groups = fetch_tracked_groups(db)
+    # One-group mode: the app tapped Sync on a single group and is waiting with a
+    # spinner. Narrow to that group and nothing else.
+    only = _only_group()
+    if only:
+        groups = [g for g in groups if str(g.get("id")) == only]
+        if not groups:
+            print(f"ONLY_GROUP={only} matched no tracked group — nothing to do.")
+            return
+        label = groups[0].get("label") or (groups[0].get("tags") or [{}])[0].get("name") or only
+        print(f"One-group run: {label!r} only.")
     print(f"{len(groups)} tracked group(s).")
     # Keys-only tombstone of dismissed works — skipped on upsert so a work the user
     # swiped away is never re-added by a later tag search (dismiss hard-deletes the
@@ -1184,6 +1214,13 @@ def main() -> None:
       time.sleep(90)
       pending, failed = failed, []
       round_no += 1
+
+    # One-group mode stops here. The app dispatched this run for one tag and is
+    # holding a spinner; backfill, reflow and the new-chapter refresh are the
+    # nightly's job and would turn a one-minute answer into an hour.
+    if _only_group():
+        print("\n== One-group run complete: discovery done, everything else left to the nightly. ==")
+        return
 
     # ---- Pass 5: offline backfill → full copies for everything else --------
     # The app is offline-first, so every work should be a full offline copy.

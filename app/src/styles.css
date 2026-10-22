@@ -341,6 +341,9 @@ input,textarea { font-family:inherit; }
 /* An Appbar icon action that's mid-flight — spins its own glyph in place, so a
    header button can show it's working without borrowing room for a spinner. */
 .iconbtn.busy svg { animation:spin .9s linear infinite; }
+/* Same idea for an icon inside a normal button (the group sheet's Sync, which
+   waits on a worker run and needs to look alive while it does). */
+.spinglyph { animation:spin .9s linear infinite; }
 
 /* ============================================================================
    CHAPTER ROW (TOC)

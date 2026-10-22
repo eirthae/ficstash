@@ -8,9 +8,9 @@ import {
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch, fetchStashCounts,
 } from '../lib/tags.js';
-import { discoverGroup, discoverGroupAllTime, errText } from '../lib/ondevice.js';
+import { errText } from '../lib/ondevice.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
-import { syncNow } from '../lib/sync.js';
+import { syncNow, syncGroupViaWorker } from '../lib/sync.js';
 import { fetchWorkById } from '../lib/library.js';
 import { sortMatches } from '../lib/dates.js';
 import { LANGUAGES } from '../lib/languages.js';
@@ -890,13 +890,13 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   const [statusFilter, setStatusFilter] = useState('all'); // all | ongoing | complete — quick filter over the results
   const [sort, setSort] = useState('newest');              // newest | oldest | longest | shortest
   const [menuOpen, setMenuOpen] = useState(false);           // tap the title → this group's actions
-  const [syncing, setSyncing] = useState(false);             // quick sync in flight
-  const [deep, setDeep] = useState(null);                    // all-time catch-up: {pages, written} | null
+  // Which stage a worker-run sync has reached: null | dispatching | queued |
+  // running. One piece of state for both buttons, which can't run at once.
+  const [job, setJob] = useState(null);
   // What the last sync actually did, kept on screen in the sheet. A toast is
   // gone in 2.4s and "it failed" is not a diagnosis — when a sync goes wrong
   // the real error text needs to still be there to read.
   const [lastRun, setLastRun] = useState(null);              // { ok, text } | null
-  const stopDeep = useRef(false);                            // set by the Stop button, read between pages
   const [toast, showToast] = useToast();
   const c = TAG_COLOR[tag.kind] || 'var(--accent)';
   const kindLabel = { relationship: 'relationship', fandom: 'fandom', freeform: 'tag', character: 'character', group: 'tag group', language: 'language', genre: 'genre' }[tag.kind] || 'tag';
@@ -951,12 +951,18 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   };
 
   // ---- the two syncs -------------------------------------------------------
-  // Both run ON THE PHONE, and that's the whole point: the nightly worker asks AO3
-  // from a GitHub Actions datacenter address that AO3 Cloudflare-525s, which is why
-  // a tag can sit empty for days while everything else works. From here, over your
-  // own connection, AO3 answers. Neither stamps last_checked — the worker owns its
-  // window, and claiming it would stop the nightly run looking at this group again.
-  const busy = syncing || !!deep;
+  // Both ask the WORKER to do the fetching, and wait for it.
+  //
+  // They used to fetch here, on the phone, on the theory that AO3 refuses the
+  // worker's datacenter IP and answers a residential device. The database says
+  // the exact opposite: on-device discovery has never written a single row —
+  // every match, in every group, for the four months since it shipped, came from
+  // a worker run hours later. AO3 refuses the logged-out phone and answers the
+  // logged-in worker. So the phone asks instead of pretending.
+  //
+  // The price is time: GitHub has to start a runner, so a tap is a minute or two
+  // rather than a moment, and the buttons say which stage they're at.
+  const busy = !!job;
 
   // Re-read the list and count what's actually NEW to it. Never report rows
   // written: the upsert rewrites works you already have, so that number would
@@ -978,81 +984,46 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     ? 'AO3 is refusing searches right now — try later'
     : "Couldn't save the results — try again", 'solar:danger-triangle-bold');
 
-  // Quick: one search page, the ~20 newest-updated works. Seconds. Closes the
-  // sheet straight away so the toast lands over the list you came to look at.
-  const syncGroup = async () => {
-    if (busy) return;
-    setSyncing(true);
-    setMenuOpen(false);
+  // Shared by both buttons: dispatch a one-group worker run, follow it, then
+  // re-read the list and report what actually landed.
+  const runViaWorker = async (allTime) => {
     const before = new Set((items || []).map((w) => w.id));
     const t0 = Date.now();
+    const phase = (p) => setJob(p);
+    setJob('dispatching');
     try {
-      await discoverGroup(tag, undefined, undefined, { patient: true });
+      const r = await syncGroupViaWorker(tag.id, { allTime, onPhase: phase });
+      if (r.alreadyRunning) {
+        setLastRun({ ok: false, text: 'A sync is already running — try again when it finishes.' });
+        showToast('A sync is already running', 'solar:clock-circle-linear');
+        return;
+      }
+      if (r.timedOut) {
+        // The run may well still be going; the matches will simply appear later.
+        setLastRun({ ok: false, text: `Still running after ${secs(t0)}s — results will appear when it finishes.` });
+        showToast('Taking longer than usual — it will finish in the background', 'solar:clock-circle-linear');
+        return;
+      }
+      if (!r.ok) {
+        setLastRun({ ok: false, text: `Worker run ${r.conclusion || 'failed'} after ${secs(t0)}s${r.error ? ` · ${r.error}` : ''}` });
+        showToast(r.error ? `Couldn't start the sync — ${r.error}` : 'The sync run failed', 'solar:danger-triangle-bold');
+        return;
+      }
       const added = await refreshAfter(before);
-      setLastRun({ ok: true, text: `Checked in ${secs(t0)}s · ${added} new · ${before.size + added} in this group` });
+      setLastRun({ ok: true, text: `${allTime ? 'Caught up all-time' : 'Checked'} in ${secs(t0)}s · ${added} new · ${before.size + added} in this group` });
+      setMenuOpen(false);
       if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
-      else showToast('Nothing new', 'solar:check-circle-bold');
+      else showToast(allTime ? 'Nothing new — you already had it all' : 'Nothing new', 'solar:check-circle-bold');
     } catch (e) {
-      setLastRun({ ok: false, text: `Failed after ${secs(t0)}s · ${errText(e)}` });
+      setLastRun({ ok: false, text: `Threw after ${secs(t0)}s · ${errText(e)}` });
       failToast(e);
     } finally {
-      setSyncing(false);
+      setJob(null);
     }
   };
 
-  // All-time: walk the tag's search back through the pages for the back catalogue,
-  // not just today. This is the seed the worker is meant to do on a group's first
-  // run and can't, which is why a group can be stuck on the handful of works the
-  // app grabbed when you made it. It takes about a minute, so the sheet stays open
-  // with live progress and the button turns into Stop.
-  const syncAllTime = async () => {
-    if (busy) return;
-    stopDeep.current = false;
-    setDeep({ pages: 0, written: 0 });
-    const before = new Set((items || []).map((w) => w.id));
-    const t0 = Date.now();
-    try {
-      const r = await discoverGroupAllTime(tag, {
-        onProgress: setDeep,
-        shouldStop: () => stopDeep.current,
-      });
-      const added = await refreshAfter(before);
-      // Keep the whole shape of the run on screen: how far it got, how long it
-      // took, and the source's own words when it went wrong.
-      setLastRun({
-        ok: !r.failed && !r.writeError,
-        text: `${r.pages} page${r.pages === 1 ? '' : 's'} in ${secs(t0)}s · ${r.written} written · ${added} new`
-          + (r.writeError ? ` · SAVE FAILED: ${r.writeError}` : '')
-          + (r.failed ? ` · AO3: ${r.reason || 'no reason given'}` : '')
-          + (r.capped ? ' · hit the page cap' : '')
-          + (r.stopped ? ' · stopped by you' : ''),
-      });
-      setMenuOpen(false);
-      // Say what actually happened, including the half-finished cases — a run that
-      // died at page 9 still kept everything it wrote.
-      if (r.writeError) {
-        showToast(`Couldn't save — ${r.writeError.slice(0, 40)}`, 'solar:danger-triangle-bold');
-      } else if (r.failed) {
-        showToast(added ? `AO3 stopped answering — kept ${plural(added)}` : 'AO3 is refusing searches right now — try later',
-          'solar:danger-triangle-bold');
-      } else if (r.stopped) {
-        showToast(added ? `Stopped — ${plural(added)}` : 'Stopped', 'solar:check-circle-bold');
-      } else if (!added) {
-        showToast('Nothing new — you already had it all', 'solar:check-circle-bold');
-      } else {
-        // `capped` means it hit the page ceiling, so there IS more further back.
-        // There's no resume — a second run starts at page 1 — so don't imply one.
-        showToast(r.capped ? `${plural(added)} — as far back as one run goes` : plural(added),
-          'solar:magic-stick-3-bold');
-      }
-    } catch (e) {
-      setLastRun({ ok: false, text: `Threw after ${secs(t0)}s · ${errText(e)}` });
-      setMenuOpen(false);
-      failToast(e);
-    } finally {
-      setDeep(null);
-    }
-  };
+  const syncGroup = () => { if (!busy) runViaWorker(false); };
+  const syncAllTimeViaWorker = () => { if (!busy) runViaWorker(true); };
 
   const list = items || [];
   // Quick complete/ongoing filter over the loaded results (client-side — separate
@@ -1143,20 +1114,28 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         open={menuOpen}
         // A catch-up is a minute of fetching — don't let a stray tap on the scrim
         // drop the sheet showing its progress and leave it running unseen.
-        onClose={() => { if (!deep) setMenuOpen(false); }}
+        onClose={() => { if (!job) setMenuOpen(false); }}
         // Same count the header shows — the group's size, not however many
         // matches happen to be loaded into this list right now.
         tag={tag} kindLabel={kindLabel} srcLabel={srcLabel} count={tag.count ?? list.length}
-        syncing={syncing} deep={deep} busy={busy} lastRun={lastRun}
+        job={job} busy={busy} lastRun={lastRun}
         onSync={syncGroup}
-        onSyncAllTime={syncAllTime}
-        onStopAllTime={() => { stopDeep.current = true; }}
+        onSyncAllTime={syncAllTimeViaWorker}
         onEdit={onEdit && tag.kind !== 'language' ? () => { setMenuOpen(false); onEdit(tag); nav.pop(); } : null}
         onRemove={() => { setMenuOpen(false); removeGroup(); }}
       />
     </div>
   );
 }
+
+// What a dispatched worker run is doing, in words. "Asking the worker" and
+// "running" are genuinely different waits — a runner takes a while to start —
+// and a button that just sits there for ninety seconds reads as broken.
+const JOB_LABEL = {
+  dispatching: 'Asking the worker…',
+  queued: 'Queued at GitHub…',
+  running: 'Searching AO3…',
+};
 
 // Everything you can do TO a tag group, one tap behind its title: the two syncs
 // as proper full-width buttons, and the two that change or end the group as
@@ -1165,7 +1144,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
 // it, so neither should sit under your thumb in the header.
 function GroupActionsSheet({
   open, onClose, tag, kindLabel, srcLabel, count,
-  syncing, deep, busy, lastRun, onSync, onSyncAllTime, onStopAllTime, onEdit, onRemove,
+  job, busy, lastRun, onSync, onSyncAllTime, onEdit, onRemove,
 }) {
   // AO3 only. It's the one source the worker gets blocked from, and the only one
   // whose search tells "couldn't read it" apart from "nothing there" — so it's
@@ -1200,19 +1179,19 @@ function GroupActionsSheet({
       </div>
     }>
       {canSync ? (
-        // No explainer text under either button — the labels carry it, and the
-        // Stop button says where a catch-up has got to while it runs.
+        // A tap here starts a worker run and waits for it, so the buttons say
+        // which stage it's at — "asking" and "running" feel very different from
+        // a button that has simply stopped responding for ninety seconds.
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button className="btn btn-lg btn-primary btn-block" onClick={onSync} disabled={busy}
             style={busy ? { opacity: .6 } : undefined}>
-            <Icon icon="solar:refresh-circle-linear" size={19} />
-            {syncing ? 'Checking AO3…' : 'Check for new works'}
+            <Icon icon="solar:refresh-circle-linear" size={19} className={busy ? 'spinglyph' : undefined} />
+            {busy ? JOB_LABEL[job] : 'Check for new works'}
           </button>
-          <button className="btn btn-lg btn-surface btn-block"
-            onClick={deep ? onStopAllTime : onSyncAllTime} disabled={syncing}
-            style={syncing ? { opacity: .6 } : undefined}>
-            <Icon icon={deep ? 'solar:stop-circle-linear' : 'solar:history-linear'} size={19} />
-            {deep ? `Stop — page ${deep.pages}, ${deep.written} found` : 'Catch up all-time'}
+          <button className="btn btn-lg btn-surface btn-block" onClick={onSyncAllTime} disabled={busy}
+            style={busy ? { opacity: .6 } : undefined}>
+            <Icon icon="solar:history-linear" size={19} />
+            Catch up all-time
           </button>
           {/* What the last run did, in its own words. Stays put after the toast
               has gone, because "it failed" is not something you can act on. */}

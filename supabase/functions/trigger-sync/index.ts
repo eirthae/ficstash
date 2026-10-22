@@ -76,8 +76,25 @@ Deno.serve(async (req: Request) => {
     // A "saves-only" POST is a real-time Save: it runs in its own workflow lane
     // (separate concurrency group), so it fires immediately and we DON'T guard it
     // against a running full sync.
+    // groupId → discovery for ONE tracked group, skipping every other pass: the
+    // app's per-group Sync buttons. The phone asks the worker because the phone
+    // cannot do it — on-device AO3 search is logged out and has never once
+    // written a row, while this worker is logged in and searches fine.
+    // allTime pairs with it for the back-catalogue catch-up.
     let savesOnly = false;
-    try { savesOnly = !!(await req.json())?.savesOnly; } catch (_e) { /* no body */ }
+    let groupId = "";
+    let allTime = false;
+    try {
+      const body = await req.json();
+      savesOnly = !!body?.savesOnly;
+      groupId = String(body?.groupId || "").trim();
+      allTime = !!body?.allTime;
+    } catch (_e) { /* no body */ }
+    // Only ever a group id — never anything that could be smuggled into a
+    // workflow input.
+    if (groupId && !/^[0-9a-fA-F-]{36}$/.test(groupId)) {
+      return json({ ok: false, error: "Bad groupId." }, 400);
+    }
 
     // For a normal sync, only dispatch if one isn't already queued/in progress —
     // otherwise every pull-to-refresh / save / app-open POST piles up runs that
@@ -89,10 +106,17 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true, alreadyRunning: true, run: current });
       }
     }
+    const inputs: Record<string, unknown> = savesOnly ? { saves_only: true } : {};
+    if (groupId) {
+      inputs.only_group = groupId;
+      // A one-group run must not drag the weekly series sweep in behind it.
+      inputs.series_sweep = "skip";
+      if (allTime) inputs.reseed_tags = true;
+    }
     const res = await fetch(gh(`actions/workflows/${WORKFLOW}/dispatches`), {
       method: "POST",
       headers: { ...ghHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ ref: "main", inputs: savesOnly ? { saves_only: true } : {} }),
+      body: JSON.stringify({ ref: "main", inputs }),
     });
     // GitHub returns 204 No Content on a successful dispatch.
     if (res.status === 204) return json({ ok: true, dispatched: true });
