@@ -108,7 +108,15 @@ REQUIRED_ENV = (
 # AO3 is a volunteer nonprofit — stay polite. Space requests apart and back off
 # (with growing waits) whenever AO3 signals it's being hit too hard.
 RATE_LIMIT_SECONDS = 6
-BACKOFF_SECONDS = (30, 60, 120)
+# Waits between retries of a failed AO3 call. Was (30, 60, 120) — 210 seconds
+# burned per failed search — which was fine when failures were rare. They aren't:
+# the 2026-10-21 reseed logged 89 retries and 21 AO3 error pages, and spent
+# almost its entire 5-hour budget WAITING, getting through 3 of 43 groups. These
+# failures are Cloudflare 5xx / "responding too slowly" pages that clear in
+# seconds, not rate limits that need minutes, so the ladder is now short enough
+# that a flaky AO3 costs us groups instead of the whole run. A genuine 429 still
+# gets the full ladder plus RATE_LIMIT_SECONDS spacing between every request.
+BACKOFF_SECONDS = (10, 25, 60)
 DEFAULT_REPAIR_MAX = 100
 # Per-run cap on how many not-yet-offline works to fully download. Default is
 # unbounded so the library fully populates (no half-empty works); requests are
@@ -1002,7 +1010,7 @@ def main() -> None:
     # AO3 intermittently answers a search with a page that is neither a results
     # list nor its "No results found" notice — a throttle/error page under load.
     # ao3-api then dies on `results.find_all(...)`, which surfaces here as an
-    # AttributeError. _with_backoff already retries (30/60/120s) and the tag can
+    # AttributeError. _with_backoff already retries (see BACKOFF_SECONDS) and the tag can
     # STILL be refused for minutes at a time, so a group gets skipped for the
     # whole run. It varies run to run — 'Supportive Montreal Voyageurs' failed on
     # Oct 15 and returned matches on Oct 17 — so one more attempt at the end,
