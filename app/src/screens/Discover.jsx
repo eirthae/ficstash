@@ -966,8 +966,11 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   };
 
   const plural = (n) => `${n} new ${n === 1 ? 'work' : 'works'}`;
+  // "Try again" was the wrong advice: when AO3 refuses searches it's refusing
+  // everyone's, for minutes at a time, and tapping again straight away just
+  // fails again. Say whose problem it is and that waiting is the fix.
   const failToast = (e) => showToast(e && e.code === 'source_unavailable'
-    ? "AO3 didn't answer — try again"
+    ? 'AO3 is refusing searches right now — try later'
     : "Couldn't save the results — try again", 'solar:danger-triangle-bold');
 
   // Quick: one search page, the ~20 newest-updated works. Seconds. Closes the
@@ -978,7 +981,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     setMenuOpen(false);
     const before = new Set((items || []).map((w) => w.id));
     try {
-      await discoverGroup(tag);
+      await discoverGroup(tag, undefined, undefined, { patient: true });
       const added = await refreshAfter(before);
       if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
       else showToast('Nothing new', 'solar:check-circle-bold');
@@ -1009,7 +1012,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
       // Say what actually happened, including the half-finished cases — a run that
       // died at page 9 still kept everything it wrote.
       if (r.failed) {
-        showToast(added ? `AO3 stopped answering — kept ${plural(added)}` : "AO3 didn't answer — try again",
+        showToast(added ? `AO3 stopped answering — kept ${plural(added)}` : 'AO3 is refusing searches right now — try later',
           'solar:danger-triangle-bold');
       } else if (r.stopped) {
         showToast(added ? `Stopped — ${plural(added)}` : 'Stopped', 'solar:check-circle-bold');

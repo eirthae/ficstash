@@ -34,13 +34,34 @@ function splitQuery(url) {
   return { base: s.slice(0, qi), params };
 }
 
-async function getOnce(url) {
+// How long a single request may take before we give up on it.
+//
+// This existed only as a default before, and the default was the problem.
+// CapacitorHttp on Android is OkHttp, whose connect/read timeouts are 10
+// SECONDS. AO3 under load answers in 15-36s — measured 2026-10-22 from a
+// residential connection: a login page at 15.4s, a tag search at 36.3s, both
+// HTTP 200. Every one of those would have been killed at 10s and reported as
+// "AO3 didn't answer". A browser has no such limit, which is exactly why AO3
+// works in a browser and not in the app, on the same phone, on the same wifi,
+// at the same moment. Retrying harder could never have fixed it: the request
+// was being cut off before AO3 had finished answering.
+//
+// 20s is the floor for everything (double OkHttp's default, so slow work pages
+// land too); a patient caller asks for much more.
+const DEFAULT_TIMEOUT_MS = 20000;
+const timeouts = (ms) => {
+  const t = ms || DEFAULT_TIMEOUT_MS;
+  return { connectTimeout: t, readTimeout: t };
+};
+
+async function getOnce(url, timeoutMs) {
   const { base, params } = splitQuery(url);
   const res = await CapacitorHttp.get({
     url: base,
     ...(params ? { params, shouldEncodeUrlParams: false } : {}),
     headers: { 'User-Agent': API_UA, Accept: '*/*' },
     responseType: 'text',
+    ...timeouts(timeoutMs),
   });
   let data = res && res.data;
   const raw = typeof data === 'string' ? data : '';
@@ -49,11 +70,11 @@ async function getOnce(url) {
 }
 
 // Fetch + parse a JSON endpoint, retrying past AO3's intermittent 525s.
-export async function fetchJson(url, { attempts = 4 } = {}) {
+export async function fetchJson(url, { attempts = 4, timeoutMs = 0 } = {}) {
   let last = { status: 0, data: null, url, raw: '' };
   for (let i = 0; i < attempts; i++) {
     try {
-      const r = await getOnce(url);
+      const r = await getOnce(url, timeoutMs);
       // Success = 2xx AND the body parsed to non-null JSON. AO3 autocomplete
       // returns a top-level array; romance.io returns an object ({success,books}).
       // Both are non-null; an error page (HTML) fails JSON.parse → null → retry.
@@ -67,13 +88,14 @@ export async function fetchJson(url, { attempts = 4 } = {}) {
   return last;
 }
 
-async function getHtmlOnce(url, accept) {
+async function getHtmlOnce(url, accept, timeoutMs) {
   const { base, params } = splitQuery(url);
   const res = await CapacitorHttp.get({
     url: base,
     ...(params ? { params, shouldEncodeUrlParams: false } : {}),
     headers: { 'User-Agent': HTML_UA, Accept: accept },
     responseType: 'text',
+    ...timeouts(timeoutMs),
     // follow redirects (default) so a restricted work lands on its /users/login
     // page — the caller reads res.url to detect that.
   });
@@ -89,7 +111,7 @@ async function getHtmlOnce(url, accept) {
 // Scribble Hub's chapter list comes from an admin-ajax POST (not in the page), so
 // the on-device SH downloader needs this. Residential IP like the GET helpers —
 // Scribble Hub Cloudflare-403s datacenter IPs (the worker), but answers the phone.
-export async function fetchHtmlPost(url, form = {}, { headers = {}, attempts = 3 } = {}) {
+export async function fetchHtmlPost(url, form = {}, { headers = {}, attempts = 3, timeoutMs = 0 } = {}) {
   const body = Object.entries(form)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join('&');
@@ -106,6 +128,7 @@ export async function fetchHtmlPost(url, form = {}, { headers = {}, attempts = 3
         },
         data: body,
         responseType: 'text',
+        ...timeouts(timeoutMs),
       });
       const data = res && res.data;
       const html = typeof data === 'string' ? data : (data == null ? '' : String(data));
@@ -134,6 +157,7 @@ export async function fetchImageDataUri(url) {
       ...(params ? { params, shouldEncodeUrlParams: false } : {}),
       headers: { 'User-Agent': HTML_UA, Accept: 'image/*,*/*' },
       responseType: 'blob',
+      ...timeouts(),
     });
     const b64 = typeof res.data === 'string' ? res.data : '';
     if (!b64) return '';
@@ -156,17 +180,27 @@ export async function fetchImageDataUri(url) {
 // the on-device counterpart to fetchJson. Used for AO3 work pages, tag search and
 // series paging (the port of the worker's AO3 scraping). Returns {status,url,html}
 // — a non-2xx or empty body after all attempts comes back so the caller decides.
-export async function fetchHtml(url, { attempts = 4, accept = 'text/html,application/xhtml+xml' } = {}) {
+// `waits` replaces the default 150ms gap with a real ladder, for callers that can
+// afford to wait out a struggling AO3 (a tap the user is watching) rather than
+// report failure in half a second. `budgetMs` caps the whole attempt so a patient
+// caller still can't hang forever on requests that never answer.
+export async function fetchHtml(url, {
+  attempts = 4, accept = 'text/html,application/xhtml+xml', waits = null, budgetMs = 0, timeoutMs = 0,
+} = {}) {
+  const started = Date.now();
   let last = { status: 0, url, html: '' };
   for (let i = 0; i < attempts; i++) {
     try {
-      const r = await getHtmlOnce(url, accept);
+      const r = await getHtmlOnce(url, accept, timeoutMs);
       if (r.status >= 200 && r.status < 300 && r.html) return r;
       last = r;
     } catch (e) {
       last = { status: 0, url, html: '' };
     }
-    if (i < attempts - 1) await new Promise((res) => setTimeout(res, 150));
+    if (i >= attempts - 1) break;
+    const wait = waits ? waits[Math.min(i, waits.length - 1)] : 150;
+    if (budgetMs && Date.now() - started + wait >= budgetMs) break;
+    await new Promise((res) => setTimeout(res, wait));
   }
   return last;
 }

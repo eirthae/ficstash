@@ -4,6 +4,39 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-22 — The app was hanging up on AO3 after 10 seconds (v0.8.73)
+
+### Fixed
+
+- **Every on-device AO3 fetch was cut off at 10 seconds.** The app set no HTTP
+  timeout anywhere, so `CapacitorHttp` used OkHttp's default — 10s connect, 10s
+  read. AO3 under load takes far longer than that to answer: measured from a
+  residential connection on 2026-10-22, a tag search returned **HTTP 200 after
+  36.3 seconds** and the login page after 15.4. Those are *successes*, and the
+  app threw every one of them away and reported "AO3 didn't answer". A browser
+  has no such limit, which is exactly why AO3 worked in a browser and not in the
+  app — same phone, same wifi, same moment. Retrying harder could never have
+  fixed it; the request was being cut off before AO3 finished replying.
+  Everything now gets at least 20s, and a sync you tap gets 45s.
+- **Manual syncs now wait AO3 out instead of giving up in half a second.** The
+  retry gap was 150ms, so a tap made four attempts in about 0.6 seconds and
+  called it. The two buttons in a group's sheet now retry 2.5s / 6s / 15s apart
+  within a ~110s budget — four chances spread over two minutes. Spacing them out
+  is also the only polite thing to send a volunteer-run site that is struggling;
+  four requests 150ms apart is not. Group creation, editing and the background
+  sweep stay fast and fail quietly, since someone is waiting on those.
+- **"Try again" was the wrong advice** when AO3 is refusing everyone's searches
+  for minutes at a time. The message now says it's AO3, and to try later.
+
+### Notes
+
+- No AO3 account is involved in any of this, and none is needed: discovery reads
+  the same public search pages a logged-out visitor sees. The app still stores no
+  AO3 credentials.
+- An earlier theory that Cloudflare was fingerprinting non-browser clients was
+  wrong and is recorded here so it isn't re-investigated: the login page returned
+  200 to plain curl, just slowly. The wall was our own timeout.
+
 ## 2026-10-22 — Sync a tag yourself, and the seed bug that kept groups empty (v0.8.72)
 
 ### Fixed

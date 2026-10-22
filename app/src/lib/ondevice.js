@@ -72,7 +72,11 @@ async function readDismissedKeys() {
 // results when a group is created or edited — it never touches last_checked, so
 // the worker's all-time seed still happens. AO3-only; other sources are skipped
 // (the worker still handles them).
-export async function discoverGroup(group, prefs, dismissed) {
+// `patient` makes the AO3 call wait out a struggling Archive (seconds between
+// retries instead of milliseconds) — for a sync the user tapped and is watching.
+// Group creation, editing and the background sweep leave it off: those have
+// someone waiting on a screen for them to return.
+export async function discoverGroup(group, prefs, dismissed, { patient = false } = {}) {
   if (!hasSupabase) return 0;
   const g = normGroup(group);
   prefs = prefs || (await readPrefs());
@@ -90,11 +94,11 @@ export async function discoverGroup(group, prefs, dismissed) {
   let metas = [];
   try {
     if (g.langCode) {
-      metas = await searchLanguage(g.langCode);
+      metas = await searchLanguage(g.langCode, 1, { patient });
     } else if (g.matchMode === 'any' && g.include.length > 1) {
-      for (const t of g.include) { metas.push(...await searchTags([t], excludeNames)); await sleep(800); }
+      for (const t of g.include) { metas.push(...await searchTags([t], excludeNames, 1, { patient })); await sleep(800); }
     } else {
-      metas = await searchTags(g.include, excludeNames);
+      metas = await searchTags(g.include, excludeNames, 1, { patient });
     }
   } catch (e) {
     // Let it out instead of returning 0. searchTags/searchLanguage already throw
@@ -204,7 +208,11 @@ export async function discoverGroupAllTime(group, { onProgress, shouldStop } = {
       if (shouldStop && shouldStop()) return { written, pages, failed: false, stopped: true, capped };
       let metas;
       try {
-        metas = q === null ? await searchLanguage(g.langCode, page) : await searchTags(q, excludeNames, page);
+        // Always patient: a catch-up is a tap the user is watching, and losing
+        // the whole walk to one unlucky page is exactly what it must not do.
+        metas = q === null
+          ? await searchLanguage(g.langCode, page, { patient: true })
+          : await searchTags(q, excludeNames, page, { patient: true });
       } catch (e) {
         // Keep what we already wrote and say where it stopped — a catch-up that
         // got 300 of 500 works is worth far more than a thrown-away run.

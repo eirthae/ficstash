@@ -261,7 +261,34 @@ export function parseSearchResults(html) {
 }
 
 // Search AO3 by tags on-device (one page). Empty/parse-fail → [].
-export async function searchTags(include, exclude = [], page = 1) {
+// How a PATIENT search waits AO3 out. The important number here is the TIMEOUT,
+// not the retries.
+//
+// AO3's /works/search is the first thing to go when the Archive is under load,
+// and the failure isn't a flat refusal — the origin just gets very slow and
+// Cloudflare 525s whatever it can't serve in time. Measured 2026-10-22 from a
+// residential connection: a tag search returned HTTP 200 after 36.3 seconds, and
+// the login page after 15.4. Those are successes. The app threw them away,
+// because CapacitorHttp's default read timeout is 10 seconds — so every slow
+// answer was cut off and reported as "AO3 didn't answer". No amount of retrying
+// could fix that; the request never got to finish.
+//
+// 45s is chosen to cover the slowest success actually observed with headroom.
+// The retry ladder is the secondary half: it rides out the 525 spells, and
+// spacing attempts seconds apart rather than 150ms apart is also the only polite
+// thing to send a volunteer-run site that is visibly struggling.
+//
+// Only foreground syncs the user tapped are patient. Creating a group, editing
+// one, and the background sweep stay quick and fail quietly — somebody is
+// watching a screen for those to come back.
+const PATIENT_TIMEOUT_MS = 45000;
+const PATIENT_WAITS = [2500, 6000, 15000];
+const PATIENT_BUDGET_MS = 110000;
+const retryPolicy = (patient) => (patient
+  ? { attempts: 4, waits: PATIENT_WAITS, budgetMs: PATIENT_BUDGET_MS, timeoutMs: PATIENT_TIMEOUT_MS }
+  : { attempts: 4 });
+
+export async function searchTags(include, exclude = [], page = 1, { patient = false } = {}) {
   const inc = (include || []).map((t) => String(t).trim()).filter(Boolean);
   if (!inc.length) return [];
   // THROWS when AO3 could not be read, and returns [] only when AO3 genuinely
@@ -270,7 +297,7 @@ export async function searchTags(include, exclude = [], page = 1) {
   // the caller then stamped the group as checked. That turned a brand-new
   // group's all-time back-catalogue seed into a one-day incremental window, and
   // the tag stayed empty for good.
-  const r = await fetchHtml(searchUrl(inc, exclude, page));
+  const r = await fetchHtml(searchUrl(inc, exclude, page), retryPolicy(patient));
   if (!r || r.status !== 200) {
     throw new Error(`AO3 unavailable (status ${r ? r.status : 'no response'})`);
   }
@@ -278,10 +305,10 @@ export async function searchTags(include, exclude = [], page = 1) {
 }
 
 // Browse a whole AO3 language (newest first) — for "Browse by language" groups.
-export async function searchLanguage(code, page = 1) {
+export async function searchLanguage(code, page = 1, { patient = false } = {}) {
   if (!code) return [];
   // Throws on an unreadable AO3, [] only on a genuine empty result — see searchTags.
-  const r = await fetchHtml(languageSearchUrl(code, page));
+  const r = await fetchHtml(languageSearchUrl(code, page), retryPolicy(patient));
   if (!r || r.status !== 200) {
     throw new Error(`AO3 unavailable (status ${r ? r.status : 'no response'})`);
   }
