@@ -8,7 +8,7 @@ import {
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch, fetchStashCounts,
 } from '../lib/tags.js';
-import { discoverGroup, discoverGroupAllTime } from '../lib/ondevice.js';
+import { discoverGroup, discoverGroupAllTime, errText } from '../lib/ondevice.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
 import { syncNow } from '../lib/sync.js';
 import { fetchWorkById } from '../lib/library.js';
@@ -892,6 +892,10 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   const [menuOpen, setMenuOpen] = useState(false);           // tap the title → this group's actions
   const [syncing, setSyncing] = useState(false);             // quick sync in flight
   const [deep, setDeep] = useState(null);                    // all-time catch-up: {pages, written} | null
+  // What the last sync actually did, kept on screen in the sheet. A toast is
+  // gone in 2.4s and "it failed" is not a diagnosis — when a sync goes wrong
+  // the real error text needs to still be there to read.
+  const [lastRun, setLastRun] = useState(null);              // { ok, text } | null
   const stopDeep = useRef(false);                            // set by the Stop button, read between pages
   const [toast, showToast] = useToast();
   const c = TAG_COLOR[tag.kind] || 'var(--accent)';
@@ -966,6 +970,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   };
 
   const plural = (n) => `${n} new ${n === 1 ? 'work' : 'works'}`;
+  const secs = (t0) => ((Date.now() - t0) / 1000).toFixed(1);
   // "Try again" was the wrong advice: when AO3 refuses searches it's refusing
   // everyone's, for minutes at a time, and tapping again straight away just
   // fails again. Say whose problem it is and that waiting is the fix.
@@ -980,12 +985,15 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     setSyncing(true);
     setMenuOpen(false);
     const before = new Set((items || []).map((w) => w.id));
+    const t0 = Date.now();
     try {
       await discoverGroup(tag, undefined, undefined, { patient: true });
       const added = await refreshAfter(before);
+      setLastRun({ ok: true, text: `Checked in ${secs(t0)}s · ${added} new · ${before.size + added} in this group` });
       if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
       else showToast('Nothing new', 'solar:check-circle-bold');
     } catch (e) {
+      setLastRun({ ok: false, text: `Failed after ${secs(t0)}s · ${errText(e)}` });
       failToast(e);
     } finally {
       setSyncing(false);
@@ -1002,16 +1010,29 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     stopDeep.current = false;
     setDeep({ pages: 0, written: 0 });
     const before = new Set((items || []).map((w) => w.id));
+    const t0 = Date.now();
     try {
       const r = await discoverGroupAllTime(tag, {
         onProgress: setDeep,
         shouldStop: () => stopDeep.current,
       });
       const added = await refreshAfter(before);
+      // Keep the whole shape of the run on screen: how far it got, how long it
+      // took, and the source's own words when it went wrong.
+      setLastRun({
+        ok: !r.failed && !r.writeError,
+        text: `${r.pages} page${r.pages === 1 ? '' : 's'} in ${secs(t0)}s · ${r.written} written · ${added} new`
+          + (r.writeError ? ` · SAVE FAILED: ${r.writeError}` : '')
+          + (r.failed ? ` · AO3: ${r.reason || 'no reason given'}` : '')
+          + (r.capped ? ' · hit the page cap' : '')
+          + (r.stopped ? ' · stopped by you' : ''),
+      });
       setMenuOpen(false);
       // Say what actually happened, including the half-finished cases — a run that
       // died at page 9 still kept everything it wrote.
-      if (r.failed) {
+      if (r.writeError) {
+        showToast(`Couldn't save — ${r.writeError.slice(0, 40)}`, 'solar:danger-triangle-bold');
+      } else if (r.failed) {
         showToast(added ? `AO3 stopped answering — kept ${plural(added)}` : 'AO3 is refusing searches right now — try later',
           'solar:danger-triangle-bold');
       } else if (r.stopped) {
@@ -1025,6 +1046,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
           'solar:magic-stick-3-bold');
       }
     } catch (e) {
+      setLastRun({ ok: false, text: `Threw after ${secs(t0)}s · ${errText(e)}` });
       setMenuOpen(false);
       failToast(e);
     } finally {
@@ -1125,7 +1147,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         // Same count the header shows — the group's size, not however many
         // matches happen to be loaded into this list right now.
         tag={tag} kindLabel={kindLabel} srcLabel={srcLabel} count={tag.count ?? list.length}
-        syncing={syncing} deep={deep} busy={busy}
+        syncing={syncing} deep={deep} busy={busy} lastRun={lastRun}
         onSync={syncGroup}
         onSyncAllTime={syncAllTime}
         onStopAllTime={() => { stopDeep.current = true; }}
@@ -1143,7 +1165,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
 // it, so neither should sit under your thumb in the header.
 function GroupActionsSheet({
   open, onClose, tag, kindLabel, srcLabel, count,
-  syncing, deep, busy, onSync, onSyncAllTime, onStopAllTime, onEdit, onRemove,
+  syncing, deep, busy, lastRun, onSync, onSyncAllTime, onStopAllTime, onEdit, onRemove,
 }) {
   // AO3 only. It's the one source the worker gets blocked from, and the only one
   // whose search tells "couldn't read it" apart from "nothing there" — so it's
@@ -1192,6 +1214,17 @@ function GroupActionsSheet({
             <Icon icon={deep ? 'solar:stop-circle-linear' : 'solar:history-linear'} size={19} />
             {deep ? `Stop — page ${deep.pages}, ${deep.written} found` : 'Catch up all-time'}
           </button>
+          {/* What the last run did, in its own words. Stays put after the toast
+              has gone, because "it failed" is not something you can act on. */}
+          {lastRun && (
+            <div style={{
+              fontSize: 11.5, lineHeight: 1.45, marginTop: 2, padding: '9px 11px', borderRadius: 10,
+              background: 'var(--surface-2)', color: lastRun.ok ? 'var(--text-tertiary)' : 'var(--danger, #f5455c)',
+              wordBreak: 'break-word',
+            }}>
+              {lastRun.text}
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ ...note, margin: '2px 2px 4px' }}>

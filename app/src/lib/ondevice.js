@@ -32,6 +32,17 @@ import {
 const SPACE_MS = 1500; // polite gap between AO3 requests (volunteer nonprofit)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A readable one-liner for an error, for the diagnostics the group sheet shows.
+// Supabase/PostgREST errors carry code + message + hint and stringify to
+// "[object Object]", which is exactly the sort of non-answer that made the first
+// round of this bug hunt guesswork. Keep the real text.
+export function errText(e) {
+  if (!e) return 'unknown';
+  const parts = [e.code, e.message || (typeof e === 'string' ? e : ''), e.details, e.hint]
+    .filter(Boolean).map(String);
+  return (parts.length ? parts.join(' · ') : String(e)).slice(0, 220);
+}
+
 // Global discovery prefs (preferred languages + per-shelf excluded tags), mapped
 // to the {languages, excludedTags} shape shelving.js expects. Missing → permissive.
 async function readPrefs() {
@@ -108,7 +119,9 @@ export async function discoverGroup(group, prefs, dismissed, { patient = false }
     // anything true. Every other caller (createGroup / createLanguageGroup /
     // updateGroup / discoverAll) already wraps this in its own try/catch and
     // treats discovery as best-effort, so nothing else changes.
-    const err = new Error('AO3 did not answer');
+    // Carry the underlying text in the message — "AO3 did not answer" alone
+    // hides whether it was a 525, a timeout, or something else entirely.
+    const err = new Error(`AO3 did not answer (${errText(e)})`);
     err.code = 'source_unavailable';
     err.cause = e;
     throw err;
@@ -216,10 +229,19 @@ export async function discoverGroupAllTime(group, { onProgress, shouldStop } = {
       } catch (e) {
         // Keep what we already wrote and say where it stopped — a catch-up that
         // got 300 of 500 works is worth far more than a thrown-away run.
-        return { written, pages, failed: true, stopped: false, capped };
+        return { written, pages, failed: true, stopped: false, capped, reason: errText(e) };
       }
       pages += 1;
-      written += await writeAo3Matches(g, metas, prefs, shelfExcl, dismissed, seen);
+      // The write gets its own catch. It used to sit outside the try above, so a
+      // Supabase error threw straight out of here — losing the pages already
+      // written, and surfacing as a generic failure that looked nothing like
+      // what had actually gone wrong. A write failure is worth reporting as
+      // itself, and worth keeping the earlier pages for.
+      try {
+        written += await writeAo3Matches(g, metas, prefs, shelfExcl, dismissed, seen);
+      } catch (e) {
+        return { written, pages, failed: false, stopped: false, capped, writeError: errText(e) };
+      }
       onProgress && onProgress({ pages, written });
       if (metas.length < AO3_PAGE_SIZE) break; // short page = end of the results
       if (page === ALLTIME_MAX_PAGES) { capped = true; break; }
