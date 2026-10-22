@@ -8,7 +8,7 @@ import {
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch, fetchStashCounts,
 } from '../lib/tags.js';
-import { errText } from '../lib/ondevice.js';
+import { discoverGroup, discoverGroupAllTime, errText } from '../lib/ondevice.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
 import { syncNow, syncGroupViaWorker } from '../lib/sync.js';
 import { fetchWorkById } from '../lib/library.js';
@@ -986,9 +986,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
 
   // Shared by both buttons: dispatch a one-group worker run, follow it, then
   // re-read the list and report what actually landed.
-  const runViaWorker = async (allTime) => {
-    const before = new Set((items || []).map((w) => w.id));
-    const t0 = Date.now();
+  const runViaWorker = async (allTime, before, t0) => {
     const phase = (p) => setJob(p);
     setJob('dispatching');
     try {
@@ -1022,8 +1020,52 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     }
   };
 
-  const syncGroup = () => { if (!busy) runViaWorker(false); };
-  const syncAllTimeViaWorker = () => { if (!busy) runViaWorker(true); };
+  // Phone first, worker second.
+  //
+  // On-device discovery can finally work: every upsert it ever attempted was
+  // rejected because matchRow sent `chapters: null` into a NOT NULL column, and
+  // the search parser never emitted a chapter count at all. With that fixed the
+  // phone is the fast path again — seconds, not a GitHub runner — so try it,
+  // and hand over to the worker only when AO3 won't answer the phone.
+  //
+  // The fallback is not optional: AO3 refuses searches outright for minutes at
+  // a time, and the worker is both logged in and patient.
+  const run = async (allTime) => {
+    if (busy) return;
+    const before = new Set((items || []).map((w) => w.id));
+    const t0 = Date.now();
+    setJob('device');
+    try {
+      let deviceOk = true;
+      let why = '';
+      if (allTime) {
+        const r = await discoverGroupAllTime(tag, { onProgress: () => setJob('device') });
+        deviceOk = !r.failed && !r.writeError;
+        why = r.writeError || r.reason || '';
+      } else {
+        await discoverGroup(tag, undefined, undefined, { patient: true });
+      }
+      if (deviceOk) {
+        const added = await refreshAfter(before);
+        setLastRun({ ok: true, text: `On this phone in ${secs(t0)}s · ${added} new · ${before.size + added} in this group` });
+        setMenuOpen(false);
+        if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
+        else showToast(allTime ? 'Nothing new — you already had it all' : 'Nothing new', 'solar:check-circle-bold');
+        setJob(null);
+        return;
+      }
+      setLastRun({ ok: false, text: `AO3 refused this phone (${why || 'no reason given'}) — asking the worker…` });
+      await runViaWorker(allTime, before, t0);
+    } catch (e) {
+      // On-device threw — AO3 unreadable, or our own write failed. Either way
+      // the worker is logged in, patient, and worth a try before giving up.
+      setLastRun({ ok: false, text: `Phone couldn't do it (${errText(e)}) — asking the worker…` });
+      await runViaWorker(allTime, before, t0);
+    }
+  };
+
+  const syncGroup = () => run(false);
+  const syncAllTimeViaWorker = () => run(true);
 
   const list = items || [];
   // Quick complete/ongoing filter over the loaded results (client-side — separate
@@ -1132,9 +1174,10 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
 // "running" are genuinely different waits — a runner takes a while to start —
 // and a button that just sits there for ninety seconds reads as broken.
 const JOB_LABEL = {
-  dispatching: 'Asking the worker…',
+  device: 'Searching AO3…',
+  dispatching: 'AO3 refused — asking the worker…',
   queued: 'Queued at GitHub…',
-  running: 'Searching AO3…',
+  running: 'The worker is searching…',
 };
 
 // Everything you can do TO a tag group, one tap behind its title: the two syncs

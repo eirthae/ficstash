@@ -48,6 +48,7 @@ test('a search blurb becomes a match with everything the feed needs', () => {
   assert.equal(w.summary, 'They text a lot.');
   assert.equal(w.words, 9800);
   assert.equal(w.status, 'ongoing');          // 3/? is unfinished
+  assert.equal(w.chapters, 3);                // posted count — see below
   assert.equal(w.chaptersTotal, null);
   assert.equal(w.updated, '2025-08-14');      // the blurb date the feed sorts by
   assert.equal(w.url, 'https://archiveofourown.org/works/12345');
@@ -61,7 +62,25 @@ test('a search blurb becomes a match with everything the feed needs', () => {
 test('a finished work reads as complete', () => {
   const [w] = parseSearchResults(BLURB.replace('3/?', '12/12'));
   assert.equal(w.status, 'complete');
+  assert.equal(w.chapters, 12);
   assert.equal(w.chaptersTotal, 12);
+});
+
+// The four-month bug, from the parser's side. `chapters` was simply never
+// emitted here, matchRow turned the missing value into an explicit null, and
+// tag_matches.chapters is NOT NULL — so Postgres rejected every row the app
+// tried to write, for every group, since June. A blurb with no stats at all
+// must still yield a usable number rather than nothing.
+test('every parsed match carries a chapter count — the column is NOT NULL', () => {
+  for (const [stat, expected] of [['3/?', 3], ['12/12', 12], ['1/1', 1]]) {
+    const [w] = parseSearchResults(BLURB.replace('3/?', stat));
+    assert.equal(typeof w.chapters, 'number', `${stat} should give a numeric count`);
+    assert.equal(w.chapters, expected);
+  }
+  // A blurb with no stats block at all: still a number, never null/undefined.
+  const [bare] = parseSearchResults(BLURB.replace(/<dl class="stats">[\s\S]*?<\/dl>/, ''));
+  assert.equal(typeof bare.chapters, 'number');
+  assert.equal(bare.chapters, 0);
 });
 
 test('several blurbs all come through', () => {

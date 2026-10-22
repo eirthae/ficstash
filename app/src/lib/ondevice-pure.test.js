@@ -80,7 +80,10 @@ test('matchRow builds the tag_matches shape and passes {t,k} tags through', () =
   assert.equal(row.source_work_id, '123');
   assert.deepEqual(row.tags, [{ t: 'Fluff', k: 'freeform' }]);
   assert.equal(row.words, 5000);
-  assert.equal(row.chapters, null);           // not provided → null (worker parity)
+  // Was asserted as `null` here, on a stated "worker parity" rationale that was
+  // simply wrong — the column is NOT NULL, so this test was pinning the bug in
+  // place rather than catching it. Not provided → 0.
+  assert.equal(row.chapters, 0);
   assert.equal(typeof row.palette, 'number');
   // user-state columns are omitted so DB defaults apply + batch keys stay uniform
   for (const k of ['seen', 'first_seen_at', 'dismissed', 'later', 'wanted', 'saved']) {
@@ -92,6 +95,31 @@ test('matchRow coerces a numeric id to string and defaults title', () => {
   const row = matchRow('g', { sourceId: 999 });
   assert.equal(row.source_work_id, '999');
   assert.equal(row.title, 'Untitled');
+});
+
+// The four-month bug. tag_matches has NOT NULL columns, and a column DEFAULT
+// only applies when the column is OMITTED — an explicit null is still a null and
+// still violates the constraint. matchRow sent `chapters: null` (the search
+// parser never emitted `chapters` at all), so Postgres rejected every row the
+// app ever tried to write, for every group, silently, since June.
+//
+// Hence: no NOT NULL column may ever come out of here as null, even when the
+// parser hands us nothing. The parser side is covered in ao3-search.test.js.
+test('matchRow never nulls a NOT NULL column, even from an empty meta', () => {
+  const row = matchRow('g', { sourceId: '1' });
+  for (const col of ['title', 'words', 'chapters', 'status']) {
+    assert.notEqual(row[col], null, `${col} must never be null — the column is NOT NULL`);
+    assert.notEqual(row[col], undefined, `${col} must never be undefined`);
+  }
+  assert.equal(row.chapters, 0);
+  assert.equal(row.words, 0);
+  assert.equal(row.status, 'ongoing');
+});
+
+test('matchRow keeps a real chapter count', () => {
+  assert.equal(matchRow('g', { sourceId: '1', chapters: 7 }).chapters, 7);
+  // A zero count is a count, not a missing value.
+  assert.equal(matchRow('g', { sourceId: '1', chapters: 0 }).chapters, 0);
 });
 
 // ---- workRow ---------------------------------------------------------------

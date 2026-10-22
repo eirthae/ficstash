@@ -57,7 +57,9 @@ export function bookMatchRow(groupId, m) {
     summary: m.summary || '',
     tags,
     words: 0,
-    chapters: null,
+    // 0, not null — same NOT NULL column, same bug as matchRow had. A book has
+    // no chapter count to report, but "no count" has to be written as a number.
+    chapters: 0,
     status: 'complete',
     source_updated: null,
     palette: paletteFor(m.title || m.author),
@@ -79,7 +81,12 @@ export function matchRow(groupId, m) {
     summary: m.summary || '',
     tags: Array.isArray(m.tags) ? m.tags : [],
     words: m.words || 0,
-    chapters: m.chapters ?? null,
+    // 0, never null. `?? null` here is what made every on-device discovery
+    // upsert fail for four months: tag_matches.chapters is NOT NULL, and an
+    // explicit null does NOT fall back to the column default — a default only
+    // applies when the column is omitted entirely. One missing field in the
+    // search parser therefore rejected the whole row, every time, silently.
+    chapters: m.chapters ?? 0,
     status: m.status || 'ongoing',
     // Was hardcoded null, so on-device discovery — the primary path — stored no
     // date at all and the feed had nothing to order by but insertion time.

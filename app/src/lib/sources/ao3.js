@@ -249,6 +249,12 @@ export function parseSearchResults(html) {
       language: clean(text(li, 'dd.language')) || 'English',
       words: parseInt((text(li, 'dd.words') || '').replace(/[^\d]/g, ''), 10) || 0,
       status: chStat.status,
+      // The posted chapter count, not just the total. Omitting it is what broke
+      // on-device discovery for four months: matchRow turned the missing value
+      // into an explicit null, tag_matches.chapters is NOT NULL, and so every
+      // upsert the app ever attempted was rejected — silently, because the
+      // caller reported it as "couldn't save" at most, and usually as nothing.
+      chapters: chStat.chapters,
       chaptersTotal: chStat.total,
       // The blurb's one date — what the discovery feed sorts and shows. Without
       // it every match fell back to "when we happened to insert the row", which

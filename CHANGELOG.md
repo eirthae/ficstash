@@ -4,6 +4,58 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-23 — The null that rejected every on-device write (v0.8.75)
+
+### Fixed
+
+- **On-device discovery wrote nothing, ever — for four months.** Every tag match
+  in the database came from a worker run; not one row was ever written by the
+  app. The cause was one missing field. `parseSearchResults` read AO3's
+  chapter stat but only emitted `chaptersTotal`, never `chapters` — so
+  `matchRow` filled the gap with `chapters: null`, and `tag_matches.chapters` is
+  **NOT NULL**. A column default does not save you here: a default applies only
+  when the column is *omitted*, and an explicit null is still a null. Postgres
+  rejected the row, every time, for every group, since 2026-06-28.
+  It was invisible because the failure had nowhere to surface: discovery at
+  group creation is best-effort and swallowed, and a tag that writes nothing
+  looks exactly like a tag with nothing new.
+- **romance.io book matches had the identical bug** — `bookMatchRow` hardcoded
+  `chapters: null` into the same NOT NULL column.
+- **The test suite was pinning the bug in place.** `matchRow` had an assertion
+  that `chapters` *should* be `null`, justified as "worker parity", which was
+  simply wrong about the schema. Corrected, and both row builders now have
+  tests that no NOT NULL column can ever come out as null or undefined.
+
+### Changed
+
+- **The group's two Sync buttons try this phone first, then the worker.** With
+  the write fixed the phone is a genuine fast path again — seconds rather than
+  waiting on a GitHub runner — but AO3 refuses searches outright for minutes at
+  a time, so when it won't answer the phone the run is handed to the worker,
+  which is logged in and patient. The button says which stage it is at.
+- **A one-group worker run** (`ONLY_GROUP`) does discovery for a single group and
+  skips series, repair, blank metadata, backfill, reflow and refresh, so it
+  finishes in minutes instead of hours. With `reseed_tags` it is the all-time
+  catch-up. The `trigger-sync` edge function passes the group id through,
+  validated as a uuid.
+- **Three schedule slots a day** (09:37, 13:47, 17:23 UTC) instead of one.
+  GitHub does not guarantee scheduled runs — nothing fired on 2026-10-20, 10-21
+  or 10-22 against crons that were in place. Whichever slot GitHub honours does
+  the work; the rest see a recent `last_checked` and exit in seconds.
+
+### Notes
+
+- Two theories were wrong along the way and are recorded so they are not
+  re-investigated. Cloudflare is **not** fingerprinting non-browser clients: the
+  AO3 login page returns 200 to plain curl, just slowly. And authentication is
+  **not** what makes search work: a logged-in worker run was refused eight times
+  in a row on 2026-10-22. AO3's search really is degraded — it served 36 matches
+  for a tag on 10-19 and error pages for the same tag on 10-22 — but that is a
+  separate problem from this one, and it will pass.
+- `parseSearchResults` had **no test coverage at all** before this release,
+  which is how a total failure in the function every tag match flows through
+  stayed invisible. It now has its own suite, including a Cloudflare error page.
+
 ## 2026-10-22 — The app was hanging up on AO3 after 10 seconds (v0.8.73)
 
 ### Fixed
