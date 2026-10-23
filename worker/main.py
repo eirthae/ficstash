@@ -624,18 +624,22 @@ def main() -> None:
     if skip_hours and not _saves_only() and not _only_group() and _series_sweep() != "only":
         try:
             stamps = [_parse_ts(g.get("last_checked")) for g in fetch_tracked_groups(db)]
-            # A group that has NEVER been checked is work waiting to be done, so
-            # its None is a reason to run, not a value to ignore. (Feeding those
-            # Nones to max() also raised TypeError, which the except below
-            # swallowed — so this check silently never fired at all.)
-            never_checked = sum(1 for t in stamps if t is None)
+            # The NEWEST non-null stamp, because the question here is only "has
+            # discovery run at all lately". Nones are dropped, not counted as a
+            # reason to run: a tag AO3 refuses run after run stays null forever,
+            # and treating that as work-to-do would make every slot a full sweep
+            # and the skip pointless. Such a group is still picked up inside the
+            # next run that does happen — fetch_tracked_groups orders
+            # never-checked first precisely so they go to the front.
+            #
+            # (Feeding those Nones to max() also raised TypeError, which the
+            # except below swallowed — so this check silently never fired at
+            # all. Hence the explicit filter rather than a bare max().)
             newest = max((t for t in stamps if t is not None), default=None)
         except Exception as exc:  # noqa: BLE001 — never let this block a run
-            never_checked, newest = 0, None
+            newest = None
             print(f"Freshness check skipped ({type(exc).__name__}: {exc}); running anyway.")
-        if never_checked:
-            print(f"{never_checked} group(s) have never been checked — running.")
-        elif newest is not None:
+        if newest is not None:
             age_h = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
             if age_h < skip_hours:
                 print(f"Discovery last advanced {age_h:.1f}h ago (< {skip_hours}h) — "

@@ -25,8 +25,9 @@ def _decide(stamps, skip_hours, now=None):
     now = now or datetime.now(timezone.utc)
     if not skip_hours:
         return False
-    if any(t is None for t in stamps):
-        return False  # never-checked groups are work waiting to be done
+    # Nones are dropped, not counted: a tag AO3 refuses run after run stays null
+    # forever, so treating "never checked" as work-to-do would make every slot a
+    # full sweep and the skip pointless.
     newest = max((t for t in stamps if t is not None), default=None)
     if newest is None:
         return False
@@ -37,12 +38,20 @@ class ScheduleSkipTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 10, 23, 12, 0, tzinfo=timezone.utc)
 
-    def test_a_never_checked_group_means_there_is_work_to_do(self):
-        # The exact shape that broke it: a mix of real stamps and None.
+    def test_a_mix_of_stamps_and_nones_does_not_explode(self):
+        # The exact shape that broke it: max() over datetimes AND Nones raised
+        # TypeError, which a defensive except swallowed, so the check never
+        # fired. A permanently-unreachable tag must not force a full sweep at
+        # every slot either — the recent stamp wins and this one skips.
         stamps = [self.now - timedelta(hours=1), None, self.now - timedelta(hours=2)]
+        self.assertTrue(_decide(stamps, 10, self.now))
+
+    def test_a_stale_run_still_runs_even_with_nones_present(self):
+        stamps = [self.now - timedelta(hours=20), None]
         self.assertFalse(_decide(stamps, 10, self.now))
 
     def test_all_none_does_not_skip(self):
+        # Nothing has ever been checked: there is genuinely nothing to go on.
         self.assertFalse(_decide([None, None], 10, self.now))
 
     def test_skips_when_another_slot_just_covered_it(self):

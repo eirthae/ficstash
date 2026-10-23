@@ -4,6 +4,43 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-10-24 — The app starts the nightly when GitHub forgets to (v0.8.76)
+
+### Added
+
+- **A daily safety net for the sweep.** GitHub does not guarantee scheduled
+  runs — nothing fired on 2026-10-20, 10-21 or 10-22 against crons that were in
+  place, and three missed nights is three nights with no tag discovery that
+  nobody notices. On app open, if discovery has genuinely gone stale (14h), the
+  app now starts a sweep itself through the dispatch path that has never failed.
+  It is deliberately **silent whenever the schedule is working**, so it can
+  neither duplicate the nightly's work nor hide whether the schedule is healthy.
+
+### Fixed
+
+- **The schedule-skip check had never once fired.** It ran `max()` over every
+  group's `last_checked`, including the nulls of groups that have never been
+  checked, which raised `TypeError` — swallowed by a defensive `except` that
+  then ran the sweep anyway. Nothing visibly failed; the check simply never
+  worked, so all three daily slots did full sweeps.
+- **The skip would have cancelled the weekly series sweep.** The 2026-10-23
+  04:53 run was the Friday series run, and a discovery-freshness check has no
+  business suppressing the one pass that enumerates series follows. Excluded.
+- **A never-checked group no longer forces a full sweep at every slot.** AO3
+  refuses some tags run after run, so their `last_checked` stays null forever;
+  counting that as work-to-do made the skip pointless. The newest real stamp
+  decides, and never-checked groups still go to the front of whichever run does
+  happen — `fetch_tracked_groups` orders them first for exactly that reason.
+
+### Notes
+
+- The same flaw existed in both the worker's check and the app's new one, and
+  both now use the same rule: the newest non-null `last_checked` answers "has
+  discovery run lately", which is the only question either is asking.
+- The skip decision now has its own tests. It lives inside `main()` wrapped
+  around a live Supabase client, which is why its failure stayed invisible until
+  a production log happened to admit it out loud.
+
 ## 2026-10-23 — The null that rejected every on-device write (v0.8.75)
 
 ### Fixed

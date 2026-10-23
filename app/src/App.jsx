@@ -16,6 +16,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { fetchWorks } from './lib/library.js';
 import { initReadingStore, absorbRemoteReadingTime } from './lib/reading.js';
 import { notifySavedAvailable, ensureNotifyPermission } from './lib/notify.js';
+import { kickDailySweepIfStale } from './lib/sync.js';
 import { supabase, hasSupabase } from './lib/supabase.js';
 
 const READER_DEFAULTS = { theme: 'grey', font: 'georgia', size: 19, leading: 1.70, margin: 18, brightness: 1 };
@@ -132,6 +133,17 @@ export default function App() {
   const [, bumpReading] = useState(0);
   const refreshReading = () => bumpReading(n => n + 1);
   useEffect(() => { initReadingStore().finally(refreshReading); }, []);
+
+  // Safety net for the nightly sweep. GitHub drops scheduled runs — it dropped
+  // three nights in a row in October — so if discovery has gone stale, the app
+  // starts one itself on open, using the dispatch path that has never failed.
+  // It stays quiet whenever the schedule is doing its job (see
+  // kickDailySweepIfStale), so it can neither duplicate the nightly's work nor
+  // hide whether the schedule is actually working.
+  useEffect(() => {
+    if (!authed) return;
+    kickDailySweepIfStale().catch(() => {});
+  }, [authed]);
 
   // works.read_seconds is the copy that survives a reinstall or a new device;
   // fold it back into the device store whenever the library loads.

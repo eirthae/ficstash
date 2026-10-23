@@ -1,5 +1,9 @@
 import { supabase, hasSupabase } from './supabase.js';
+import { Preferences } from '@capacitor/preferences';
 import { runSync } from './ondevice.js';
+
+// When we last dispatched the daily safety-net sweep (epoch ms).
+const KICK_KEY = 'fs-daily-kick';
 
 // Pull-to-refresh: finish pending downloads ON-DEVICE (residential IP, which AO3
 // answers) — the links you pasted and the works you tapped Save on. That's what
@@ -180,4 +184,63 @@ export async function watchSync({ savesOnly = true, onPhase, timeoutMs = 240000,
   }
   phase('timeout');
   return { ok: true, timedOut: true };
+}
+
+// ---- daily safety net ------------------------------------------------------
+
+// Start the nightly sweep ourselves when nobody else has, on app open.
+//
+// GitHub does not guarantee scheduled runs: nothing fired on 2026-10-20, 10-21
+// or 10-22 against crons that were in place, and three missed nights is three
+// nights with no tag discovery that nobody finds out about. The worker now has
+// three schedule slots for that reason; this is the belt to that braces, using
+// the one trigger path that has never let us down — the app's own dispatch.
+//
+// Deliberately SILENT when the schedule is working. It fires only when
+// discovery has genuinely gone stale, so it cannot mask a working nightly (nor
+// the question of whether the schedule fix holds) by quietly doing the work
+// first. If the nightly is fine, this never speaks.
+//
+// `staleHours` must stay comfortably above the gap between schedule slots, or
+// this races them for the same work.
+//
+// Returns { kicked } plus a `why` for the not-kicked cases. Never throws.
+export async function kickDailySweepIfStale({ staleHours = 14, minGapHours = 6 } = {}) {
+  if (!hasSupabase) return { kicked: false, why: 'offline' };
+  try {
+    // Don't re-dispatch on every cold start. A run that fails, or one AO3
+    // refuses end to end, leaves last_checked untouched — so without this guard
+    // a broken AO3 would mean a fresh sweep every time the app opened.
+    const { value } = await Preferences.get({ key: KICK_KEY });
+    const lastKick = value ? Number(value) : 0;
+    if (lastKick && Date.now() - lastKick < minGapHours * 3600_000) {
+      return { kicked: false, why: 'kicked recently' };
+    }
+
+    // Authoritative staleness: what the WORKER has actually managed, not what
+    // this device remembers.
+    //
+    // The NEWEST non-null stamp, deliberately — "has discovery run at all
+    // lately?" is the question a safety net is asking. Never-checked groups are
+    // a different problem (AO3 refusing a tag run after run) and the worker
+    // already puts them first; counting them here would mean a permanently
+    // unreachable tag made this kick a sweep every few hours, forever.
+    const { data, error } = await supabase
+      .from('tracked_groups')
+      .select('last_checked')
+      .order('last_checked', { ascending: false, nullsFirst: false })
+      .limit(1);
+    if (error || !data || !data.length) return { kicked: false, why: 'no groups' };
+    const newest = data[0].last_checked;
+    if (newest) {
+      const ageH = (Date.now() - new Date(newest).getTime()) / 3600_000;
+      if (ageH < staleHours) return { kicked: false, why: `fresh (${ageH.toFixed(1)}h)` };
+    }
+
+    const r = await kickSync(); // already a no-op when a run is queued/in progress
+    if (r && r.ok) await Preferences.set({ key: KICK_KEY, value: String(Date.now()) });
+    return { kicked: !!(r && r.ok && !r.alreadyRunning), why: r && r.alreadyRunning ? 'already running' : '' };
+  } catch (e) {
+    return { kicked: false, why: 'error' };
+  }
 }
