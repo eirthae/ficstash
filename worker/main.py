@@ -616,17 +616,26 @@ def main() -> None:
     # Several schedule slots a day, so a dropped one costs nothing: whichever
     # slot finds stale windows does the work, and the rest exit here in seconds.
     # Saves-only and one-group runs are explicit requests and are never skipped.
+    # A series-only run is NOT discovery and must never be suppressed by a
+    # discovery-freshness check: the weekly sweep is the only thing that
+    # enumerates follows, and skipping it because tags were checked recently
+    # would silently cancel it for the week.
     skip_hours = _skip_if_checked_within_hours()
-    if skip_hours and not _saves_only() and not _only_group():
+    if skip_hours and not _saves_only() and not _only_group() and _series_sweep() != "only":
         try:
-            newest = max(
-                (_parse_ts(g.get("last_checked")) for g in fetch_tracked_groups(db)),
-                default=None,
-            )
+            stamps = [_parse_ts(g.get("last_checked")) for g in fetch_tracked_groups(db)]
+            # A group that has NEVER been checked is work waiting to be done, so
+            # its None is a reason to run, not a value to ignore. (Feeding those
+            # Nones to max() also raised TypeError, which the except below
+            # swallowed — so this check silently never fired at all.)
+            never_checked = sum(1 for t in stamps if t is None)
+            newest = max((t for t in stamps if t is not None), default=None)
         except Exception as exc:  # noqa: BLE001 — never let this block a run
-            newest = None
+            never_checked, newest = 0, None
             print(f"Freshness check skipped ({type(exc).__name__}: {exc}); running anyway.")
-        if newest is not None:
+        if never_checked:
+            print(f"{never_checked} group(s) have never been checked — running.")
+        elif newest is not None:
             age_h = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
             if age_h < skip_hours:
                 print(f"Discovery last advanced {age_h:.1f}h ago (< {skip_hours}h) — "
