@@ -254,19 +254,50 @@ def fetch_untitled_works(
     to the soup, so those rows landed with a blank title (and blank
     author/fandom). This finds them so a repair pass can re-fetch their metadata.
     Ordered most-recently-updated first and capped by `limit` to stay polite.
+
+    Typed filters rather than one hand-written `or_`. The single filter this used
+    to carry — `.or_("title.is.null,title.eq.")` — found NOTHING: its empty value
+    after `eq.` did not match the empty strings, and nothing in the database was
+    actually NULL. So the pass printed "0 work(s) with blank metadata to repair"
+    every run while 504 such works sat there, unreadable in the library and
+    invisible to the only thing that could have fixed them. Typed filters go
+    through the client's own encoding, where an empty string is just a value.
     """
-    query = (
-        client.table("works")
-        .select("source_work_id,title")
-        .eq("source", source)
-        .eq("hidden", False)
-        .or_("title.is.null,title.eq.")
-        .order("source_updated", desc=True)
-    )
-    if limit:
-        query = query.limit(limit)
-    rows = list(query.execute().data or [])
-    return [r["source_work_id"] for r in rows if r.get("source_work_id")]
+
+    def _ids(apply_filter):
+        q = (
+            client.table("works")
+            .select("source_work_id,title")
+            .eq("source", source)
+            .eq("hidden", False)
+        )
+        q = apply_filter(q).order("source_updated", desc=True)
+        if limit:
+            q = q.limit(limit)
+        return [
+            r["source_work_id"] for r in (q.execute().data or []) if r.get("source_work_id")
+        ]
+
+    out: list[str] = []
+    seen: set[str] = set()
+    # Blank title is the headline symptom; a blank author on a titled work is the
+    # same half-written row and just as useless to read, so repair those too.
+    for apply_filter in (
+        lambda q: q.eq("title", ""),
+        lambda q: q.is_("title", "null"),
+        lambda q: q.eq("author", ""),
+    ):
+        try:
+            found = _ids(apply_filter)
+        except Exception:  # noqa: BLE001 — one failing variant must not blind the rest
+            continue
+        for wid in found:
+            if wid not in seen:
+                seen.add(wid)
+                out.append(wid)
+        if limit and len(out) >= limit:
+            return out[:limit]
+    return out[:limit] if limit else out
 
 
 def fetch_plaintext_chapter_works(
