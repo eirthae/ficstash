@@ -127,6 +127,17 @@ jobs:
           # was refused by AO3 all the way through advances nothing and the next
           # slot correctly tries again.
           SKIP_IF_CHECKED_WITHIN_HOURS: ${{ github.event_name == 'schedule' && '10' || '' }}
+          # Hard stop for an announced source outage — set the repo variable
+          # SYNC_PAUSED=1 and every lane does nothing until it's unset. Applies
+          # to manual runs too, deliberately: when AO3 is switched off there is
+          # nothing a manual run could achieve either.
+          #   gh variable set SYNC_PAUSED --body 1     # pause
+          #   gh variable delete SYNC_PAUSED           # resume
+          SYNC_PAUSED: ${{ vars.SYNC_PAUSED }}
+          # The stale-match prune only runs when discovery is actually
+          # replenishing. Its licence to delete is "re-discovery re-populates
+          # any that still match", which is false during an outage.
+          PRUNE_REQUIRES_FRESH_H: ${{ vars.PRUNE_REQUIRES_FRESH_H || '48' }}
           # How long works/new chapters stay in What's New (days). This prune is
           # a DELETE, not a hide, so too low means a chapter notice is destroyed
           # before you ever see it — at the old default of 1, missing a single

@@ -344,6 +344,22 @@ def _series_sweep() -> str:
     return raw if raw in ("full", "skip", "only") else "full"
 
 
+def _sync_paused() -> bool:
+    """Hard stop: do nothing at all this run.
+
+    For an announced source outage. AO3 announced a 2-4 week downtime on
+    2026-10-29, and across that span the schedule would otherwise fire ~84 times,
+    each run spending hours retrying a site that is deliberately switched off —
+    pointless for us and impolite to them.
+
+    Set the repo variable SYNC_PAUSED=1 to stop, and delete it (or set 0) to
+    resume. Nothing is lost while paused: saves stay `wanted`, discovery windows
+    stay where they are, and the stalest-first ordering means the groups that
+    missed out go to the front of the first run after resuming.
+    """
+    return os.environ.get("SYNC_PAUSED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _skip_if_checked_within_hours() -> int:
     """Hours of "discovery already ran recently" that make this run a no-op.
 
@@ -610,6 +626,17 @@ def main() -> None:
     load_dotenv()  # picks up worker/.env locally; no-op in CI where vars are set
     check_env()
     _start_run_clock()
+
+    # Paused for an announced source outage — before the DB client, before the
+    # AO3 login, before anything. Every lane stops, saves included: with AO3 off
+    # there is nothing to fetch, and a queued save stays `wanted` and goes out
+    # on the first run after resuming.
+    if _sync_paused():
+        print("== SYNC PAUSED (repo variable SYNC_PAUSED) — doing nothing. ==")
+        print("   Unset SYNC_PAUSED, or set it to 0, to resume. Nothing is lost "
+              "meanwhile: saves stay queued and every group's window is untouched, "
+              "so the stalest go first on the next real run.")
+        return
 
     db = make_client()
 
@@ -990,10 +1017,30 @@ def main() -> None:
 
     # Prune discovery suggestions the user never acted on (unsaved, not Later/Failed/
     # wanted, older than the window) so they don't hoard metadata forever.
+    #
+    # Gated on discovery actually working, because the prune's whole licence to
+    # delete is "re-discovery re-populates any that still match". When AO3 is
+    # down that is simply false: nothing can be re-fetched, so every pruned row
+    # is gone for good and the group visibly shrinks. AO3 announced a 2-4 week
+    # outage on 2026-10-29, over which 640 more rows would have crossed the
+    # 90-day line and been deleted with no way to bring them back.
+    #
+    # So: if no group has been checked successfully in PRUNE_REQUIRES_FRESH_H,
+    # discovery is not replenishing anything and the prune has no business
+    # running. It resumes by itself the moment AO3 answers again.
     try:
-        pruned_matches = delete_stale_unsaved_matches(db, days=int(os.environ.get("MATCH_RETENTION_DAYS", "30") or 30))
-        if pruned_matches:
-            print(f"Storage: pruned {pruned_matches} stale unsaved discovery suggestion(s).")
+        fresh_h = int(os.environ.get("PRUNE_REQUIRES_FRESH_H", "48") or 48)
+        stamps = [_parse_ts(g.get("last_checked")) for g in fetch_tracked_groups(db)]
+        newest = max((t for t in stamps if t is not None), default=None)
+        age_h = None if newest is None else (datetime.now(timezone.utc) - newest).total_seconds() / 3600
+        if age_h is None or age_h > fresh_h:
+            ago = "never" if age_h is None else f"{age_h:.0f}h ago"
+            print(f"Stale-match prune SKIPPED — discovery last advanced {ago} (> {fresh_h}h). "
+                  "Nothing can be re-discovered right now, so nothing gets deleted.")
+        else:
+            pruned_matches = delete_stale_unsaved_matches(db, days=int(os.environ.get("MATCH_RETENTION_DAYS", "30") or 30))
+            if pruned_matches:
+                print(f"Storage: pruned {pruned_matches} stale unsaved discovery suggestion(s).")
     except Exception as exc:  # noqa: BLE001 — best-effort
         print(f"Stale-match prune skipped ({type(exc).__name__}: {exc})")
 
