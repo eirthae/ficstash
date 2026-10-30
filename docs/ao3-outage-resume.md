@@ -151,6 +151,32 @@ suspicion.
 - **`discoverAll` is dead code** — exported from `ondevice.js`, zero callers
   since v0.8.66.
 
+- **Four anon-writable policies, and the anon key is public.** Found 2026-10-30
+  while ideating a public catalogue site; unrelated to that idea and worth
+  fixing regardless.
+
+  | table | cmd | `USING` / `WITH CHECK` |
+  |---|---|---|
+  | `works` | UPDATE | `true` / `true` |
+  | `tag_matches` | UPDATE | `true` / `true` |
+  | `chapter_updates` | UPDATE | `true` / `true` |
+  | `dismissed_matches` | **ALL** | `true` / `true` |
+
+  RLS cannot restrict columns, so `works_mark_hidden` permits updating *any*
+  field on *any* work, not just `hidden`. And the key is already out: the repo
+  is public, the APK is a public Release asset, and Vite inlines
+  `VITE_SUPABASE_ANON_KEY` into the bundle — unzip the APK, grep the key.
+
+  Exposure today: **vandalism, not theft.** Someone could hide the whole library
+  or scramble match flags. They cannot read anything (no anon `SELECT` policies
+  exist) and cannot delete works or chapters.
+
+  Fix: scope each policy to the column it exists for (trigger guard or
+  `SECURITY DEFINER` function), or drop `anon` from them and let the app use the
+  authenticated session it already holds. Check nothing in the app relies on
+  anon writes before dropping — `markGroupSeen` and the hide path are the ones
+  to look at.
+
 ---
 
 ## 5. State at pause (2026-10-30)
