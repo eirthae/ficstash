@@ -1,6 +1,13 @@
 # Resuming after the AO3 outage
 
-_Paused: **2026-10-30**. AO3 announced 2–4 weeks of downtime from ~2026-10-29._
+_Paused: **2026-10-30** (code switch). Workflow disabled at GitHub:
+**2026-11-01**. AO3 announced 2–4 weeks of downtime from ~2026-10-29._
+
+**Nothing of ours reaches AO3 while this holds** — with one exception: the app
+on your phone. `SYNC_PAUSED` and the disabled workflow govern the worker only.
+Pull-to-refresh (Library / Discover / What's New) and a group's Sync buttons
+still fetch from AO3 on-device. Opening the app does not; it talks to Supabase
+only. So: don't pull-to-refresh and don't tap Sync until AO3 is back.
 
 Sync is stopped at the switch, not broken. This is what to do when AO3 is back,
 what to check, and what is still unproven because it needs a live AO3.
@@ -9,13 +16,19 @@ what to check, and what is still unproven because it needs a live AO3.
 
 ## 1. Resume
 
+**Two switches, both must be flipped.** The workflow was disabled at GitHub on
+2026-11-01 as well as paused in code, so clearing the variable alone leaves the
+schedule dead and nothing will run.
+
 ```bash
-gh variable delete SYNC_PAUSED        # from the repo root
+gh workflow enable sync.yml           # 1. let GitHub fire the schedule again
+gh variable delete SYNC_PAUSED        # 2. let the worker actually do work
 ```
 
-That is the whole switch. Confirm it took:
+Confirm both took:
 
 ```bash
+gh workflow list --all                # Sync should read "active", not "disabled_manually"
 gh variable list                      # SYNC_PAUSED should be gone
 ```
 
