@@ -14,6 +14,29 @@ what to check, and what is still unproven because it needs a live AO3.
 
 ---
 
+## 0. Before anything: the AO3 password
+
+AO3 disclosed a breach involving emails (~2026-11-03), so assume credentials
+were in scope. The worker signs in with your account, and the password lives in
+GitHub secrets as `AO3_PASSWORD`.
+
+This cannot be done while AO3 is down — there is nowhere to change it — so it
+is the **first** step once the site is back, before either switch below:
+
+1. Change the password on AO3 itself.
+2. Update the secret:
+
+```bash
+gh secret set AO3_PASSWORD        # paste the new one when prompted
+```
+
+Order matters. Resuming first would have the worker retry a stale password
+against a site that has just been breached, which from the outside is
+indistinguishable from credential-stuffing — the surest way to get the account
+flagged exactly when you want it working.
+
+---
+
 ## 1. Resume
 
 **Two switches, both must be flipped.** The workflow was disabled at GitHub on
