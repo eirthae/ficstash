@@ -109,3 +109,11 @@ test('junk and empty input are survivable', () => {
   assert.deepEqual(parseSearchResults(null), []);
   assert.deepEqual(parseSearchResults('<li class="work blurb group">no heading</li>'), []);
 });
+
+// A deliberate refusal (AO3's robot check) is never retried: one request, stop.
+test('418 and 403 are refusals; overload and success are not', async () => {
+  const { isDenied } = await import('../fetch.js');
+  assert.equal(isDenied(418), true);
+  assert.equal(isDenied(403), true);
+  for (const s of [0, 200, 404, 429, 500, 503, 525]) assert.equal(isDenied(s), false, String(s));
+});

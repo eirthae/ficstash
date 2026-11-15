@@ -4,6 +4,28 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-11-15 — Standing down when AO3 says "not now" (v0.8.78)
+
+AO3 returned from its outage behind a robot check ("Shields are up"): a browser
+passes it, anything automated gets HTTP 418 or a 403 challenge. A resume attempt
+made about 15 refused requests in one small test run; a nightly would have made
+a few hundred, three times a day.
+
+### Changed
+
+- **The worker asks once and stands down.** Every AO3 run starts with a single
+  request to the front page. If AO3 is refusing automated clients the run ends
+  there — no login attempts, no saves, no searches. A 5xx or a timeout is not a
+  refusal and still goes through the usual retries.
+- **The pause is off and stays off.** Scheduled runs are back; while the check
+  is up each one costs one request, and the first run after AO3 lifts it carries
+  on by itself. Queued saves stay queued until then.
+- **The app stops after one refused request too.** A 418/403 is never retried,
+  the sync buttons say AO3 is screening for robots, and the request is not
+  handed to the worker, which would only be refused as well.
+
+We do not try to get past the check. Sync returns when AO3 lifts it.
+
 ## 2026-11-15 — Editing a group no longer empties it; sync buttons for every source (v0.8.77)
 
 ### Fixed

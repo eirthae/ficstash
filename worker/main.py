@@ -360,6 +360,54 @@ def _sync_paused() -> bool:
     return os.environ.get("SYNC_PAUSED", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _ao3_denial(status: int, body: str) -> str:
+    """Why AO3 is turning automated clients away, or "" if it isn't.
+
+    AO3 came back from its 2026 outage behind a robot check ("Shields are up!"):
+    a browser passes it, anything automated gets HTTP 418 "Request temporarily
+    denied" or a 403 challenge page. That is AO3 saying "not now" on purpose,
+    which is a different thing from a 5xx under load — retrying it is pointless
+    and is exactly the traffic the check exists to catch. So a run asks ONCE,
+    and if this returns a reason, it stands down without logging in or fetching
+    anything. We never try to get past the check; we wait for it to be lifted.
+    """
+    text = (body or "").lower()
+    if status == 418:
+        return "HTTP 418 — request temporarily denied"
+    for marker, why in (
+        ("shields are up", "robot check (Shields are up)"),
+        ("request temporarily denied", "request temporarily denied"),
+        ("down for maintenance", "down for maintenance"),
+        ("just a moment", "browser challenge page"),
+        ("cf-chl", "browser challenge page"),
+    ):
+        if marker in text:
+            return why
+    if status == 403:
+        return "HTTP 403 — forbidden"
+    return ""
+
+
+def _ao3_preflight() -> str:
+    """One request to AO3's front page. Returns the denial reason, or "".
+
+    A network error or a 5xx is NOT a denial: those are the overloaded-Archive
+    cases the per-call backoff already handles, so the run carries on as before.
+    """
+    import requests
+
+    try:
+        resp = requests.get(
+            "https://archiveofourown.org/",
+            headers={"User-Agent": "FicStash/1.0 (+https://github.com/eirthae/ficstash; offline reader)"},
+            timeout=30,
+        )
+    except Exception as exc:  # noqa: BLE001 — unreachable is not "denied"
+        print(f"AO3 preflight: no answer ({type(exc).__name__}); carrying on with the usual retries.")
+        return ""
+    return _ao3_denial(resp.status_code, resp.text[:4000])
+
+
 def _non_ao3_source(group_row: dict) -> str:
     """The group's source if it is provably NOT AO3, else "".
 
@@ -721,6 +769,18 @@ def main() -> None:
     # single method on it — every pass that would is skipped below.
     ao3 = get_source("ao3")
     if not offline_source:
+        # Ask once before doing anything else. If AO3 is turning automated
+        # clients away, this run is over: no login attempts, no saves, no
+        # searches — one request instead of a few hundred refusals. Nothing is
+        # lost (saves stay queued, windows stay put), and the first run after
+        # the check is lifted simply proceeds, with no switch to remember.
+        denied = _ao3_preflight()
+        if denied:
+            print(f"== AO3 is refusing automated clients ({denied}) — standing down. ==")
+            print("   One request made, nothing else attempted. Queued saves stay "
+                  "queued; the next run tries again and carries on by itself once "
+                  "AO3 lets us back in.")
+            return
         _maybe_login_ao3(ao3)
 
     # Only import works in languages the user can read; everything else is

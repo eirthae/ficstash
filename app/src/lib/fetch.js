@@ -49,6 +49,17 @@ function splitQuery(url) {
 // 20s is the floor for everything (double OkHttp's default, so slow work pages
 // land too); a patient caller asks for much more.
 const DEFAULT_TIMEOUT_MS = 20000;
+
+// A site telling us "no" on purpose, as opposed to failing to answer.
+//
+// AO3 came back from its 2026 outage behind a robot check: a browser passes it,
+// anything automated gets HTTP 418 ("Request temporarily denied") or a 403
+// challenge. Scribble Hub does the same to addresses it doesn't like. Retrying
+// that is pointless — the answer is a decision, not a hiccup — and repeated
+// refused requests are precisely what such a check is watching for. So these
+// are never retried: one request, one answer, stop. We don't try to get past
+// the check; we wait for it to be lifted.
+export const isDenied = (status) => status === 418 || status === 403;
 const timeouts = (ms) => {
   const t = ms || DEFAULT_TIMEOUT_MS;
   return { connectTimeout: t, readTimeout: t };
@@ -80,6 +91,7 @@ export async function fetchJson(url, { attempts = 4, timeoutMs = 0 } = {}) {
       // Both are non-null; an error page (HTML) fails JSON.parse → null → retry.
       if (r.status >= 200 && r.status < 300 && r.data != null) return r;
       last = r;
+      if (isDenied(r.status)) break; // refused on purpose — don't ask again
     } catch (e) {
       last = { status: 0, data: null, url, raw: String(e && e.message || e) };
     }
@@ -194,6 +206,7 @@ export async function fetchHtml(url, {
       const r = await getHtmlOnce(url, accept, timeoutMs);
       if (r.status >= 200 && r.status < 300 && r.html) return r;
       last = r;
+      if (isDenied(r.status)) break; // refused on purpose — don't ask again
     } catch (e) {
       last = { status: 0, url, html: '' };
     }

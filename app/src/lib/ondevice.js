@@ -123,6 +123,7 @@ export async function discoverGroup(group, prefs, dismissed, { patient = false }
     // hides whether it was a 525, a timeout, or something else entirely.
     const err = new Error(`AO3 did not answer (${errText(e)})`);
     err.code = 'source_unavailable';
+    err.denied = !!(e && e.denied); // AO3's robot check — don't retry, don't escalate
     err.cause = e;
     throw err;
   }
@@ -229,7 +230,7 @@ export async function discoverGroupAllTime(group, { onProgress, shouldStop } = {
       } catch (e) {
         // Keep what we already wrote and say where it stopped — a catch-up that
         // got 300 of 500 works is worth far more than a thrown-away run.
-        return { written, pages, failed: true, stopped: false, capped, reason: errText(e) };
+        return { written, pages, failed: true, stopped: false, capped, reason: errText(e), denied: !!(e && e.denied) };
       }
       pages += 1;
       // The write gets its own catch. It used to sit outside the try above, so a

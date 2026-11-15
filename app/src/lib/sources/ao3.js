@@ -1,4 +1,4 @@
-import { fetchHtml, fetchJson, fetchImageDataUri } from '../fetch.js';
+import { fetchHtml, fetchJson, fetchImageDataUri, isDenied } from '../fetch.js';
 
 // On-device AO3 source — the JS port of the worker's ao3.py, run on the PHONE.
 // AO3 Cloudflare-525s our datacenter IPs (Supabase, the GitHub Actions worker) but
@@ -290,6 +290,17 @@ export function parseSearchResults(html) {
 const PATIENT_TIMEOUT_MS = 45000;
 const PATIENT_WAITS = [2500, 6000, 15000];
 const PATIENT_BUDGET_MS = 110000;
+// The error a search throws when AO3 could not be read. `denied` marks the case
+// where AO3 answered with a deliberate refusal (its robot check) rather than
+// failing to answer — callers use it to stop at once instead of retrying or
+// handing the same doomed request to the worker.
+function unavailable(r) {
+  const e = new Error(`AO3 unavailable (status ${r ? r.status : 'no response'})`);
+  e.status = r ? r.status : 0;
+  e.denied = !!r && isDenied(r.status);
+  return e;
+}
+
 const retryPolicy = (patient) => (patient
   ? { attempts: 4, waits: PATIENT_WAITS, budgetMs: PATIENT_BUDGET_MS, timeoutMs: PATIENT_TIMEOUT_MS }
   : { attempts: 4 });
@@ -305,7 +316,7 @@ export async function searchTags(include, exclude = [], page = 1, { patient = fa
   // the tag stayed empty for good.
   const r = await fetchHtml(searchUrl(inc, exclude, page), retryPolicy(patient));
   if (!r || r.status !== 200) {
-    throw new Error(`AO3 unavailable (status ${r ? r.status : 'no response'})`);
+    throw unavailable(r);
   }
   return parseSearchResults(r.html);
 }
@@ -316,7 +327,7 @@ export async function searchLanguage(code, page = 1, { patient = false } = {}) {
   // Throws on an unreadable AO3, [] only on a genuine empty result — see searchTags.
   const r = await fetchHtml(languageSearchUrl(code, page), retryPolicy(patient));
   if (!r || r.status !== 200) {
-    throw new Error(`AO3 unavailable (status ${r ? r.status : 'no response'})`);
+    throw unavailable(r);
   }
   return parseSearchResults(r.html);
 }

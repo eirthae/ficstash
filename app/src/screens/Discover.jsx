@@ -1020,6 +1020,23 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     }
   };
 
+  // AO3 turned the phone away with its robot check ("Shields are up" — HTTP 418
+  // or a 403 challenge). That is a decision, not a glitch: one request was made
+  // and none are retried, and the worker is NOT asked instead — it gets the
+  // same refusal, and repeated refused requests are what the check watches
+  // for. Say what happened and stop. It works again when AO3 lifts the check.
+  const standDown = async (before, t0) => {
+    const added = await refreshAfter(before).catch(() => 0);
+    setLastRun({
+      ok: false,
+      text: `AO3 is screening for robots and turned this request away after ${secs(t0)}s. `
+        + 'Nothing was retried. Sync will work again when AO3 lifts the check'
+        + (added ? ` · kept ${plural(added)}` : '') + '.',
+    });
+    showToast('AO3 is screening for robots — try again later', 'solar:danger-triangle-bold');
+    setJob(null);
+  };
+
   // Phone first, worker second.
   //
   // On-device discovery can finally work: every upsert it ever attempted was
@@ -1048,6 +1065,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
       let why = '';
       if (allTime) {
         const r = await discoverGroupAllTime(tag, { onProgress: () => setJob('device') });
+        if (r.denied) { await standDown(before, t0); return; }
         deviceOk = !r.failed && !r.writeError;
         why = r.writeError || r.reason || '';
       } else {
@@ -1065,6 +1083,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
       setLastRun({ ok: false, text: `AO3 refused this phone (${why || 'no reason given'}) — asking the worker…` });
       await runViaWorker(allTime, before, t0);
     } catch (e) {
+      if (e && e.denied) { await standDown(before, t0); return; }
       // On-device threw — AO3 unreadable, or our own write failed. Either way
       // the worker is logged in, patient, and worth a try before giving up.
       setLastRun({ ok: false, text: `Phone couldn't do it (${errText(e)}) — asking the worker…` });
