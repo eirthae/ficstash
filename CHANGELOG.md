@@ -4,6 +4,35 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-11-15 — Editing a group no longer empties it; sync buttons for every source (v0.8.77)
+
+### Fixed
+
+- **Choosing "Complete works" in a group's settings returned 0.** Saving any
+  edit deleted every match in the group and then refilled it with the on-device
+  discovery that could not write a row for four months, so the group was simply
+  left empty — and the Completed filter on an empty group shows nothing either.
+  The sharpest case: switching to "Complete works" deleted the complete works
+  the group already held. An edit now deletes only what the new rules reject. A
+  completion-filter change is decided from the rows already stored (drop the
+  ones with the other status, keep the rest, no re-fetch); a rename or widening
+  to "all" deletes nothing; only a change to the tags, excludes or match mode
+  still clears and re-seeds, because only the source can answer that.
+- **A non-AO3 group's sync would have reported "Nothing new" without searching.**
+  On-device discovery returns 0 for sources it has no search for, which reads
+  exactly like an empty result. Those groups now go straight to the worker.
+
+### Added
+
+- **Sync buttons on Royal Road and Scribble Hub groups.** Checked when you tap,
+  and not otherwise. The search runs on the worker, the only place it exists
+  for those sites.
+- **A one-group run for a non-AO3 source never touches AO3.** No AO3 login, no
+  pending links, no pending saves, no series, no repairs, no chapter refresh —
+  one group's discovery and nothing else — so it is allowed while AO3 is paused.
+  The gate fails closed: a missing group, an unreadable database or a blank
+  source is treated as AO3 and stays paused.
+
 ## 2026-10-24 — The app starts the nightly when GitHub forgets to (v0.8.76)
 
 ### Added

@@ -1034,6 +1034,14 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     if (busy) return;
     const before = new Set((items || []).map((w) => w.id));
     const t0 = Date.now();
+    // Only AO3 has an on-device search. For every other source discoverGroup
+    // returns 0 without making a request — which would be reported below as
+    // "Nothing new", a flat lie about a search that never happened. Royal Road,
+    // Scribble Hub and the rest are searched by the worker, so go straight there.
+    if ((tag.source || 'ao3') !== 'ao3') {
+      await runViaWorker(allTime, before, t0);
+      return;
+    }
     setJob('device');
     try {
       let deviceOk = true;
@@ -1175,7 +1183,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
 // and a button that just sits there for ninety seconds reads as broken.
 const JOB_LABEL = {
   device: 'Searching AO3…',
-  dispatching: 'AO3 refused — asking the worker…',
+  dispatching: 'Asking the worker…',
   queued: 'Queued at GitHub…',
   running: 'The worker is searching…',
 };
@@ -1189,10 +1197,11 @@ function GroupActionsSheet({
   open, onClose, tag, kindLabel, srcLabel, count,
   job, busy, lastRun, onSync, onSyncAllTime, onEdit, onRemove,
 }) {
-  // AO3 only. It's the one source the worker gets blocked from, and the only one
-  // whose search tells "couldn't read it" apart from "nothing there" — so it's
-  // the only one these buttons could report honestly about.
-  const canSync = (tag.source || 'ao3') === 'ao3';
+  // Every source gets the buttons now. Royal Road and Scribble Hub groups are
+  // checked when you tap, and not otherwise — which is how they're wanted:
+  // rarely read, so not worth a nightly. The work happens on the worker, which
+  // is the only place a search for those sites is implemented.
+  const canSync = true;
   const note = { fontSize: 12, lineHeight: 1.45, color: 'var(--text-tertiary)', margin: '8px 2px 0' };
   return (
     <Sheet open={open} onClose={onClose} title={
@@ -1248,12 +1257,7 @@ function GroupActionsSheet({
             </div>
           )}
         </div>
-      ) : (
-        <div style={{ ...note, margin: '2px 2px 4px' }}>
-          On-device sync is AO3-only. The worker reaches {srcLabel} fine, so this
-          group is covered by the nightly run.
-        </div>
-      )}
+      ) : null}
     </Sheet>
   );
 }

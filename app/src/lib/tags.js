@@ -3,6 +3,7 @@ import { hashStr, COVER_PALETTES } from '../data/sample.js';
 import { fetchJson } from './fetch.js';
 import { discoverGroup, enqueueSave } from './ondevice.js';
 import { markOwned } from './ondevice-pure.js';
+import { matchesToDropOnEdit } from './shelving.js';
 import { kickSave } from './sync.js';
 
 // ============================================================================
@@ -250,6 +251,10 @@ export async function updateGroup(groupId, { label = '', tags, excludedTags = []
     .filter((t) => t.name);
   const clean = cleanTags(tags);
   if (!clean.length) throw new Error('A group needs at least one tag');
+  // Read the OLD rules first, so we can tell what actually changed. Without
+  // this every edit looked like a total rewrite and threw the whole group away.
+  const { data: before } = await supabase
+    .from('tracked_groups').select('tags,excluded_tags,match_mode,status').eq('id', groupId).maybeSingle();
   const { data, error } = await supabase
     .from('tracked_groups')
     .update({
@@ -264,11 +269,30 @@ export async function updateGroup(groupId, { label = '', tags, excludedTags = []
     .select()
     .single();
   if (error) throw error;
-  // Drop the un-reviewed suggestions found under the OLD rules — but not the ones
-  // you set aside for Later. Changing a group's criteria is a decision about what
-  // to surface next, not about the stash you already curated.
-  await supabase.from('tag_matches').delete().eq('group_id', groupId).eq('later', false);
+  // Drop the un-reviewed suggestions found under the OLD rules — but only the
+  // ones the NEW rules actually reject, and never the Later stash.
+  //
+  // This used to delete every match in the group on any edit, then refill by
+  // calling discoverGroup, whose failures are swallowed below. For four months
+  // that refill could not write a single row (`chapters: null` into a NOT NULL
+  // column), so saving any edit emptied the group and left it empty. Even
+  // working, the refill is ONE page (~20 works) against a delete of hundreds.
+  //
+  // The sharpest case: switching a group to "Complete works" deleted the
+  // complete works it already had — throwing away exactly what was asked for,
+  // then trying to re-fetch it.
+  //
+  // A status change is decidable from rows we already hold, so it needs no
+  // re-fetch at all. A change to the tags themselves is not — only the source
+  // can say what matches "A + B" now — so that still clears and re-seeds.
+  const drop = matchesToDropOnEdit(before, { tags: clean, excludedTags: cleanTags(excludedTags), matchMode, status });
+  const del = supabase.from('tag_matches').delete().eq('group_id', groupId).eq('later', false);
+  if (drop.mode === 'all') await del;                               // can't judge locally — re-seed
+  else if (drop.mode === 'status') await del.neq('status', drop.status); // keep what still qualifies
+
   // Re-discover against the new criteria, on-device, so the tile refills now.
+  // Best-effort by design: it is a head start, not the source of truth. The
+  // worker re-seeds all-time because last_checked was just nulled.
   try { await discoverGroup(data); } catch (e) { /* discovery is best-effort */ }
   return mapGroup(data);
 }

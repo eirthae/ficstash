@@ -362,3 +362,36 @@ test('a work read on another device is not listed as unread here', () => {
   const w = { id: 'a', words: 84000, chapters: 22, readSeconds: 900 };
   assert.equal(isUnread(w, readingStateFor(w, {})), false);
 });
+
+// ---- matchesToDropOnEdit ---------------------------------------------------
+// Editing a group used to delete every match it had, always. Choosing "Complete
+// works" in a group's settings therefore emptied the group — including the
+// complete works it already held — and the screen showed 0.
+const T = (...names) => names.map((name) => ({ name }));
+const stored = { tags: T('A', 'B'), excluded_tags: T('X'), match_mode: 'all', status: 'all' };
+const same = { tags: T('B', 'A'), excludedTags: T('X'), matchMode: 'all' };
+
+test('narrowing to complete keeps the complete works (drops only the others)', async () => {
+  const { matchesToDropOnEdit } = await import('./shelving.js');
+  assert.deepEqual(matchesToDropOnEdit(stored, { ...same, status: 'complete' }), { mode: 'status', status: 'complete' });
+  assert.deepEqual(matchesToDropOnEdit(stored, { ...same, status: 'ongoing' }), { mode: 'status', status: 'ongoing' });
+});
+
+test('a rename, a reorder, or widening to all deletes nothing', async () => {
+  const { matchesToDropOnEdit } = await import('./shelving.js');
+  assert.equal(matchesToDropOnEdit(stored, { ...same, status: 'all' }).mode, 'none');
+  assert.equal(matchesToDropOnEdit({ ...stored, status: 'complete' }, { ...same, status: 'all' }).mode, 'none');
+  assert.equal(matchesToDropOnEdit({ ...stored, status: 'complete' }, { ...same, status: 'complete' }).mode, 'none');
+});
+
+test('changing tags, excludes or match mode still re-seeds the group', async () => {
+  const { matchesToDropOnEdit } = await import('./shelving.js');
+  assert.equal(matchesToDropOnEdit(stored, { ...same, tags: T('A'), status: 'all' }).mode, 'all');
+  assert.equal(matchesToDropOnEdit(stored, { ...same, excludedTags: [], status: 'all' }).mode, 'all');
+  assert.equal(matchesToDropOnEdit(stored, { ...same, matchMode: 'any', status: 'all' }).mode, 'all');
+});
+
+test('an unreadable old row is treated as everything changed', async () => {
+  const { matchesToDropOnEdit } = await import('./shelving.js');
+  assert.equal(matchesToDropOnEdit(null, { ...same, status: 'complete' }).mode, 'all');
+});

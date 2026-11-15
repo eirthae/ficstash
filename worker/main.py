@@ -360,6 +360,21 @@ def _sync_paused() -> bool:
     return os.environ.get("SYNC_PAUSED", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _non_ao3_source(group_row: dict) -> str:
+    """The group's source if it is provably NOT AO3, else "".
+
+    Decides whether a one-group run may proceed without AO3 (no login, no AO3
+    pass). Everything uncertain resolves to "" — a missing row, a missing or
+    blank source (the column's own default is 'ao3'), anything that isn't a
+    plain string. "" means "treat as AO3", which honours the pause.
+    """
+    src = (group_row or {}).get("source")
+    if not isinstance(src, str):
+        return ""
+    src = src.strip().lower()
+    return src if src and src != "ao3" else ""
+
+
 def _skip_if_checked_within_hours() -> int:
     """Hours of "discovery already ran recently" that make this run a no-op.
 
@@ -631,12 +646,39 @@ def main() -> None:
     # AO3 login, before anything. Every lane stops, saves included: with AO3 off
     # there is nothing to fetch, and a queued save stays `wanted` and goes out
     # on the first run after resuming.
-    if _sync_paused():
+    # A one-group run for a NON-AO3 group (Royal Road, Scribble Hub, …) never
+    # needs AO3, so it is allowed to proceed while AO3 is paused — but only if
+    # we can prove the group is not AO3's. `offline_source` means: this process
+    # must not make a single request to AO3. Nothing below may weaken that.
+    #
+    # Fails CLOSED. Unknown group, unreadable database, any exception: we treat
+    # it as AO3's and stay paused. Being wrong in that direction costs a sync;
+    # being wrong the other way hits a site that asked for quiet.
+    offline_source = ""
+    if _only_group():
+        try:
+            probe = make_client()
+            row = (
+                probe.table("tracked_groups").select("source")
+                .eq("id", _only_group()).maybe_single().execute()
+            )
+            # maybe_single() hands back None (not an empty result) when no row
+            # matches, so guard the object as well as its data. No row → "ao3".
+            offline_source = _non_ao3_source((row.data if row else None) or {})
+        except Exception as exc:  # noqa: BLE001 — unknown source → treat as AO3
+            print(f"Could not read the group's source ({type(exc).__name__}: {exc}); "
+                  "assuming AO3 and honouring the pause.")
+
+    if _sync_paused() and not offline_source:
         print("== SYNC PAUSED (repo variable SYNC_PAUSED) — doing nothing. ==")
         print("   Unset SYNC_PAUSED, or set it to 0, to resume. Nothing is lost "
               "meanwhile: saves stay queued and every group's window is untouched, "
               "so the stalest go first on the next real run.")
         return
+    if offline_source:
+        print(f"== {offline_source} one-group run — AO3 is NOT touched in this mode. ==")
+        print("   No AO3 login, no pending links, no pending saves, no series, "
+              "no chapter refresh. One group's discovery and nothing else.")
 
     db = make_client()
 
@@ -674,8 +716,12 @@ def main() -> None:
                 return
             print(f"Discovery last advanced {age_h:.1f}h ago (>= {skip_hours}h) — running.")
 
+    # Constructing the source makes no request (it only sets up empty caches);
+    # logging in does. In offline_source mode we never log in and never call a
+    # single method on it — every pass that would is skipped below.
     ao3 = get_source("ao3")
-    _maybe_login_ao3(ao3)
+    if not offline_source:
+        _maybe_login_ao3(ao3)
 
     # Only import works in languages the user can read; everything else is
     # dropped before it ever reaches the library or tag-match discovery.
@@ -721,8 +767,13 @@ def main() -> None:
     series_dropped = clear_series_requests(db)
     if series_dropped:
         print(f"Removed {series_dropped} unsupported AO3 series link(s).")
-    link_requests = fetch_requested_urls(db)
-    print(f"{len(link_requests)} link request(s).")
+    # A pasted link can be an AO3 work and this pass cannot know before fetching
+    # it, so in offline_source mode the pass gets nothing at all. Skipped
+    # wholesale rather than filtered by host: the guarantee is "no AO3 request",
+    # and a filter is one more thing that can be wrong.
+    link_requests = [] if offline_source else fetch_requested_urls(db)
+    print(f"{len(link_requests)} link request(s)."
+          + (" (skipped — non-AO3 one-group run)" if offline_source else ""))
     link_done = link_failed = link_dropped = link_requeued = 0
     if link_requests:
         from ficstash_worker.sources.link import UnsupportedSite
@@ -820,8 +871,11 @@ def main() -> None:
     # the source's canonical work URL. Runs ahead of the library sweep so a
     # tapped Save lands quickly. Marks the match saved once it's in the library.
     print("\n== Requested saves ==")
-    wanted = fetch_wanted_matches_all(db)
-    print(f"{len(wanted)} work(s) requested.")
+    # Same reasoning: your queued saves are AO3 works. They stay `wanted` and go
+    # out on the first run that is allowed to talk to AO3.
+    wanted = [] if offline_source else fetch_wanted_matches_all(db)
+    print(f"{len(wanted)} work(s) requested."
+          + (" (skipped — non-AO3 one-group run)" if offline_source else ""))
     saved_count = save_failed = 0
     for w in wanted:
         src_id = w["source"]

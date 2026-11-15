@@ -271,3 +271,36 @@ export function savedWorksFrom(works) {
     .filter((w) => (w.origin || '') === 'tag')
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
+
+// What editing a tracked group should delete from its un-reviewed matches.
+//
+//   'all'    — the tags, excludes or match mode changed. Only the source can say
+//              what matches the new combination, so the old suggestions go and
+//              the group re-seeds.
+//   'status' — only the completion filter narrowed. Every row already carries
+//              its status, so drop just the rows the new filter rejects (those
+//              whose status differs from `status`) and keep the rest. No
+//              re-fetch needed.
+//   'none'   — nothing the new rules reject (a rename, or widening to 'all').
+//
+// Editing used to delete everything, always. Switching a group to "Complete
+// works" therefore threw away the complete works it already held — exactly
+// what had just been asked for — and waited on a re-fetch to bring them back.
+//
+// `before` is the stored row (tags / excluded_tags / match_mode / status), or
+// null when it couldn't be read — which is treated as "everything changed",
+// the old behaviour, because we can't prove the rows still qualify.
+export function matchesToDropOnEdit(before, next) {
+  const status = ['ongoing', 'complete'].includes(next && next.status) ? next.status : 'all';
+  const names = (list) => JSON.stringify((list || []).map((t) => (t && t.name) || '').filter(Boolean).sort());
+  const mode = (m) => (m === 'any' ? 'any' : 'all');
+  if (!before
+    || names(before.tags) !== names(next.tags)
+    || names(before.excluded_tags) !== names(next.excludedTags)
+    || mode(before.match_mode) !== mode(next.matchMode)) {
+    return { mode: 'all', status };
+  }
+  const was = ['ongoing', 'complete'].includes(before.status) ? before.status : 'all';
+  if (status !== 'all' && status !== was) return { mode: 'status', status };
+  return { mode: 'none', status };
+}
