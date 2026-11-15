@@ -1,5 +1,18 @@
 # Resuming after the AO3 outage
 
+> **CURRENT STATE (2026-11-15, v0.8.78): nothing is paused and nothing needs
+> flipping.** `SYNC_PAUSED` is deleted and the Sync workflow is enabled. Every
+> AO3 run now starts with one request to AO3's front page; while AO3's robot
+> check is up the run stands down there (verified: a full run ended in 21s with
+> "AO3 is refusing automated clients (HTTP 418)" and no login attempt). The
+> first scheduled run after AO3 lifts the check carries on by itself.
+>
+> **So sections 0 and 1 below are history.** What still applies once a run gets
+> through: the checks in section 2. To tell whether a run got through, look for
+> `AO3: logged in as` in its log instead of `standing down`.
+>
+> `SYNC_PAUSED=1` still works as a hard stop if one is ever wanted again.
+
 _Paused: **2026-10-30** (code switch). Workflow disabled at GitHub:
 **2026-11-01**. AO3 announced 2–4 weeks of downtime from ~2026-10-29._
 
