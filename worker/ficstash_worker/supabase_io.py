@@ -356,7 +356,19 @@ def upsert_work(
     flag. `origin` (how the work entered the library: 'link'/'tag'/…) is written
     only when supplied, so a backfill never overwrites the original source lane.
     `history_read_at` (the AO3 last-visited date) is written only when supplied.
+
+    Refuses an AO3 work with a blank title. Every AO3 work has one, so a blank
+    means the fetch parsed something that was not a work page, and writing it
+    would blank the stored title/author/fandom/summary and zero the counts of a
+    work that was fine — which is how 504 works became readable but nameless.
+    The AO3 source already raises for this; this is the backstop for any path
+    that builds a WorkMeta another way.
     """
+    if meta.source == "ao3" and not (meta.title or "").strip():
+        raise ValueError(
+            f"refusing to write AO3 work {meta.source_work_id} with a blank title "
+            "(a failed fetch, not real metadata)"
+        )
     payload = {
         "source": meta.source,
         "source_work_id": meta.source_work_id,

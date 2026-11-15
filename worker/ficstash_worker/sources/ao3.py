@@ -533,7 +533,28 @@ class AO3Source(Source):
         Cheap enough to call on every work each sync to detect new chapters.
         """
         work = self._load_work(source_work_id, with_chapters=False)
-        return _work_to_meta(self.id, source_work_id, work)
+        meta = _work_to_meta(self.id, source_work_id, work)
+        # Every AO3 work has a title, so a blank one means the page we parsed
+        # was not a work page at all — an error page, a robot check, AO3's "page
+        # responding too slowly". _load_work tolerates a reload() abort whenever
+        # *some* page came back (to survive a real ao3-api quirk on valid works),
+        # and cannot tell those apart; this is where they are told apart.
+        #
+        # It matters because the result is written straight over the stored row:
+        # the nightly refresh re-reads metadata for every work, so each such page
+        # blanked a good title, author, fandom and summary and zeroed the word
+        # and chapter counts — while the chapter text stayed. 504 works ended up
+        # readable but unidentifiable, 10-20 more every week. Treat it as the
+        # transient failure it is, and forget the cached page so a retry
+        # fetches a fresh one.
+        if not (meta.title or "").strip():
+            self._work_cache.pop(source_work_id, None)
+            self._chapters_loaded.discard(source_work_id)
+            raise AO3Unavailable(
+                f"AO3 returned a page with no work title for {source_work_id} "
+                "(error page / robot check) — not overwriting stored metadata"
+            )
+        return meta
 
     def fetch_chapter(self, source_work_id: str, chapter_n: int) -> Chapter:
         """Return one chapter's body, downloading chapter text on first use."""
