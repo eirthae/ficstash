@@ -3,6 +3,26 @@
 _Paused: **2026-10-30** (code switch). Workflow disabled at GitHub:
 **2026-11-01**. AO3 announced 2–4 weeks of downtime from ~2026-10-29._
 
+**Update 2026-11-15 — AO3 is up for browsers, not for us.** It came back in
+"Shields are up" mode: a Cloudflare challenge in front of everything. A real
+browser passes it; anything automated is refused (HTTP 418 "Request temporarily
+denied" to plain HTTP from the home connection, and to the worker). A resume was
+attempted and reversed the same hour: the worker's login failed 3/3, all 4
+queued saves failed (still `wanted`, not marked failed) and the test group's
+search was refused 4/4. So the state is now:
+
+- **Sync workflow: enabled** (was disabled) — needed so one-group runs for
+  non-AO3 sources can be dispatched; they never touch AO3 and ignore the pause.
+- **`SYNC_PAUSED=1`: set again** — resuming is now ONE switch:
+  `gh variable delete SYNC_PAUSED`. Skip the `gh workflow enable` step below.
+- Re-test before resuming with the curl in section 1. `200` means the shields
+  are down; `418`/`403` means they are not, and a run would only collect
+  refusals. We do not try to get past the challenge.
+
+Also found: **Scribble Hub 403s the worker** (datacenter IP), so the Scribble
+Hub sync button reaches the worker but its search is refused. Needs an
+on-device search (the phone can reach Scribble Hub) — not built yet.
+
 **Nothing of ours reaches AO3 while this holds** — with one exception: the app
 on your phone. `SYNC_PAUSED` and the disabled workflow govern the worker only.
 Pull-to-refresh (Library / Discover / What's New) and a group's Sync buttons
