@@ -657,6 +657,17 @@ def run_ao3_series_pass(db, ao3, space, backoff) -> None:
 _run_deadline: float | None = None
 
 
+def _search_breaker_after() -> int:
+    """Consecutive failed AO3 group searches after which search counts as down
+    for the rest of the run. Tune with SEARCH_BREAKER_AFTER (0 disables)."""
+    raw = os.environ.get("SEARCH_BREAKER_AFTER", "").strip()
+    try:
+        n = int(raw) if raw else 4
+    except ValueError:
+        n = 4
+    return n if n > 0 else 10**9
+
+
 def _refresh_slot_minutes() -> int:
     """Budget for a refresh-only slot (one whose discovery was already covered).
 
@@ -1319,8 +1330,21 @@ def main() -> None:
     pending = list(groups)
     failed: list[dict] = []
     round_no = 0
+    # Circuit breaker for AO3 search. After the 2026 outage AO3's search pages
+    # stayed overloaded for days while its front page, login and work pages
+    # worked: 29 of 33 groups failed in one nightly, each burning ~5 minutes of
+    # hung requests and 10/25/60s retries, so discovery ate ~4 hours to get 4
+    # groups through and starved the chapter refresh. Several AO3 searches in a
+    # row failing means search is down, not that those tags are unlucky — so
+    # stop searching AO3 for this run and hand the time to the refresh. The
+    # next run tries again, stalest-first, so nothing is skipped for good.
+    ao3_search_streak = 0
+    ao3_search_down = False
     while True:
       for g in pending:
+        if ao3_search_down and (g.get("source") or "ao3") == "ao3":
+            failed.append(g)  # not attempted this run; window untouched
+            continue
         if not _within_budget(_refresh_reserve_seconds()):
             print("  time budget reached — stopping discovery; resumes next run.")
             break
@@ -1414,9 +1438,17 @@ def main() -> None:
                 mark_group_checked(db, g["id"])
                 note = f" ({dropped} filtered by language)" if dropped else ""
                 print(f"    '{label}': {written} match(es).{note}")
+                ao3_search_streak = 0
             except Exception as exc:  # noqa: BLE001
                 print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
                 failed.append(g)
+                ao3_search_streak += 1
+                if ao3_search_streak >= _search_breaker_after() and not ao3_search_down:
+                    ao3_search_down = True
+                    print(f"  AO3 search failed for {ao3_search_streak} groups in a row — "
+                          "treating search as down for this run. Remaining AO3 groups "
+                          "keep their windows and go first next run; the time goes to "
+                          "the chapter refresh instead.")
             continue
 
         # ---- non-AO3 sources (Royal Road, Scribble Hub, …) -----------------
@@ -1472,13 +1504,17 @@ def main() -> None:
       # plus another ladder turned one tag into a 23-minute wait. They can tap
       # again. The nightly, which nobody is watching, still gets its retry.
       max_rounds = 0 if _only_group() else 1
-      if not failed or round_no >= max_rounds or out_of_time:
+      # No retry round when AO3 search is down — a 90s pause and a second pass
+      # over the same groups would just collect the same failures.
+      if not failed or round_no >= max_rounds or out_of_time or ao3_search_down:
           if failed:
               names = ", ".join(str(x.get("label") or x.get("id")) for x in failed[:5])
               # Say which it was: "AO3 kept refusing" and "we ran out of time
               # before retrying" need different responses from a human reading
               # this, and conflating them sent me down the wrong path once.
-              why = "no time left to retry them" if out_of_time else "still refused by AO3"
+              why = ("no time left to retry them" if out_of_time
+                     else "left for next run (AO3 search down)" if ao3_search_down
+                     else "still refused by AO3")
               print(f"  {len(failed)} group(s) {why} ({names}) — "
                     "their windows are untouched, so they go first next run.")
           break

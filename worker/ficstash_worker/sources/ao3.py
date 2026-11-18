@@ -283,6 +283,28 @@ def _enable_adult_view(session) -> None:
 _CLOUDFLARE_5XX = (520, 521, 522, 523, 524, 525, 526, 527, 530)
 
 
+# (connect, read) seconds for every AO3 request. There was none: ao3-api calls
+# requests without a timeout, so when AO3's search hung after the 2026 outage
+# each request waited until Cloudflare gave up (~100s), the adapter retried that
+# four more times, and the callers' backoff retried the lot three more — up to
+# half an hour for one group's search. 45s between bytes is generous: AO3's
+# slowest real answers measured at ~36s to first byte.
+AO3_TIMEOUT = (15, 45)
+
+try:  # requests is always installed; guarded only so import never breaks
+    from requests.adapters import HTTPAdapter as _HTTPAdapter
+
+    class _TimeoutAdapter(_HTTPAdapter):
+        """An HTTPAdapter that applies AO3_TIMEOUT when the caller set none."""
+
+        def send(self, request, **kwargs):
+            if kwargs.get("timeout") is None:
+                kwargs["timeout"] = AO3_TIMEOUT
+            return super().send(request, **kwargs)
+except Exception:  # noqa: BLE001  # pragma: no cover
+    _TimeoutAdapter = None
+
+
 def _install_retry(session) -> None:
     """Make the session's underlying requests adapter retry Cloudflare 5xx.
 
@@ -305,7 +327,10 @@ def _install_retry(session) -> None:
     retry = Retry(
         total=4,
         connect=4,
-        read=4,
+        # Not 4: a read that times out is AO3 hanging, not a Cloudflare blip,
+        # and the callers' own backoff already retries the whole call. Retrying
+        # it here too multiplied every hang by five.
+        read=0,
         status=4,
         status_forcelist=_CLOUDFLARE_5XX,
         backoff_factor=0.8,  # 0, 0.8, 1.6, 3.2s — ~5.6s worst case per work
@@ -313,7 +338,7 @@ def _install_retry(session) -> None:
         # Default allowed_methods already covers GET/HEAD (AO3 fetches are GET) and
         # is named differently across urllib3 versions, so we leave it untouched.
     )
-    adapter = HTTPAdapter(max_retries=retry)
+    adapter = _TimeoutAdapter(max_retries=retry)
     for attr in ("session", "_session", "requests_session", "s"):
         sess = getattr(session, attr, None)
         if sess is not None and hasattr(sess, "mount"):
