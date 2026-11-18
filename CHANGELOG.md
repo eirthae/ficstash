@@ -4,6 +4,48 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-11-18 — Chapter checks every day, tile counts that update, honest refusals (v0.8.79)
+
+### Fixed
+
+- **New chapters took up to nine days to show.** A nightly spends most of its
+  5-hour budget on discovery, then reached only ~60 of ~500 ongoing works before
+  time ran out. The other two daily slots found discovery already covered and
+  exited, throwing their time away. They now refresh chapters instead
+  (stalest-first, 2 hours each), which roughly covers every ongoing work daily.
+- **Group tiles kept their old count after a sync.** The count reloads when you
+  leave the group, but only the on-screen back arrow did that — Android's back
+  gesture popped the screen without it. Every way out now reloads the count.
+- **Royal Road and Scribble Hub cost ~95s of retries every night.** Both answer
+  the worker with a Cloudflare challenge (403). A 403/418 is a decision, not a
+  hiccup, so it is no longer retried: one request, then move on.
+- **A refused worker search was reported as "Nothing new".** The one-group run
+  succeeds even when the site refuses its search. The app now checks whether the
+  group's last successful search actually moved, and says the site refused it
+  when it didn't.
+- **Works AO3 serves as a non-work page cost ~95s each per run.** The blank-title
+  guard from v0.8.78 used the retrying error type; it now fails fast, keeps the
+  stored data, and the next run tries again.
+
+### Changed
+
+- **All-time walks pace their pages 5s apart** (was 1.5s). Twenty-five search
+  pages in about a minute is the burst a robot check exists to catch.
+- **A walk that saved works before AO3 asked it to stop** shows in amber and
+  leads with what was kept, instead of reading as a red failure.
+
+### Notes
+
+- **Royal Road and Scribble Hub cannot be searched right now from anywhere we
+  control.** Both serve "Just a moment… Enable JavaScript and cookies" to plain
+  requests from a home connection too, not just the worker — and the phone's
+  sync uses plain requests. Building an on-device search would hit the same
+  wall. A browser passes it; getting past it otherwise means defeating the bot
+  check, which we don't do.
+- 216 of the 504 nameless works were restored from their discovery records on
+  2026-11-16; the repair pass is now finding the rest, and the blank-title guard
+  was seen refusing to overwrite good rows with error pages in production.
+
 ## 2026-11-15 — Standing down when AO3 says "not now" (v0.8.78)
 
 AO3 returned from its outage behind a robot check ("Shields are up"): a browser

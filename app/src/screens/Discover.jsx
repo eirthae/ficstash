@@ -7,6 +7,7 @@ import {
   fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup, updateGroup,
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch, fetchStashCounts,
+  fetchGroupLastChecked,
 } from '../lib/tags.js';
 import { discoverGroup, discoverGroupAllTime, errText } from '../lib/ondevice.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
@@ -912,7 +913,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     return () => { alive = false; };
   }, [tag.id]);
 
-  const leave = () => { onLeave && onLeave(); nav.pop(); };
+  const leave = () => nav.pop(); // goBack runs onLeave, for every way out
 
   const dismiss = (w) => {
     setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
@@ -990,6 +991,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     const phase = (p) => setJob(p);
     setJob('dispatching');
     try {
+      const checkedBefore = await fetchGroupLastChecked(tag.id).catch(() => null);
       const r = await syncGroupViaWorker(tag.id, { allTime, onPhase: phase });
       if (r.alreadyRunning) {
         setLastRun({ ok: false, text: 'A sync is already running — try again when it finishes.' });
@@ -1008,6 +1010,17 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         return;
       }
       const added = await refreshAfter(before);
+      // The run "succeeds" even when the site refused its one search — the
+      // worker logs it and moves on. The group's last_checked only moves when
+      // the search actually worked, so if it didn't move, say so instead of
+      // reporting "Nothing new" about a search that never happened. (Royal Road
+      // and Scribble Hub refuse the worker with a Cloudflare challenge.)
+      const checkedAfter = await fetchGroupLastChecked(tag.id).catch(() => null);
+      if (!added && checkedAfter === checkedBefore) {
+        setLastRun({ ok: false, text: `The worker ran, but ${srcLabel} refused its search — the site is blocking automated access right now. Nothing was changed.` });
+        showToast(`${srcLabel} is blocking automated searches right now`, 'solar:danger-triangle-bold');
+        return;
+      }
       setLastRun({ ok: true, text: `${allTime ? 'Caught up all-time' : 'Checked'} in ${secs(t0)}s · ${added} new · ${before.size + added} in this group` });
       setMenuOpen(false);
       if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
@@ -1027,13 +1040,22 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   // for. Say what happened and stop. It works again when AO3 lifts the check.
   const standDown = async (before, t0) => {
     const added = await refreshAfter(before).catch(() => 0);
-    setLastRun({
-      ok: false,
-      text: `AO3 is screening for robots and turned this request away after ${secs(t0)}s. `
-        + 'Nothing was retried. Sync will work again when AO3 lifts the check'
-        + (added ? ` · kept ${plural(added)}` : '') + '.',
-    });
-    showToast('AO3 is screening for robots — try again later', 'solar:danger-triangle-bold');
+    // Some pages may have landed before AO3 said stop — that is a partial
+    // success, not a failure, and it reads as one (amber, and leads with what
+    // was kept). An all-time walk is the most likely thing to trip the check.
+    setLastRun(added
+      ? {
+        ok: false, warn: true,
+        text: `Kept ${plural(added)}, then AO3's robot check asked us to stop after ${secs(t0)}s. `
+          + 'Nothing was retried. Tap again later to pick up the rest.',
+      }
+      : {
+        ok: false,
+        text: `AO3 is screening for robots and turned this request away after ${secs(t0)}s. `
+          + 'Nothing was retried. Sync will work again when AO3 lifts the check.',
+      });
+    showToast(added ? `${plural(added)} — AO3 asked us to pause` : 'AO3 is screening for robots — try again later',
+      added ? 'solar:magic-stick-3-bold' : 'solar:danger-triangle-bold');
     setJob(null);
   };
 
@@ -1269,7 +1291,8 @@ function GroupActionsSheet({
           {lastRun && (
             <div style={{
               fontSize: 11.5, lineHeight: 1.45, marginTop: 2, padding: '9px 11px', borderRadius: 10,
-              background: 'var(--surface-2)', color: lastRun.ok ? 'var(--text-tertiary)' : 'var(--danger, #f5455c)',
+              background: 'var(--surface-2)',
+              color: lastRun.ok ? 'var(--text-tertiary)' : lastRun.warn ? 'var(--warning)' : 'var(--danger, #f5455c)',
               wordBreak: 'break-word',
             }}>
               {lastRun.text}
@@ -1293,7 +1316,7 @@ export function LaterScreen({ nav, onLeave }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const leave = () => { onLeave && onLeave(); nav.pop(); };
+  const leave = () => nav.pop(); // goBack runs onLeave, for every way out
 
   const remove = (w) => {
     setItems((arr) => (arr || []).filter((x) => x.id !== w.id));
@@ -1372,7 +1395,7 @@ export function FailedScreen({ nav, onLeave }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const leave = () => { onLeave && onLeave(); nav.pop(); };
+  const leave = () => nav.pop(); // goBack runs onLeave, for every way out
 
   const remove = (w) => {
     setItems((arr) => (arr || []).filter((x) => x.id !== w.id));

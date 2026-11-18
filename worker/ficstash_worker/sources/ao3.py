@@ -69,6 +69,17 @@ class RateLimitError(Exception):
     """AO3 returned HTTP 429 — caller should back off and retry."""
 
 
+class AO3NotAWorkPage(Exception):
+    """A work fetch came back with a page that has no work title.
+
+    Every AO3 work has a title, so this was an error page or a robot check, not
+    metadata. Deliberately NOT a RateLimitError: some works get served that way
+    on every attempt, and retrying through the 10/25/60s backoff cost ~95s per
+    such work per run. The caller skips the work and keeps what it has stored;
+    the next run tries again.
+    """
+
+
 class AO3Unavailable(RateLimitError):
     """AO3 served an error page instead of results — a Cloudflare 5xx (525 "SSL
     handshake failed" is the common one) or AO3's own "Page Responding Too
@@ -550,7 +561,7 @@ class AO3Source(Source):
         if not (meta.title or "").strip():
             self._work_cache.pop(source_work_id, None)
             self._chapters_loaded.discard(source_work_id)
-            raise AO3Unavailable(
+            raise AO3NotAWorkPage(
                 f"AO3 returned a page with no work title for {source_work_id} "
                 "(error page / robot check) — not overwriting stored metadata"
             )

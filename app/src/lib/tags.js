@@ -107,6 +107,16 @@ export async function requestSave(matchId) {
   }
 }
 
+// When the worker last searched a group successfully (mark_group_checked only
+// runs after a search that worked). Compared before/after a one-group run to
+// tell "searched, nothing new" from "the site refused the search" — the run
+// itself reports success either way.
+export async function fetchGroupLastChecked(groupId) {
+  if (!hasSupabase) return null;
+  const { data } = await supabase.from('tracked_groups').select('last_checked').eq('id', groupId).maybeSingle();
+  return (data && data.last_checked) || null;
+}
+
 export async function fetchTrackedGroups() {
   if (!hasSupabase) return null; // not configured → caller falls back to sample
   const { data: groups, error } = await supabase

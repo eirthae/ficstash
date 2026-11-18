@@ -10,7 +10,7 @@ the chapter text stayed: 504 works readable but nameless, 10-20 more a week.
 import unittest
 from unittest import mock
 
-from ficstash_worker.sources.ao3 import AO3Source, AO3Unavailable
+from ficstash_worker.sources.ao3 import AO3NotAWorkPage, AO3Source, RateLimitError
 from ficstash_worker.sources.base import WorkMeta
 from ficstash_worker.supabase_io import upsert_work
 
@@ -25,8 +25,11 @@ class BlankTitleGuardTests(unittest.TestCase):
         src._work_cache["123"] = object()
         with mock.patch.object(src, "_load_work", return_value=object()), \
              mock.patch("ficstash_worker.sources.ao3._work_to_meta", return_value=_meta("")):
-            with self.assertRaises(AO3Unavailable):
+            with self.assertRaises(AO3NotAWorkPage) as ctx:
                 src.fetch_work_metadata("123")
+        # Not retryable: a work served this way every time must not cost ~95s of
+        # backoff on every run.
+        self.assertNotIsInstance(ctx.exception, RateLimitError)
         # The bad page is forgotten, so a retry fetches a fresh one.
         self.assertNotIn("123", src._work_cache)
 

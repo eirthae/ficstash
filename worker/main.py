@@ -181,6 +181,15 @@ def _maybe_login_ao3(ao3) -> None:
           "automated login from this CI IP (Cloudflare).")
 
 
+def _is_refusal(exc: BaseException) -> bool:
+    """True when an HTTP error is a deliberate refusal (403/418), not a hiccup."""
+    code = getattr(getattr(exc, "response", None), "status_code", None)
+    if code in (403, 418):
+        return True
+    text = str(exc)
+    return "403 Client Error" in text or "418 Client Error" in text
+
+
 def _with_backoff(fn, *, what: str, broad: bool = False):
     """Run fn(), retrying with growing waits.
 
@@ -198,8 +207,12 @@ def _with_backoff(fn, *, what: str, broad: bool = False):
         except RateLimitError:
             if attempt >= len(BACKOFF_SECONDS):
                 raise
-        except Exception:  # noqa: BLE001
-            if not broad or attempt >= len(BACKOFF_SECONDS):
+        except Exception as exc:  # noqa: BLE001
+            # A 403/418 is a site deciding "not you" (Royal Road and Scribble
+            # Hub serve a Cloudflare challenge to anything automated). Waiting
+            # 10/25/60s and asking again only repeats the refusal — ~95s a group,
+            # every night — so it is raised at once.
+            if _is_refusal(exc) or not broad or attempt >= len(BACKOFF_SECONDS):
                 raise
     raise RuntimeError(f"gave up on {what} after backoff")
 
@@ -644,6 +657,27 @@ def run_ao3_series_pass(db, ao3, space, backoff) -> None:
 _run_deadline: float | None = None
 
 
+def _refresh_slot_minutes() -> int:
+    """Budget for a refresh-only slot (one whose discovery was already covered).
+
+    Shorter than a full run on purpose: two extra slots of this size roughly
+    give every ongoing work a chapter check each day, without three back-to-back
+    five-hour runs of AO3 traffic. Tune with REFRESH_SLOT_MINUTES.
+    """
+    raw = os.environ.get("REFRESH_SLOT_MINUTES", "").strip()
+    try:
+        return max(10, int(raw)) if raw else 120
+    except ValueError:
+        return 120
+
+
+def _shorten_run_clock(minutes: int) -> None:
+    """Pull the run deadline in to `minutes` from now (never extend it)."""
+    global _run_deadline
+    cap = time.monotonic() + minutes * 60
+    _run_deadline = cap if _run_deadline is None else min(_run_deadline, cap)
+
+
 def _start_run_clock() -> None:
     """Start the per-run time budget. The heavy full-sweep passes (discovery,
     backfill, reflow, refresh) check _within_budget() and stop starting new work
@@ -738,6 +772,7 @@ def main() -> None:
     # enumerates follows, and skipping it because tags were checked recently
     # would silently cancel it for the week.
     skip_hours = _skip_if_checked_within_hours()
+    skip_discovery = False
     if skip_hours and not _saves_only() and not _only_group() and _series_sweep() != "only":
         try:
             stamps = [_parse_ts(g.get("last_checked")) for g in fetch_tracked_groups(db)]
@@ -759,9 +794,18 @@ def main() -> None:
         if newest is not None:
             age_h = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
             if age_h < skip_hours:
+                # Discovery is covered, but the new-chapter refresh is not: a
+                # nightly spends most of its budget on discovery and then gets
+                # through ~60 of ~500 ongoing works before time runs out, so
+                # each work was checked about once every nine days. Exiting here
+                # threw the spare slots away. They refresh chapters instead —
+                # stalest-first, so each slot picks up where the last stopped —
+                # on a shorter budget so the day's AO3 traffic stays modest.
+                skip_discovery = True
+                _shorten_run_clock(_refresh_slot_minutes())
                 print(f"Discovery last advanced {age_h:.1f}h ago (< {skip_hours}h) — "
-                      "another slot already covered this. Nothing to do.")
-                return
+                      f"another slot covered it. This slot refreshes chapters only "
+                      f"({_refresh_slot_minutes()} min).")
             print(f"Discovery last advanced {age_h:.1f}h ago (>= {skip_hours}h) — running.")
 
     # Constructing the source makes no request (it only sets up empty caches);
@@ -1190,7 +1234,9 @@ def main() -> None:
 
     # ---- Pass 4: tracked tag groups → discover new matches -----------------
     print("\n== Tracked tag groups ==")
-    groups = fetch_tracked_groups(db)
+    groups = [] if skip_discovery else fetch_tracked_groups(db)
+    if skip_discovery:
+        print("Skipped (refresh-only slot — discovery was covered by an earlier slot).")
     # One-group mode: the app tapped Sync on a single group and is waiting with a
     # spinner. Narrow to that group and nothing else.
     only = _only_group()

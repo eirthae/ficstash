@@ -188,6 +188,13 @@ export default function App() {
   const goBack = () => {
     const s = stackRef.current;
     if (!s.length) return false;
+    // Whatever the screen wanted done on the way out (Discover's group screen
+    // reloads the tile counts) — run it here, the one place every exit passes
+    // through: the on-screen arrow, Android's back gesture, the hardware key.
+    // Only the arrow used to call it, so after syncing 140 works and swiping
+    // back, the tile still showed the old count.
+    const leaving = s[s.length - 1];
+    try { leaving && leaving.props && leaving.props.onLeave && leaving.props.onLeave(); } catch (e) { /* never block navigation */ }
     setNavDir('back');
     setExiting({ item: s[s.length - 1], key: s.length });
     setStack(s.slice(0, -1));

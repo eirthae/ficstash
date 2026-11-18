@@ -178,6 +178,10 @@ const AO3_PAGE_SIZE = 20;
 // anyone will hold a phone still — and it keeps a 40,000-work fandom tag from
 // turning one tap into an hour of hammering a volunteer-run site.
 const ALLTIME_MAX_PAGES = 25;
+// Gap between all-time pages. Was SPACE_MS (1.5s): 25 search pages in about a
+// minute is the burst a robot check exists to catch, and AO3 came back from its
+// outage behind exactly such a check. The worker spaces AO3 requests 6s apart.
+const ALLTIME_PAGE_GAP_MS = 5000;
 
 // Walk a group's search back through the pages instead of taking only the newest
 // one — the back catalogue, not today's updates.
@@ -246,7 +250,7 @@ export async function discoverGroupAllTime(group, { onProgress, shouldStop } = {
       onProgress && onProgress({ pages, written });
       if (metas.length < AO3_PAGE_SIZE) break; // short page = end of the results
       if (page === ALLTIME_MAX_PAGES) { capped = true; break; }
-      await sleep(SPACE_MS);
+      await sleep(ALLTIME_PAGE_GAP_MS);
     }
   }
   // Same rule as discoverGroup: no last_checked stamp. Even a full back-catalogue
