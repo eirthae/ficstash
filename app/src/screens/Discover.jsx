@@ -987,7 +987,8 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
 
   // Shared by both buttons: dispatch a one-group worker run, follow it, then
   // re-read the list and report what actually landed.
-  const runViaWorker = async (allTime, before, t0) => {
+  const runViaWorker = async (allTime, before, t0, phoneNote = '') => {
+    const lead = phoneNote ? `${phoneNote} Then: ` : '';
     const phase = (p) => setJob(p);
     setJob('dispatching');
     try {
@@ -1005,7 +1006,15 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         return;
       }
       if (!r.ok) {
-        setLastRun({ ok: false, text: `Worker run ${r.conclusion || 'failed'} after ${secs(t0)}s${r.error ? ` · ${r.error}` : ''}` });
+        // r.error means the run was never started (the request to start it
+        // failed) — calling that "Worker run failed" sent us looking at the
+        // worker when nothing had reached it.
+        setLastRun({
+          ok: false,
+          text: lead + (r.error
+            ? `the worker couldn't be started (${secs(t0)}s): ${r.error}.`
+            : `the worker run ${r.conclusion || 'failed'} after ${secs(t0)}s.`),
+        });
         showToast(r.error ? `Couldn't start the sync — ${r.error}` : 'The sync run failed', 'solar:danger-triangle-bold');
         return;
       }
@@ -1102,14 +1111,16 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         setJob(null);
         return;
       }
-      setLastRun({ ok: false, text: `AO3 refused this phone (${why || 'no reason given'}) — asking the worker…` });
-      await runViaWorker(allTime, before, t0);
+      const note = `This phone couldn't finish (${why || 'AO3 did not answer'}).`;
+      setLastRun({ ok: false, text: `${note} Asking the worker…` });
+      await runViaWorker(allTime, before, t0, note);
     } catch (e) {
       if (e && e.denied) { await standDown(before, t0); return; }
       // On-device threw — AO3 unreadable, or our own write failed. Either way
       // the worker is logged in, patient, and worth a try before giving up.
-      setLastRun({ ok: false, text: `Phone couldn't do it (${errText(e)}) — asking the worker…` });
-      await runViaWorker(allTime, before, t0);
+      const note = `This phone couldn't finish (${errText(e)}).`;
+      setLastRun({ ok: false, text: `${note} Asking the worker…` });
+      await runViaWorker(allTime, before, t0, note);
     }
   };
 

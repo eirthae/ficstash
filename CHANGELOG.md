@@ -4,6 +4,28 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-11-18 — A hung AO3 search no longer eats the night (v0.8.80)
+
+### Fixed
+
+- **Only 8 of 46 AO3 groups were checked in two days after AO3 returned.** AO3's
+  front page, login and work pages came back before its search did, and search
+  hung. With no request timeout, each hung search waited ~100s for Cloudflare to
+  give up, was retried 4 more times by the HTTP layer and 3 more by our backoff —
+  up to ~30 minutes for one group. One nightly spent ~4 hours to get 4 of 33
+  groups through, and the chapter refresh reached 57 works. Now:
+  - every AO3 request times out (15s to connect, 45s between bytes);
+  - a hang is not retried at the HTTP layer, only by the caller's backoff;
+  - after 4 AO3 group searches fail in a row, search counts as down for that
+    run — the remaining groups keep their windows and go first next run, and
+    the time goes to the chapter refresh (work pages, which do answer).
+- **"Worker run failed in 59.7 sec — failed to send a request to the edge
+  function."** No run had been started: the phone could not reach the server
+  (the server was checked and answers in ~1s). The request is now retried once
+  after a network failure, and the message says the worker couldn't be started
+  and why, instead of blaming a run that never happened. The phone's own result
+  is kept in the message too, rather than overwritten.
+
 ## 2026-11-18 — Chapter checks every day, tile counts that update, honest refusals (v0.8.79)
 
 ### Fixed

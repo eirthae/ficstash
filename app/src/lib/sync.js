@@ -36,10 +36,31 @@ export async function triggerSync(opts = {}) {
   const body = opts.savesOnly ? { savesOnly: true }
     : opts.groupId ? { groupId: opts.groupId, allTime: !!opts.allTime }
       : {};
-  const { data, error } = await supabase.functions.invoke('trigger-sync', { method: 'POST', body });
-  if (error) return { ok: false, error: error.message || String(error) };
+  const invoke = () => supabase.functions.invoke('trigger-sync', { method: 'POST', body });
+  let { data, error } = await invoke();
+  // "Failed to send a request to the Edge Function" is the phone failing to
+  // reach the server at all — a network blip, often the screen locking during
+  // a long wait — not the function failing (it answered fine when checked).
+  // One retry is cheap and safe: if the first request did get through and
+  // started a run, the retry is simply told one is already running.
+  if (error && isNetworkError(error)) {
+    await new Promise((res) => setTimeout(res, 2000));
+    ({ data, error } = await invoke());
+  }
+  if (error) {
+    return {
+      ok: false,
+      network: isNetworkError(error),
+      error: isNetworkError(error)
+        ? "couldn't reach FicStash's server — check your connection and tap again"
+        : (error.message || String(error)),
+    };
+  }
   return data || { ok: true };
 }
+
+const isNetworkError = (e) => !!e && (e.name === 'FunctionsFetchError'
+  || /failed to send a request/i.test(e.message || ''));
 
 // Sync ONE tracked group by asking the worker to do it, and wait for the answer.
 //
