@@ -4,6 +4,45 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-11-19 — All-time stops passing the buck; Royal Road and Scribble Hub in a browser you drive (v0.8.81)
+
+### Fixed
+
+- **All-time fetch kept ending in errors.** When the phone's walk didn't finish,
+  the app handed the job to the worker — and that hand-off never once started a
+  run: the server refuses a second run while one is going, which is now most of
+  the day. Even when it could start, the worker's AO3 searches failed in every
+  run on 2026-11-18 while the phone got 213 works through. The hand-off is gone.
+  The phone fetches; if AO3 stops answering, what landed is kept and the message
+  says so in one line (amber when some works came in, red when none did).
+- **"AO3 is screening for robots" was the wrong message.** AO3's refusals (HTTP
+  418) are its own downtime page — served while it is down for maintenance and,
+  per its status page, as an intentional traffic gate while load is high. The
+  message now says AO3 is down or holding back traffic, and points at
+  status.archiveofourown.org.
+
+### Added
+
+- **Royal Road and Scribble Hub groups open in an in-app browser.** Both sites
+  refuse every automated request — the worker's and the phone's alike — so
+  their groups now get one button, **Browse Royal Road / Scribble Hub**. It opens
+  the group's search on the site; you browse it like any page (a check the site
+  shows is passed by the browser, or by you), and **Add N to FicStash** at the
+  bottom of the page reads the results on your screen into the group. The app
+  makes no requests of its own there: nothing loads in the background and
+  nothing pages automatically. Untested on a phone yet, and Cloudflare may
+  refuse in-app browsers outright — if so it won't get through, and it won't be
+  disguised to.
+- **This is tag discovery only.** Saving a work would mean driving the browser
+  through every chapter page automatically, which is the bulk fetching the
+  sites' checks exist to stop, so it isn't offered.
+
+### Notes
+
+- AO3 went down again for "preventative maintenance" at 11:27 UTC on
+  2026-11-19 (otwstatus.org). The worker's 11:20 run had already stood down
+  after one request. Runs keep doing that until AO3 is back, then carry on.
+
 ## 2026-11-18 — A hung AO3 search no longer eats the night (v0.8.80)
 
 ### Fixed

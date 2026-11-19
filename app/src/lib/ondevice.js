@@ -45,7 +45,7 @@ export function errText(e) {
 
 // Global discovery prefs (preferred languages + per-shelf excluded tags), mapped
 // to the {languages, excludedTags} shape shelving.js expects. Missing → permissive.
-async function readPrefs() {
+export async function readPrefs() {
   try {
     const { data } = await supabase
       .from('discovery_prefs')
@@ -61,7 +61,7 @@ async function readPrefs() {
 // Keys-only tombstone of dismissed works ("source:id"), so on-device discovery never
 // re-adds one the user swiped away (dismiss hard-deletes the tag_matches row). Best-
 // effort: empty set if the table isn't there yet.
-async function readDismissedKeys() {
+export async function readDismissedKeys() {
   const keys = new Set();
   try {
     const PAGE = 1000;

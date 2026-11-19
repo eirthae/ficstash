@@ -7,11 +7,12 @@ import {
   fetchTrackedGroups, createGroup, createLanguageGroup, deleteGroup, updateGroup,
   fetchMatches, dismissMatch, markGroupSeen, autocompleteTags, requestSave,
   markLater, unmarkLater, fetchLaterMatches, fetchFailedMatches, retryMatch, fetchStashCounts,
-  fetchGroupLastChecked,
 } from '../lib/tags.js';
 import { discoverGroup, discoverGroupAllTime, errText } from '../lib/ondevice.js';
+import { openSiteSearch } from '../lib/sitebrowser.js';
+import { SITE_SOURCES } from '../lib/sitesearch-pure.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
-import { syncNow, syncGroupViaWorker } from '../lib/sync.js';
+import { syncNow } from '../lib/sync.js';
 import { fetchWorkById } from '../lib/library.js';
 import { sortMatches } from '../lib/dates.js';
 import { LANGUAGES } from '../lib/languages.js';
@@ -985,111 +986,48 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     ? 'AO3 is refusing searches right now — try later'
     : "Couldn't save the results — try again", 'solar:danger-triangle-bold');
 
-  // Shared by both buttons: dispatch a one-group worker run, follow it, then
-  // re-read the list and report what actually landed.
-  const runViaWorker = async (allTime, before, t0, phoneNote = '') => {
-    const lead = phoneNote ? `${phoneNote} Then: ` : '';
-    const phase = (p) => setJob(p);
-    setJob('dispatching');
-    try {
-      const checkedBefore = await fetchGroupLastChecked(tag.id).catch(() => null);
-      const r = await syncGroupViaWorker(tag.id, { allTime, onPhase: phase });
-      if (r.alreadyRunning) {
-        setLastRun({ ok: false, text: 'A sync is already running — try again when it finishes.' });
-        showToast('A sync is already running', 'solar:clock-circle-linear');
-        return;
-      }
-      if (r.timedOut) {
-        // The run may well still be going; the matches will simply appear later.
-        setLastRun({ ok: false, text: `Still running after ${secs(t0)}s — results will appear when it finishes.` });
-        showToast('Taking longer than usual — it will finish in the background', 'solar:clock-circle-linear');
-        return;
-      }
-      if (!r.ok) {
-        // r.error means the run was never started (the request to start it
-        // failed) — calling that "Worker run failed" sent us looking at the
-        // worker when nothing had reached it.
-        setLastRun({
-          ok: false,
-          text: lead + (r.error
-            ? `the worker couldn't be started (${secs(t0)}s): ${r.error}.`
-            : `the worker run ${r.conclusion || 'failed'} after ${secs(t0)}s.`),
-        });
-        showToast(r.error ? `Couldn't start the sync — ${r.error}` : 'The sync run failed', 'solar:danger-triangle-bold');
-        return;
-      }
-      const added = await refreshAfter(before);
-      // The run "succeeds" even when the site refused its one search — the
-      // worker logs it and moves on. The group's last_checked only moves when
-      // the search actually worked, so if it didn't move, say so instead of
-      // reporting "Nothing new" about a search that never happened. (Royal Road
-      // and Scribble Hub refuse the worker with a Cloudflare challenge.)
-      const checkedAfter = await fetchGroupLastChecked(tag.id).catch(() => null);
-      if (!added && checkedAfter === checkedBefore) {
-        setLastRun({ ok: false, text: `The worker ran, but ${srcLabel} refused its search — the site is blocking automated access right now. Nothing was changed.` });
-        showToast(`${srcLabel} is blocking automated searches right now`, 'solar:danger-triangle-bold');
-        return;
-      }
-      setLastRun({ ok: true, text: `${allTime ? 'Caught up all-time' : 'Checked'} in ${secs(t0)}s · ${added} new · ${before.size + added} in this group` });
-      setMenuOpen(false);
-      if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
-      else showToast(allTime ? 'Nothing new — you already had it all' : 'Nothing new', 'solar:check-circle-bold');
-    } catch (e) {
-      setLastRun({ ok: false, text: `Threw after ${secs(t0)}s · ${errText(e)}` });
-      failToast(e);
-    } finally {
-      setJob(null);
-    }
-  };
-
-  // AO3 turned the phone away with its robot check ("Shields are up" — HTTP 418
-  // or a 403 challenge). That is a decision, not a glitch: one request was made
-  // and none are retried, and the worker is NOT asked instead — it gets the
-  // same refusal, and repeated refused requests are what the check watches
-  // for. Say what happened and stop. It works again when AO3 lifts the check.
+  // AO3 turned the request away on purpose (HTTP 418 / 403). Since its 2026
+  // outage that is AO3's own downtime page — served both while it is down for
+  // maintenance and, per its status page, as an intentional traffic gate while
+  // load is high. A decision, not a glitch: nothing is retried and nothing is
+  // handed to the worker, which gets the same page. Say what happened and stop.
+  //
+  // This used to call it a "robot check" — wrong, and alarming: AO3's page says
+  // the archive is down, and status.archiveofourown.org says why.
   const standDown = async (before, t0) => {
     const added = await refreshAfter(before).catch(() => 0);
-    // Some pages may have landed before AO3 said stop — that is a partial
-    // success, not a failure, and it reads as one (amber, and leads with what
-    // was kept). An all-time walk is the most likely thing to trip the check.
+    // Some pages may have landed before AO3 said stop — a partial success, and
+    // it reads as one (amber, and leads with what was kept).
     setLastRun(added
       ? {
         ok: false, warn: true,
-        text: `Kept ${plural(added)}, then AO3's robot check asked us to stop after ${secs(t0)}s. `
-          + 'Nothing was retried. Tap again later to pick up the rest.',
+        text: `Kept ${plural(added)}, then AO3 turned requests away after ${secs(t0)}s — it's down or `
+          + 'holding back traffic. Nothing was retried. Tap again later to pick up the rest.',
       }
       : {
         ok: false,
-        text: `AO3 is screening for robots and turned this request away after ${secs(t0)}s. `
-          + 'Nothing was retried. Sync will work again when AO3 lifts the check.',
+        text: `AO3 turned this request away after ${secs(t0)}s — it's down or holding back traffic `
+          + '(status.archiveofourown.org has the latest). Nothing was retried; try again later.',
       });
-    showToast(added ? `${plural(added)} — AO3 asked us to pause` : 'AO3 is screening for robots — try again later',
+    showToast(added ? `${plural(added)} — then AO3 turned us away` : "AO3 isn't letting requests through — try later",
       added ? 'solar:magic-stick-3-bold' : 'solar:danger-triangle-bold');
     setJob(null);
   };
 
-  // Phone first, worker second.
-  //
-  // On-device discovery can finally work: every upsert it ever attempted was
-  // rejected because matchRow sent `chapters: null` into a NOT NULL column, and
-  // the search parser never emitted a chapter count at all. With that fixed the
-  // phone is the fast path again — seconds, not a GitHub runner — so try it,
-  // and hand over to the worker only when AO3 won't answer the phone.
-  //
-  // The fallback is not optional: AO3 refuses searches outright for minutes at
-  // a time, and the worker is both logged in and patient.
+  // The two AO3 buttons fetch on this phone, which is the one fetcher that has
+  // actually got AO3 search results through since its outage. (It writes now:
+  // every upsert it ever attempted had been rejected for `chapters: null` into
+  // a NOT NULL column, fixed in v0.8.75.) There is no hand-off to the worker
+  // any more — see didNotFinish for why.
   const run = async (allTime) => {
     if (busy) return;
     const before = new Set((items || []).map((w) => w.id));
     const t0 = Date.now();
-    // Only AO3 has an on-device search. For every other source discoverGroup
-    // returns 0 without making a request — which would be reported below as
-    // "Nothing new", a flat lie about a search that never happened. Royal Road,
-    // Scribble Hub and the rest are searched by the worker, so go straight there.
-    if ((tag.source || 'ao3') !== 'ao3') {
-      await runViaWorker(allTime, before, t0);
-      return;
-    }
+    // Only AO3 has an on-device search; discoverGroup returns 0 for any other
+    // source without asking anything, which would read as "Nothing new". Royal
+    // Road and Scribble Hub groups get the in-app browser instead of these
+    // buttons, so this is only a guard.
+    if ((tag.source || 'ao3') !== 'ao3') return;
     setJob('device');
     try {
       let deviceOk = true;
@@ -1111,16 +1049,51 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         setJob(null);
         return;
       }
-      const note = `This phone couldn't finish (${why || 'AO3 did not answer'}).`;
-      setLastRun({ ok: false, text: `${note} Asking the worker…` });
-      await runViaWorker(allTime, before, t0, note);
+      await didNotFinish(before, t0, why || 'AO3 did not answer');
     } catch (e) {
       if (e && e.denied) { await standDown(before, t0); return; }
-      // On-device threw — AO3 unreadable, or our own write failed. Either way
-      // the worker is logged in, patient, and worth a try before giving up.
-      const note = `This phone couldn't finish (${errText(e)}).`;
-      setLastRun({ ok: false, text: `${note} Asking the worker…` });
-      await runViaWorker(allTime, before, t0, note);
+      await didNotFinish(before, t0, errText(e));
+    }
+  };
+
+  // The phone's AO3 fetch didn't finish. This used to hand the job to the
+  // worker, and that hand-off never once worked: the server won't start a run
+  // while another is going (now most of the day), and when the phone can't get
+  // an answer from AO3's search the worker can't either — on 2026-11-18 the
+  // worker's AO3 searches failed in every run while the phone got 213 works
+  // through. All it added was a second, more confusing error. So: keep whatever
+  // landed, say plainly what happened, stop.
+  const didNotFinish = async (before, t0, why) => {
+    const added = await refreshAfter(before).catch(() => 0);
+    setLastRun(added
+      ? { ok: false, warn: true, text: `Kept ${plural(added)}, then AO3 stopped answering after ${secs(t0)}s (${why}). Tap again later to pick up the rest.` }
+      : { ok: false, text: `AO3 didn't answer after ${secs(t0)}s (${why}). Nothing was changed — try again later.` });
+    showToast(added ? `${plural(added)} — AO3 stopped answering` : "AO3 didn't answer — try again later",
+      added ? 'solar:magic-stick-3-bold' : 'solar:danger-triangle-bold');
+    setJob(null);
+  };
+
+  // Royal Road / Scribble Hub: open the site's search in the in-app browser.
+  // You browse; "Add to FicStash" on the page reads what's on your screen into
+  // this group. The list refreshes as results land and again when you close it.
+  const browseSite = async () => {
+    setMenuOpen(false);
+    const before = new Set((items || []).map((w) => w.id));
+    let added = 0;
+    try {
+      await openSiteSearch(tag, {
+        onAdded: (n) => { added += n; refreshAfter(before).catch(() => {}); },
+        onClose: async () => {
+          const fresh = await refreshAfter(before).catch(() => 0);
+          setLastRun(fresh || added
+            ? { ok: true, text: `Added from ${srcLabel} · ${fresh} new · ${before.size + fresh} in this group` }
+            : { ok: true, text: `Nothing added from ${srcLabel}.` });
+          if (fresh) showToast(plural(fresh), 'solar:magic-stick-3-bold');
+        },
+      });
+    } catch (e) {
+      setLastRun({ ok: false, text: `Couldn't open the in-app browser — ${errText(e)}` });
+      showToast("Couldn't open the in-app browser", 'solar:danger-triangle-bold');
     }
   };
 
@@ -1223,6 +1196,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         job={job} busy={busy} lastRun={lastRun}
         onSync={syncGroup}
         onSyncAllTime={syncAllTimeViaWorker}
+        onBrowse={browseSite}
         onEdit={onEdit && tag.kind !== 'language' ? () => { setMenuOpen(false); onEdit(tag); nav.pop(); } : null}
         onRemove={() => { setMenuOpen(false); removeGroup(); }}
       />
@@ -1230,14 +1204,10 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   );
 }
 
-// What a dispatched worker run is doing, in words. "Asking the worker" and
-// "running" are genuinely different waits — a runner takes a while to start —
-// and a button that just sits there for ninety seconds reads as broken.
+// What a sync button is doing, in words, while it waits on AO3 — a button that
+// just sits there for ninety seconds reads as broken.
 const JOB_LABEL = {
   device: 'Searching AO3…',
-  dispatching: 'Asking the worker…',
-  queued: 'Queued at GitHub…',
-  running: 'The worker is searching…',
 };
 
 // Everything you can do TO a tag group, one tap behind its title: the two syncs
@@ -1247,8 +1217,11 @@ const JOB_LABEL = {
 // it, so neither should sit under your thumb in the header.
 function GroupActionsSheet({
   open, onClose, tag, kindLabel, srcLabel, count,
-  job, busy, lastRun, onSync, onSyncAllTime, onEdit, onRemove,
+  job, busy, lastRun, onSync, onSyncAllTime, onBrowse, onEdit, onRemove,
 }) {
+  // Royal Road and Scribble Hub block every automated search (worker and phone
+  // alike), so their groups get the in-app browser instead of sync buttons.
+  const isSite = SITE_SOURCES.includes(tag.source);
   // Every source gets the buttons now. Royal Road and Scribble Hub groups are
   // checked when you tap, and not otherwise — which is how they're wanted:
   // rarely read, so not worth a nightly. The work happens on the worker, which
@@ -1287,16 +1260,25 @@ function GroupActionsSheet({
         // which stage it's at — "asking" and "running" feel very different from
         // a button that has simply stopped responding for ninety seconds.
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <button className="btn btn-lg btn-primary btn-block" onClick={onSync} disabled={busy}
-            style={busy ? { opacity: .6 } : undefined}>
-            <Icon icon="solar:refresh-circle-linear" size={19} className={busy ? 'spinglyph' : undefined} />
-            {busy ? JOB_LABEL[job] : 'Check for new works'}
-          </button>
-          <button className="btn btn-lg btn-surface btn-block" onClick={onSyncAllTime} disabled={busy}
-            style={busy ? { opacity: .6 } : undefined}>
-            <Icon icon="solar:history-linear" size={19} />
-            Catch up all-time
-          </button>
+          {isSite ? (
+            <button className="btn btn-lg btn-primary btn-block" onClick={onBrowse}>
+              <Icon icon="solar:global-linear" size={19} />
+              Browse {srcLabel}
+            </button>
+          ) : (
+            <>
+              <button className="btn btn-lg btn-primary btn-block" onClick={onSync} disabled={busy}
+                style={busy ? { opacity: .6 } : undefined}>
+                <Icon icon="solar:refresh-circle-linear" size={19} className={busy ? 'spinglyph' : undefined} />
+                {busy ? JOB_LABEL[job] : 'Check for new works'}
+              </button>
+              <button className="btn btn-lg btn-surface btn-block" onClick={onSyncAllTime} disabled={busy}
+                style={busy ? { opacity: .6 } : undefined}>
+                <Icon icon="solar:history-linear" size={19} />
+                Catch up all-time
+              </button>
+            </>
+          )}
           {/* What the last run did, in its own words. Stays put after the toast
               has gone, because "it failed" is not something you can act on. */}
           {lastRun && (
