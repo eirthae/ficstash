@@ -298,6 +298,9 @@ function unavailable(r) {
   const e = new Error(`AO3 unavailable (status ${r ? r.status : 'no response'})`);
   e.status = r ? r.status : 0;
   e.denied = !!r && isDenied(r.status);
+  // 429: AO3 is up and rationing searches. Since its 2026 outage it does this
+  // to anything that searches in quick succession — an all-time walk above all.
+  e.rateLimited = !!r && r.status === 429;
   return e;
 }
 

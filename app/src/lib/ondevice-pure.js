@@ -203,3 +203,64 @@ export function markOwned(matches, ownedRows) {
     return libraryWorkId ? { ...m, inLibrary: true, libraryWorkId } : m;
   });
 }
+
+// One tap of an all-time walk, with every side effect passed in so the logic
+// can be tested on its own. (It lives in pure code because three silent bugs
+// this month hid in code that only ran against the live database.)
+//
+//   queries     — the searches to page through ([[tags]], or per-tag for "any")
+//   start       — { qi, page } to carry on from, or null for the beginning
+//   search(q, page) → results     throws {denied | rateLimited} on refusals
+//   write(results)  → rows written throws on a failed save; retried once
+//   sleep(ms), shouldStop()
+//
+// Returns { written, pages, stop, atPage, next, reason } where `stop` is
+// done | tap-limit | rate-limited | denied | ao3 | save | stopped, and `next`
+// is where the following tap should carry on (null once the walk is done).
+// A failed page is never skipped: `next` points back at it.
+export async function walkAllTime({
+  queries, start = null, perTap, maxPages, pageSize = 20, gapMs = 0, retryMs = 0,
+  search, write, sleep = async () => {}, shouldStop = () => false, onProgress,
+}) {
+  let qi = start && start.qi < queries.length ? start.qi : 0;
+  let page = start && start.qi < queries.length && start.page >= 1 ? start.page : 1;
+  let written = 0;
+  let pages = 0;
+  const end = (stop, extra = {}) => ({
+    written, pages, stop, atPage: page, next: stop === 'done' ? null : { qi, page }, ...extra,
+  });
+
+  while (qi < queries.length) {
+    if (shouldStop()) return end('stopped');
+    if (pages >= perTap) return end('tap-limit');
+    if (pages) await sleep(gapMs);
+    let results;
+    try {
+      results = await search(queries[qi], page);
+    } catch (e) {
+      const stop = e && e.denied ? 'denied' : e && e.rateLimited ? 'rate-limited' : 'ao3';
+      return end(stop, { reason: String((e && e.message) || e) });
+    }
+    let n;
+    try {
+      n = await write(results);
+    } catch (e1) {
+      await sleep(retryMs);
+      try {
+        n = await write(results);
+      } catch (e2) {
+        return end('save', { reason: String((e2 && e2.message) || e2) });
+      }
+    }
+    written += n || 0;
+    pages += 1;
+    if (onProgress) onProgress({ pages, written, page });
+    if ((results || []).length < pageSize || page >= maxPages) {
+      qi += 1;
+      page = 1;
+    } else {
+      page += 1;
+    }
+  }
+  return end('done');
+}

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  normGroup, matchRow, bookMatchRow, workRow, chapterRows, paletteFor,
+  normGroup, matchRow, bookMatchRow, workRow, chapterRows, paletteFor, walkAllTime,
   newChapters, chapterUpdateRows, seriesFetchPlan, isDefinitiveFailure, markOwned,
 } from './ondevice-pure.js';
 
@@ -287,4 +287,87 @@ test('markOwned with nothing owned returns the matches unchanged', () => {
 
 test('markOwned handles an empty match list', () => {
   assert.deepEqual(markOwned([], [{ id: 'w1', source: 'ao3', source_work_id: '1' }]), []);
+});
+
+// ---- walkAllTime: one tap of an all-time catch-up --------------------------
+// The walk is spread over taps so that every attempt keeps its progress. Each
+// way a tap can end has to leave `next` pointing at the right page, or a walk
+// either repeats itself forever or silently skips results.
+const full = (n = 20) => Array.from({ length: n }, (_, i) => ({ i }));
+const walk = (over) => walkAllTime({
+  queries: [['A']], perTap: 6, maxPages: 25, pageSize: 20,
+  search: async () => full(), write: async (r) => r.length, ...over,
+});
+
+test('walkAllTime stops at the per-tap limit and saves the next page', async () => {
+  const r = await walk();
+  assert.equal(r.stop, 'tap-limit');
+  assert.equal(r.pages, 6);
+  assert.equal(r.written, 120);
+  assert.deepEqual(r.next, { qi: 0, page: 7 });
+});
+
+test('walkAllTime carries on from where the last tap stopped', async () => {
+  const asked = [];
+  const r = await walk({ start: { qi: 0, page: 7 }, search: async (q, p) => { asked.push(p); return full(); } });
+  assert.deepEqual(asked, [7, 8, 9, 10, 11, 12]);
+  assert.deepEqual(r.next, { qi: 0, page: 13 });
+});
+
+test('a short page ends the walk, and a finished walk leaves nothing to resume', async () => {
+  const r = await walk({ search: async (q, p) => (p < 3 ? full() : full(4)) });
+  assert.equal(r.stop, 'done');
+  assert.equal(r.pages, 3);
+  assert.equal(r.next, null);
+});
+
+test('the page ceiling ends a query even if pages stay full', async () => {
+  const r = await walk({ start: { qi: 0, page: 24 }, perTap: 10 });
+  assert.equal(r.stop, 'done');
+  assert.equal(r.pages, 2); // pages 24 and 25
+});
+
+test('an "any" group walks each tag in turn', async () => {
+  const asked = [];
+  const r = await walk({
+    queries: [['A'], ['B']], perTap: 10,
+    search: async (q, p) => { asked.push(`${q[0]}${p}`); return p < 2 ? full() : full(1); },
+  });
+  assert.deepEqual(asked, ['A1', 'A2', 'B1', 'B2']);
+  assert.equal(r.stop, 'done');
+});
+
+test('AO3 slowing us down stops the tap and retries that same page next time', async () => {
+  const r = await walk({
+    search: async (q, p) => { if (p === 3) { const e = new Error('AO3 unavailable (status 429)'); e.rateLimited = true; throw e; } return full(); },
+  });
+  assert.equal(r.stop, 'rate-limited');
+  assert.equal(r.written, 40);
+  assert.deepEqual(r.next, { qi: 0, page: 3 });
+});
+
+test('a refusal and a non-answer are told apart from a slow-down', async () => {
+  const denied = await walk({ search: async () => { const e = new Error('418'); e.denied = true; throw e; } });
+  assert.equal(denied.stop, 'denied');
+  const quiet = await walk({ search: async () => { throw new Error('AO3 unavailable (status 0)'); } });
+  assert.equal(quiet.stop, 'ao3');
+  assert.match(quiet.reason, /status 0/);
+});
+
+test('a failed save is retried once, then reported as a save problem — not AO3', async () => {
+  let calls = 0;
+  const flaky = await walk({ perTap: 1, write: async (r) => { calls += 1; if (calls === 1) throw new Error('TypeError: Failed to fetch'); return r.length; } });
+  assert.equal(flaky.stop, 'tap-limit');
+  assert.equal(flaky.written, 20);
+
+  const dead = await walk({ write: async () => { throw new Error('TypeError: Failed to fetch'); } });
+  assert.equal(dead.stop, 'save');
+  assert.equal(dead.written, 0);
+  assert.deepEqual(dead.next, { qi: 0, page: 1 }, 'the unsaved page is fetched again next tap');
+});
+
+test('a stale resume point past the last query starts over', async () => {
+  const r = await walk({ start: { qi: 5, page: 9 } });
+  assert.equal(r.atPage, 7);
+  assert.equal(r.pages, 6);
 });

@@ -4,6 +4,40 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-11-20 — All-time walks resume; the nightly stops jamming on AO3's rationing (v0.8.83)
+
+AO3 is up but rationing searches since its outage ("We are being rate-limited").
+That one fact was behind both the stalled nightly and the all-time errors.
+
+### Fixed
+
+- **The nightly found no new works for days.** Every run tried the same groups
+  first — stalest-first meant an all-time seed and a five-week window on a big
+  tag, the heaviest searches there are — they failed, the breaker tripped, and
+  the 35 groups behind them never got a turn. Groups are now shuffled each run,
+  and an AO3 "slow down" is no longer retried 10/25/60s later: one ends
+  searching for the run, so we stop asking the moment AO3 says so. (Chapter
+  checks were working throughout: 157 and 125 works in the last two runs.)
+- **"AO3 didn't answer … TypeError: Failed to fetch" and a link.** That was not
+  AO3. It was the phone's save to our own server failing mid-walk — a walk took
+  minutes and the screen tends to lock — and the "link" was a code location in
+  the app. A failed save is now retried once, and reported as the connection to
+  FicStash's server dropping.
+- **"AO3 unavailable" while AO3 was plainly up.** An all-time walk asked for up
+  to 25 search pages in a row and ran into AO3's rationing part-way.
+
+### Changed
+
+- **All-time walks carry on where they stopped.** A tap now does up to 6 pages,
+  10 seconds apart, and saves its place; the next tap continues from that page
+  instead of starting again at page 1. Whatever ends a tap — AO3 slowing us
+  down, AO3 not answering, the connection dropping — the works already found
+  are kept and the failed page is the one tried next. The message says which
+  happened and where it will carry on from.
+- The walk's logic now lives in a pure function with its own tests (every way a
+  tap can end, and where it resumes), rather than only running against the live
+  database.
+
 ## 2026-11-20 — A group's number is what's in it now (v0.8.82)
 
 ### Fixed

@@ -91,7 +91,9 @@ export async function fetchJson(url, { attempts = 4, timeoutMs = 0 } = {}) {
       // Both are non-null; an error page (HTML) fails JSON.parse → null → retry.
       if (r.status >= 200 && r.status < 300 && r.data != null) return r;
       last = r;
-      if (isDenied(r.status)) break; // refused on purpose — don't ask again
+      // Refused on purpose (418/403), or told to slow down (429): asking again
+      // straight away is exactly what we were just asked not to do.
+      if (isDenied(r.status) || r.status === 429) break;
     } catch (e) {
       last = { status: 0, data: null, url, raw: String(e && e.message || e) };
     }
@@ -206,7 +208,9 @@ export async function fetchHtml(url, {
       const r = await getHtmlOnce(url, accept, timeoutMs);
       if (r.status >= 200 && r.status < 300 && r.html) return r;
       last = r;
-      if (isDenied(r.status)) break; // refused on purpose — don't ask again
+      // Refused on purpose (418/403), or told to slow down (429): asking again
+      // straight away is exactly what we were just asked not to do.
+      if (isDenied(r.status) || r.status === 429) break;
     } catch (e) {
       last = { status: 0, url, html: '' };
     }

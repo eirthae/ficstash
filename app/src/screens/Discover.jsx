@@ -1030,30 +1030,72 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
     if ((tag.source || 'ao3') !== 'ao3') return;
     setJob('device');
     try {
-      let deviceOk = true;
-      let why = '';
       if (allTime) {
         const r = await discoverGroupAllTime(tag, { onProgress: () => setJob('device') });
-        if (r.denied) { await standDown(before, t0); return; }
-        deviceOk = !r.failed && !r.writeError;
-        why = r.writeError || r.reason || '';
-      } else {
-        await discoverGroup(tag, undefined, undefined, { patient: true });
-      }
-      if (deviceOk) {
-        const added = await refreshAfter(before);
-        setLastRun({ ok: true, text: `On this phone in ${secs(t0)}s · ${added} new · ${before.size + added} in this group` });
-        setMenuOpen(false);
-        if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
-        else showToast(allTime ? 'Nothing new — you already had it all' : 'Nothing new', 'solar:check-circle-bold');
-        setJob(null);
+        await reportWalk(r, before, t0);
         return;
       }
-      await didNotFinish(before, t0, why || 'AO3 did not answer');
+      // Check for new works: one page; any failure throws to the catch below.
+      await discoverGroup(tag, undefined, undefined, { patient: true });
+      const added = await refreshAfter(before);
+      setLastRun({ ok: true, text: `On this phone in ${secs(t0)}s · ${added} new · ${before.size + added} in this group` });
+      setMenuOpen(false);
+      if (added) showToast(plural(added), 'solar:magic-stick-3-bold');
+      else showToast('Nothing new', 'solar:check-circle-bold');
+      setJob(null);
     } catch (e) {
       if (e && e.denied) { await standDown(before, t0); return; }
-      await didNotFinish(before, t0, errText(e));
+      // Only a source_unavailable error is AO3's. Anything else came from the
+      // save to our own server — and calling that "AO3 didn't answer" sent the
+      // diagnosis the wrong way ("TypeError: Failed to fetch" was the phone
+      // losing its connection to Supabase, not AO3 failing).
+      if (e && e.code !== 'source_unavailable') { await saveFailed(before, t0, errText(e)); return; }
+      await didNotFinish(before, t0, e.rateLimited ? 'AO3 asked us to slow down' : errText(e));
     }
+  };
+
+  // One tap of "Catch up all-time". The walk is spread over taps: each does a
+  // few pages and saves its place, so every attempt is progress you keep —
+  // including one that AO3 or the connection cut short. Say exactly that.
+  const reportWalk = async (r, before, t0) => {
+    const added = await refreshAfter(before).catch(() => 0);
+    const got = `${plural(added)}${r.pages ? ` from ${r.pages} page${r.pages === 1 ? '' : 's'}` : ''}`;
+    const cont = `Tap Catch up all-time again to carry on from page ${r.atPage}.`;
+    let line;
+    let toast;
+    if (r.stop === 'done') {
+      line = { ok: true, text: `Caught up all-time in ${secs(t0)}s · ${got} · ${before.size + added} in this group` };
+      toast = added ? plural(added) : 'Nothing new — you already had it all';
+    } else if (r.stop === 'tap-limit') {
+      line = { ok: true, text: `${got} in ${secs(t0)}s. There's more further back — ${cont}` };
+      toast = `${plural(added)} — more to go`;
+    } else if (r.stop === 'rate-limited') {
+      line = { ok: false, warn: true, text: `${got}, then AO3 asked us to slow down. Wait a few minutes — then ${cont.charAt(0).toLowerCase()}${cont.slice(1)}` };
+      toast = 'AO3 asked us to slow down — try again in a few minutes';
+    } else if (r.stop === 'denied') {
+      await standDown(before, t0);
+      return;
+    } else if (r.stop === 'save') {
+      line = { ok: false, warn: !!added, text: `${got}, then the connection to FicStash's server dropped while saving (${r.reason}) — usually the screen locking mid-walk. ${cont}` };
+      toast = "Lost the connection while saving — tap again to carry on";
+    } else {
+      line = { ok: false, warn: !!added, text: `${got}, then AO3 didn't answer page ${r.atPage} (${r.reason}). ${cont}` };
+      toast = "AO3 didn't answer — tap again to carry on";
+    }
+    setLastRun(line);
+    showToast(toast, line.ok ? 'solar:magic-stick-3-bold' : 'solar:danger-triangle-bold');
+    setJob(null);
+  };
+
+  // A save to our own server failed (not AO3).
+  const saveFailed = async (before, t0, why) => {
+    const added = await refreshAfter(before).catch(() => 0);
+    setLastRun({
+      ok: false, warn: !!added,
+      text: `${added ? `Kept ${plural(added)}, but the` : 'The'} connection to FicStash's server dropped while saving after ${secs(t0)}s (${why}) — usually the screen locking or a network switch. Tap again.`,
+    });
+    showToast("Lost the connection while saving — tap again", 'solar:danger-triangle-bold');
+    setJob(null);
   };
 
   // The phone's AO3 fetch didn't finish. This used to hand the job to the

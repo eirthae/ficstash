@@ -1,10 +1,11 @@
+import { Preferences } from '@capacitor/preferences';
 import { supabase, hasSupabase } from './supabase.js';
 import { searchTags, searchLanguage, fetchWork, seriesWorks, isAo3Url, workIdFromUrl } from './sources/ao3.js';
 import { fetchWork as fetchScribbleWork } from './sources/scribblehub.js';
 import { searchRomanceBooks, slugsForNames } from './sources/romanceio.js';
 import { statusMatches, passesGlobalPrefs, excludedForShelf } from './shelving.js';
 import {
-  normGroup, matchRow, bookMatchRow, workRow, chapterRows,
+  normGroup, matchRow, bookMatchRow, workRow, chapterRows, walkAllTime,
   newChapters, chapterUpdateRows, seriesFetchPlan, isDefinitiveFailure,
 } from './ondevice-pure.js';
 
@@ -123,7 +124,8 @@ export async function discoverGroup(group, prefs, dismissed, { patient = false }
     // hides whether it was a 525, a timeout, or something else entirely.
     const err = new Error(`AO3 did not answer (${errText(e)})`);
     err.code = 'source_unavailable';
-    err.denied = !!(e && e.denied); // AO3's robot check — don't retry, don't escalate
+    err.denied = !!(e && e.denied); // AO3's downtime page — don't retry, don't escalate
+    err.rateLimited = !!(e && e.rateLimited); // AO3 said slow down
     err.cause = e;
     throw err;
   }
@@ -173,15 +175,33 @@ async function writeAo3Matches(g, metas, prefs, shelfExcl, dismissed, seen) {
 
 // AO3 serves 20 works per search page, so a short page is the last page.
 const AO3_PAGE_SIZE = 20;
-// Hard ceiling on an all-time catch-up: 25 pages ≈ 500 works per query. At the
-// 1.5s politeness gap that's ~40 seconds of fetching, which is about as long as
-// anyone will hold a phone still — and it keeps a 40,000-work fandom tag from
-// turning one tap into an hour of hammering a volunteer-run site.
+// Hard ceiling on an all-time catch-up: 25 pages ≈ 500 works per query, spread
+// over several taps (see ALLTIME_PAGES_PER_TAP). It keeps a 40,000-work fandom
+// tag from turning into an hour of paging through a volunteer-run site.
 const ALLTIME_MAX_PAGES = 25;
-// Gap between all-time pages. Was SPACE_MS (1.5s): 25 search pages in about a
-// minute is the burst a robot check exists to catch, and AO3 came back from its
-// outage behind exactly such a check. The worker spaces AO3 requests 6s apart.
-const ALLTIME_PAGE_GAP_MS = 5000;
+// Gap between all-time pages. AO3 came back from its 2026 outage rationing
+// searches: a walk at 1.5s and then 5s between pages ran into "slow down" (429)
+// part-way. 10s is closer to a person paging through results.
+const ALLTIME_PAGE_GAP_MS = 10000;
+// Pages per tap. A whole walk is up to 25 pages — minutes on a phone whose
+// screen may lock half-way, which killed the save to our server mid-walk
+// ("TypeError: Failed to fetch"). A tap now does a few pages, saves its place,
+// and the next tap carries on from there, so every attempt is progress kept.
+const ALLTIME_PAGES_PER_TAP = 6;
+const walkKey = (groupId) => `fs-alltime-${groupId}`;
+async function readWalk(groupId) {
+  try {
+    const { value } = await Preferences.get({ key: walkKey(groupId) });
+    const w = value ? JSON.parse(value) : null;
+    return w && Number.isInteger(w.qi) && Number.isInteger(w.page) && w.page >= 1 ? w : null;
+  } catch (e) { return null; }
+}
+async function saveWalk(groupId, w) {
+  try {
+    if (w) await Preferences.set({ key: walkKey(groupId), value: JSON.stringify(w) });
+    else await Preferences.remove({ key: walkKey(groupId) });
+  } catch (e) { /* best-effort: worst case the next tap starts at page 1 */ }
+}
 
 // Walk a group's search back through the pages instead of taking only the newest
 // one — the back catalogue, not today's updates.
@@ -199,7 +219,7 @@ const ALLTIME_PAGE_GAP_MS = 5000;
 // there. Worth telling the user, because a second run starts from page 1 again:
 // there's no resume, and pretending otherwise would be a lie.
 export async function discoverGroupAllTime(group, { onProgress, shouldStop } = {}) {
-  const idle = { written: 0, pages: 0, failed: false, stopped: false, capped: false };
+  const idle = { written: 0, pages: 0, stop: 'done', fromPage: 1, atPage: 1 };
   if (!hasSupabase) return idle;
   const g = normGroup(group);
   if (g.source !== 'ao3') return idle;
@@ -217,46 +237,32 @@ export async function discoverGroupAllTime(group, { onProgress, shouldStop } = {
   const queries = g.langCode ? [null]
     : (g.matchMode === 'any' && g.include.length > 1 ? g.include.map((t) => [t]) : [g.include]);
   const seen = new Set();
-  let written = 0;
-  let pages = 0;
-  let capped = false;
 
-  for (const q of queries) {
-    for (let page = 1; page <= ALLTIME_MAX_PAGES; page++) {
-      if (shouldStop && shouldStop()) return { written, pages, failed: false, stopped: true, capped };
-      let metas;
-      try {
-        // Always patient: a catch-up is a tap the user is watching, and losing
-        // the whole walk to one unlucky page is exactly what it must not do.
-        metas = q === null
-          ? await searchLanguage(g.langCode, page, { patient: true })
-          : await searchTags(q, excludeNames, page, { patient: true });
-      } catch (e) {
-        // Keep what we already wrote and say where it stopped — a catch-up that
-        // got 300 of 500 works is worth far more than a thrown-away run.
-        return { written, pages, failed: true, stopped: false, capped, reason: errText(e), denied: !!(e && e.denied) };
-      }
-      pages += 1;
-      // The write gets its own catch. It used to sit outside the try above, so a
-      // Supabase error threw straight out of here — losing the pages already
-      // written, and surfacing as a generic failure that looked nothing like
-      // what had actually gone wrong. A write failure is worth reporting as
-      // itself, and worth keeping the earlier pages for.
-      try {
-        written += await writeAo3Matches(g, metas, prefs, shelfExcl, dismissed, seen);
-      } catch (e) {
-        return { written, pages, failed: false, stopped: false, capped, writeError: errText(e) };
-      }
-      onProgress && onProgress({ pages, written });
-      if (metas.length < AO3_PAGE_SIZE) break; // short page = end of the results
-      if (page === ALLTIME_MAX_PAGES) { capped = true; break; }
-      await sleep(ALLTIME_PAGE_GAP_MS);
-    }
-  }
+  // The walk itself is walkAllTime (ondevice-pure.js, tested on its own); this
+  // supplies AO3, the save, and where the last tap stopped.
+  const start = await readWalk(g.id);
+  const r = await walkAllTime({
+    queries,
+    start,
+    perTap: ALLTIME_PAGES_PER_TAP,
+    maxPages: ALLTIME_MAX_PAGES,
+    pageSize: AO3_PAGE_SIZE,
+    gapMs: ALLTIME_PAGE_GAP_MS,
+    retryMs: 2000,
+    // Always patient: a catch-up is a tap the user is watching.
+    search: (q, page) => (q === null
+      ? searchLanguage(g.langCode, page, { patient: true })
+      : searchTags(q, excludeNames, page, { patient: true })),
+    write: (metas) => writeAo3Matches(g, metas, prefs, shelfExcl, dismissed, seen),
+    sleep,
+    shouldStop: shouldStop || (() => false),
+    onProgress,
+  });
+  await saveWalk(g.id, r.next);
   // Same rule as discoverGroup: no last_checked stamp. Even a full back-catalogue
   // walk is not the worker's incremental window, and claiming it would stop the
   // nightly run from ever looking at this group again.
-  return { written, pages, failed: false, stopped: false, capped };
+  return r;
 }
 
 // Discover one romance.io Books group on-device: query the site's books API by the

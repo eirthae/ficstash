@@ -49,6 +49,7 @@ works are never re-downloaded.
 from __future__ import annotations
 
 import os
+import random
 import re
 import sys
 import time
@@ -60,7 +61,7 @@ from ficstash_worker.lang import allowed_language_set, language_allowed
 from ficstash_worker.saves import fetch_work_chapters
 from ficstash_worker.util import is_phantom_link_error, status_matches
 from ficstash_worker.sources import TAG_SEARCH, get_source
-from ficstash_worker.sources.ao3 import RateLimitError
+from ficstash_worker.sources.ao3 import AO3Unavailable, RateLimitError
 from ficstash_worker.supabase_io import (
     age_out_saved_matches,
     clear_series_requests,
@@ -190,7 +191,22 @@ def _is_refusal(exc: BaseException) -> bool:
     return "403 Client Error" in text or "418 Client Error" in text
 
 
-def _with_backoff(fn, *, what: str, broad: bool = False):
+def _is_slow_down(exc: BaseException) -> bool:
+    """AO3 told us to slow down (429 / ao3-api's "We are being rate-limited").
+
+    Not an AO3Unavailable: that's an error page under load, which a wait can
+    fix. A slow-down is AO3 rationing us, and asking again is the opposite of
+    what it asked for.
+    """
+    if isinstance(exc, AO3Unavailable):
+        return False
+    if isinstance(exc, RateLimitError):
+        return True
+    text = str(exc).lower()
+    return "rate-limited" in text or "429" in text
+
+
+def _with_backoff(fn, *, what: str, broad: bool = False, retry_slow_down: bool = True):
     """Run fn(), retrying with growing waits.
 
     Always retries RateLimitError. With broad=True, also retries any other
@@ -204,15 +220,18 @@ def _with_backoff(fn, *, what: str, broad: bool = False):
             time.sleep(wait)
         try:
             return fn()
-        except RateLimitError:
-            if attempt >= len(BACKOFF_SECONDS):
+        except RateLimitError as exc:
+            if attempt >= len(BACKOFF_SECONDS) or (not retry_slow_down and _is_slow_down(exc)):
                 raise
         except Exception as exc:  # noqa: BLE001
             # A 403/418 is a site deciding "not you" (Royal Road and Scribble
             # Hub serve a Cloudflare challenge to anything automated). Waiting
             # 10/25/60s and asking again only repeats the refusal — ~95s a group,
             # every night — so it is raised at once.
-            if _is_refusal(exc) or not broad or attempt >= len(BACKOFF_SECONDS):
+            # ao3-api reports a slow-down as its own HTTPError("We are being
+            # rate-limited…"), not a RateLimitError, so it lands here.
+            if (_is_refusal(exc) or not broad or attempt >= len(BACKOFF_SECONDS)
+                    or (not retry_slow_down and _is_slow_down(exc))):
                 raise
     raise RuntimeError(f"gave up on {what} after backoff")
 
@@ -1328,6 +1347,14 @@ def main() -> None:
     # successful upsert, so its window stays put and (ordered stalest-first) it
     # goes to the front next run. This just saves waiting a day for that.
     pending = list(groups)
+    # Shuffled, not stalest-first. Stalest-first was fair until searching started
+    # failing: then the same stalest — and heaviest — groups (an all-time seed, a
+    # five-week window on a big tag) went first every night, failed, tripped the
+    # breaker, and the 35 groups behind them never got a turn. In random order
+    # every group gets an early slot some nights, and a light group isn't stuck
+    # behind a heavy one forever.
+    if not _only_group():
+        random.shuffle(pending)
     failed: list[dict] = []
     round_no = 0
     # Circuit breaker for AO3 search. After the 2026 outage AO3's search pages
@@ -1431,6 +1458,11 @@ def main() -> None:
                     ),
                     what=f"tag search '{label}'",
                     broad=True,
+                    # AO3 has rationed searches since its 2026 outage. Retrying a
+                    # "slow down" 10/25/60s later — and then moving on to the next
+                    # group to do it again — is how one nightly turned into ~140
+                    # refused searches. One slow-down ends searching for the run.
+                    retry_slow_down=False,
                 )
                 kept = [m for m in metas if keep_discovery_language(m) and _keep_status(m)]
                 dropped = len(metas) - len(kept)
@@ -1443,7 +1475,11 @@ def main() -> None:
                 print(f"    '{label}' skipped ({type(exc).__name__}: {exc})")
                 failed.append(g)
                 ao3_search_streak += 1
-                if ao3_search_streak >= _search_breaker_after() and not ao3_search_down:
+                if _is_slow_down(exc) and not ao3_search_down:
+                    ao3_search_down = True
+                    print("  AO3 asked us to slow down — no more searches this run. "
+                          "Remaining AO3 groups keep their windows and go first next run.")
+                elif ao3_search_streak >= _search_breaker_after() and not ao3_search_down:
                     ao3_search_down = True
                     print(f"  AO3 search failed for {ao3_search_streak} groups in a row — "
                           "treating search as down for this run. Remaining AO3 groups "
