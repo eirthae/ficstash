@@ -341,24 +341,39 @@ export async function annotateInLibrary(matches) {
   return markOwned(matches, rows);
 }
 
+// Every match still waiting in a group — the whole backlog, not one page of it.
+//
+// Supabase returns at most 1,000 rows per request, and this used to make one
+// request. A group past 1,000 (one all-time walk adds up to 500) would have
+// shown its first 1,000 forever, with the rest unreachable and the screen's
+// count stuck at 1,000. So it pages until a short page says it has everything.
+// The id tiebreaker keeps the pages from overlapping or skipping rows.
+const MATCH_PAGE = 1000;
 export async function fetchMatches(groupId) {
   if (!hasSupabase) return null;
-  const { data, error } = await supabase
-    .from('tag_matches')
-    .select('*')
-    .eq('group_id', groupId)
-    .eq('dismissed', false)
-    .eq('saved', false)
-    .eq('later', false)
-    .eq('failed', false)
-    // Newest work first — by the work's OWN date, not when we inserted the row.
-    // first_seen_at only breaks ties (and carries rows discovered before we
-    // captured a date); on a first tag seed every row shares that timestamp, so
-    // ordering by it alone made the feed look shuffled.
-    .order('source_updated', { ascending: false, nullsFirst: false })
-    .order('first_seen_at', { ascending: false });
-  if (error) throw error;
-  return annotateInLibrary((data || []).map(mapMatch));
+  const rows = [];
+  for (let from = 0; ; from += MATCH_PAGE) {
+    const { data, error } = await supabase
+      .from('tag_matches')
+      .select('*')
+      .eq('group_id', groupId)
+      .eq('dismissed', false)
+      .eq('saved', false)
+      .eq('later', false)
+      .eq('failed', false)
+      // Newest work first — by the work's OWN date, not when we inserted the
+      // row. first_seen_at only breaks ties (and carries rows discovered before
+      // we captured a date); on a first tag seed every row shares that
+      // timestamp, so ordering by it alone made the feed look shuffled.
+      .order('source_updated', { ascending: false, nullsFirst: false })
+      .order('first_seen_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + MATCH_PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < MATCH_PAGE) break;
+  }
+  return annotateInLibrary(rows.map(mapMatch));
 }
 
 // Swipe LEFT = "Later": keep the match's blurb/tags but don't download it. It

@@ -1101,6 +1101,12 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
   const syncAllTimeViaWorker = () => run(true);
 
   const list = items || [];
+  // The group's size as it is NOW. tag.count is the number on the tile when you
+  // opened the group — 0 for a brand-new tag — and the header used to show
+  // `tag.count ?? list.length`, which keeps a 0 forever (?? only falls back on
+  // null). Once the list has loaded it is the truth: it uses the same filters as
+  // the tile's count, and it grows as a sync brings works in.
+  const liveCount = items === null ? (tag.count ?? 0) : list.length;
   // Quick complete/ongoing filter over the loaded results (client-side — separate
   // from the group's own status setting in its tag settings).
   const filtered = statusFilter === 'all' ? list
@@ -1117,7 +1123,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
       <Appbar
         back={leave}
         title={tag.name}
-        sub={`${tag.count ?? list.length} works · ${kindLabel}`}
+        sub={`${liveCount} works · ${kindLabel}`}
         // No header icons any more: sync, edit and delete all live behind the
         // title. Three glyphs in a row made the two destructive ones sit a
         // thumb-width from each other, and left nowhere to put a second sync.
@@ -1192,7 +1198,7 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
         onClose={() => { if (!job) setMenuOpen(false); }}
         // Same count the header shows — the group's size, not however many
         // matches happen to be loaded into this list right now.
-        tag={tag} kindLabel={kindLabel} srcLabel={srcLabel} count={tag.count ?? list.length}
+        tag={tag} kindLabel={kindLabel} srcLabel={srcLabel} count={liveCount}
         job={job} busy={busy} lastRun={lastRun}
         onSync={syncGroup}
         onSyncAllTime={syncAllTimeViaWorker}

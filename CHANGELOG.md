@@ -4,6 +4,23 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-11-20 — A group's number is what's in it now (v0.8.82)
+
+### Fixed
+
+- **A new tag stayed at "0 works" after a fetch brought works in.** Inside a
+  group, the header and the actions sheet showed `tag.count ?? list.length`:
+  the count from the moment you opened the group, which is 0 for a new tag —
+  and `??` only falls back on a missing value, not on 0. Both now show the live
+  size of the group's backlog (everything still in it for you to go through),
+  and it grows as a sync lands works. Leaving the group reloads the tile's count
+  by every route out (v0.8.79), so the tile follows too.
+- **A group with more than 1,000 works waiting would have been cut off at
+  1,000.** Supabase returns at most 1,000 rows per request and the group list
+  made one request, so the rest would have been unreachable and the count stuck.
+  No group was there yet (largest: 487), but one all-time walk adds up to 500.
+  The list now pages until it has everything.
+
 ## 2026-11-19 — All-time stops passing the buck; Royal Road and Scribble Hub in a browser you drive (v0.8.81)
 
 ### Fixed
