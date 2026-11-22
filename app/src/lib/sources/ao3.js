@@ -301,6 +301,8 @@ function unavailable(r) {
   // 429: AO3 is up and rationing searches. Since its 2026 outage it does this
   // to anything that searches in quick succession — an all-time walk above all.
   e.rateLimited = !!r && r.status === 429;
+  // Nothing was sent: the phone is still waiting out a 429 from earlier.
+  e.cooldown = !!r && !!r.cooldown;
   return e;
 }
 

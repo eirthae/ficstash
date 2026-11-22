@@ -80,3 +80,37 @@ export function languageSearchUrl(code, page = 1) {
   if (page > 1) p.set('page', String(page));
   return `https://${AO3_HOST}/works/search?${p.toString()}`;
 }
+
+// ---- the phone's AO3 manners -------------------------------------------------
+//
+// AO3 counts requests per internet connection and answers "429 / Retry later"
+// when one sends too many; it doesn't publish the limit. The phone shares your
+// home connection with your own AO3 browsing, and the app used to space some AO3
+// requests 1.5s apart, retry failures four times in half a second, and go
+// straight back after a 429. Every AO3 request now waits its turn here instead.
+
+// Minimum gap between the START of any two AO3 requests from this device: 6s
+// for pages (the worker's rule, ~10 a minute), shorter for the tag picker's
+// tiny autocomplete lookups so typing still feels live.
+export const AO3_PAGE_GAP_MS = 6000;
+export const AO3_LOOKUP_GAP_MS = 1500;
+// After a 429, nothing goes to AO3 for this long. AO3's own advice after a
+// "Retry later" (for comments) is to wait about 15 minutes.
+export const AO3_COOLDOWN_MS = 15 * 60 * 1000;
+
+// How long to wait before the next AO3 request may start (0 = go now).
+export function ao3GateDelay(lastStartAt, minGapMs, now) {
+  if (!lastStartAt) return 0;
+  return Math.max(0, lastStartAt + minGapMs - now);
+}
+
+// How long a 429 cooldown has left (0 = none).
+export function ao3CooldownLeft(until, now) {
+  return until && until > now ? until - now : 0;
+}
+
+// "about 12 minutes" / "about a minute" for a cooldown, rounded up.
+export function minutesLabel(ms) {
+  const m = Math.max(1, Math.ceil(ms / 60000));
+  return m === 1 ? 'about a minute' : `about ${m} minutes`;
+}

@@ -85,3 +85,23 @@ test('parseBlurbDate returns empty for anything it does not recognise', () => {
   assert.equal(parseBlurbDate('14 Foo 2025'), '');
   assert.equal(parseBlurbDate('2025-08-14'), '');
 });
+
+// ---- the phone's AO3 manners -------------------------------------------------
+import { ao3GateDelay, ao3CooldownLeft, minutesLabel, AO3_PAGE_GAP_MS, AO3_COOLDOWN_MS } from './ao3-util.js';
+
+test('AO3 requests start at least the gap apart', () => {
+  assert.equal(ao3GateDelay(0, AO3_PAGE_GAP_MS, 1000), 0, 'first request goes at once');
+  assert.equal(ao3GateDelay(10_000, AO3_PAGE_GAP_MS, 11_000), 5_000);
+  assert.equal(ao3GateDelay(10_000, AO3_PAGE_GAP_MS, 16_000), 0);
+  assert.equal(ao3GateDelay(10_000, AO3_PAGE_GAP_MS, 99_000), 0);
+});
+
+test('a 429 cooldown counts down to nothing', () => {
+  const until = 1_000_000 + AO3_COOLDOWN_MS;
+  assert.equal(ao3CooldownLeft(until, 1_000_000), AO3_COOLDOWN_MS);
+  assert.equal(ao3CooldownLeft(until, until), 0);
+  assert.equal(ao3CooldownLeft(0, 5), 0);
+  assert.equal(minutesLabel(AO3_COOLDOWN_MS), 'about 15 minutes');
+  assert.equal(minutesLabel(61_000), 'about 2 minutes');
+  assert.equal(minutesLabel(1), 'about a minute');
+});

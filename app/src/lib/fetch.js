@@ -1,4 +1,8 @@
 import { CapacitorHttp } from '@capacitor/core';
+import { Preferences } from '@capacitor/preferences';
+import {
+  isAo3Url, AO3_PAGE_GAP_MS, AO3_LOOKUP_GAP_MS, AO3_COOLDOWN_MS, ao3GateDelay, ao3CooldownLeft,
+} from './sources/ao3-util.js';
 
 // Native HTTP for AO3's JSON endpoints (tag autocomplete), called DIRECTLY from
 // the device — no Supabase proxy. On Android CapacitorHttp makes the request from
@@ -60,12 +64,72 @@ const DEFAULT_TIMEOUT_MS = 20000;
 // are never retried: one request, one answer, stop. We don't try to get past
 // the check; we wait for it to be lifted.
 export const isDenied = (status) => status === 418 || status === 403;
+// ---- the AO3 gate -----------------------------------------------------------
+// Every AO3 request the phone makes — search, work pages, series, chapter
+// checks, the tag picker — takes its turn here. Two rules (ao3-util.js has the
+// numbers and the reasons): requests START at least a gap apart, and after AO3
+// says "429 / Retry later" nothing goes to AO3 at all until a cooldown ends.
+// The cooldown is remembered across app restarts, so closing and reopening the
+// app doesn't send the next request straight back into a rate limit.
+const COOLDOWN_KEY = 'fs-ao3-cooldown-until';
+let lastAo3Start = 0;
+let cooldownUntil = 0;
+const cooldownLoaded = Preferences.get({ key: COOLDOWN_KEY })
+  .then(({ value }) => { cooldownUntil = Number(value) || 0; })
+  .catch(() => {});
+let turnChain = Promise.resolve();
+
+// Milliseconds left on the 429 cooldown (0 when there is none).
+export async function ao3CooldownLeftMs() {
+  await cooldownLoaded;
+  return ao3CooldownLeft(cooldownUntil, Date.now());
+}
+
+// Wait for this request's turn. Turns are handed out one at a time, so two
+// features asking at once still start their requests a gap apart; a slow
+// response doesn't hold up the next turn, only the start times are spaced.
+function ao3Turn(gapMs) {
+  const turn = turnChain.then(async () => {
+    const wait = ao3GateDelay(lastAo3Start, gapMs, Date.now());
+    if (wait > 0) await new Promise((res) => setTimeout(res, wait));
+    lastAo3Start = Date.now();
+  });
+  turnChain = turn.catch(() => {});
+  return turn;
+}
+
+// What AO3 answered. A 429 starts the cooldown.
+function noteAo3(status) {
+  if (status !== 429) return;
+  cooldownUntil = Date.now() + AO3_COOLDOWN_MS;
+  Preferences.set({ key: COOLDOWN_KEY, value: String(cooldownUntil) }).catch(() => {});
+}
+
+// Run one AO3 request through the gate. During a cooldown nothing is sent: the
+// caller gets a 429 back exactly as if AO3 had said it, marked `cooldown`.
+async function viaAo3Gate(url, gapMs, send, coolResult) {
+  if (!isAo3Url(url)) return send();
+  await cooldownLoaded;
+  if (ao3CooldownLeft(cooldownUntil, Date.now()) > 0) return coolResult;
+  await ao3Turn(gapMs);
+  // A turn can wait several seconds; a 429 elsewhere in that time still counts.
+  if (ao3CooldownLeft(cooldownUntil, Date.now()) > 0) return coolResult;
+  const r = await send();
+  noteAo3(r && r.status);
+  return r;
+}
+
 const timeouts = (ms) => {
   const t = ms || DEFAULT_TIMEOUT_MS;
   return { connectTimeout: t, readTimeout: t };
 };
 
 async function getOnce(url, timeoutMs) {
+  return viaAo3Gate(url, AO3_LOOKUP_GAP_MS, () => getOnceRaw(url, timeoutMs),
+    { status: 429, data: null, url, raw: '', cooldown: true });
+}
+
+async function getOnceRaw(url, timeoutMs) {
   const { base, params } = splitQuery(url);
   const res = await CapacitorHttp.get({
     url: base,
@@ -103,6 +167,11 @@ export async function fetchJson(url, { attempts = 4, timeoutMs = 0 } = {}) {
 }
 
 async function getHtmlOnce(url, accept, timeoutMs) {
+  return viaAo3Gate(url, AO3_PAGE_GAP_MS, () => getHtmlOnceRaw(url, accept, timeoutMs),
+    { status: 429, url, html: '', cooldown: true });
+}
+
+async function getHtmlOnceRaw(url, accept, timeoutMs) {
   const { base, params } = splitQuery(url);
   const res = await CapacitorHttp.get({
     url: base,
@@ -166,13 +235,13 @@ export async function fetchHtmlPost(url, form = {}, { headers = {}, attempts = 3
 export async function fetchImageDataUri(url) {
   try {
     const { base, params } = splitQuery(url);
-    const res = await CapacitorHttp.get({
+    const res = await viaAo3Gate(url, AO3_PAGE_GAP_MS, () => CapacitorHttp.get({
       url: base,
       ...(params ? { params, shouldEncodeUrlParams: false } : {}),
       headers: { 'User-Agent': HTML_UA, Accept: 'image/*,*/*' },
       responseType: 'blob',
       ...timeouts(),
-    });
+    }), { status: 429, data: '' });
     const b64 = typeof res.data === 'string' ? res.data : '';
     if (!b64) return '';
     const h = res.headers || {};

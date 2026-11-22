@@ -13,6 +13,8 @@ import { openSiteSearch } from '../lib/sitebrowser.js';
 import { SITE_SOURCES } from '../lib/sitesearch-pure.js';
 import { fetchFailedLinks, retryLinkRequest, removeRequest, retryAllFailedLinks } from '../lib/links.js';
 import { syncNow } from '../lib/sync.js';
+import { ao3CooldownLeftMs } from '../lib/fetch.js';
+import { minutesLabel } from '../lib/sources/ao3-util.js';
 import { fetchWorkById } from '../lib/library.js';
 import { sortMatches } from '../lib/dates.js';
 import { LANGUAGES } from '../lib/languages.js';
@@ -1050,7 +1052,12 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
       // diagnosis the wrong way ("TypeError: Failed to fetch" was the phone
       // losing its connection to Supabase, not AO3 failing).
       if (e && e.code !== 'source_unavailable') { await saveFailed(before, t0, errText(e)); return; }
-      await didNotFinish(before, t0, e.rateLimited ? 'AO3 asked us to slow down' : errText(e));
+      if (e.rateLimited) {
+        const wait = minutesLabel(await ao3CooldownLeftMs().catch(() => 15 * 60 * 1000));
+        await didNotFinish(before, t0, `AO3 asked us to slow down — FicStash will hold off AO3 for ${wait}`);
+        return;
+      }
+      await didNotFinish(before, t0, errText(e));
     }
   };
 
@@ -1070,8 +1077,11 @@ export function TagResultsScreen({ tag, nav, onLeave, onEdit }) {
       line = { ok: true, text: `${got} in ${secs(t0)}s. There's more further back — ${cont}` };
       toast = `${plural(added)} — more to go`;
     } else if (r.stop === 'rate-limited') {
-      line = { ok: false, warn: true, text: `${got}, then AO3 asked us to slow down. Wait a few minutes — then ${cont.charAt(0).toLowerCase()}${cont.slice(1)}` };
-      toast = 'AO3 asked us to slow down — try again in a few minutes';
+      // The phone holds off AO3 entirely until the cooldown ends, so say for how
+      // long — "a few minutes" invited a tap straight back into the limit.
+      const wait = minutesLabel(await ao3CooldownLeftMs().catch(() => 15 * 60 * 1000));
+      line = { ok: false, warn: true, text: `${r.pages ? `${got}, then ` : ''}AO3 asked us to slow down. FicStash won't ask AO3 for anything for ${wait}; after that, ${cont.charAt(0).toLowerCase()}${cont.slice(1)}` };
+      toast = `AO3 asked us to slow down — try again in ${wait}`;
     } else if (r.stop === 'denied') {
       await standDown(before, t0);
       return;

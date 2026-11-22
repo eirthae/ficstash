@@ -4,6 +4,41 @@ All notable changes to FicStash are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). The app has no numeric version
 scheme yet, so entries are dated and reference the commit that shipped them.
 
+## 2026-11-22 — The phone minds its manners with AO3 (v0.8.84)
+
+AO3 counts requests per internet connection and answers "429 / Retry later"
+when one sends too many. It doesn't publish the limit. On 2026-11-22 it
+answered a home connection's very first search with 429 — the same connection
+the phone uses, alongside your own AO3 browsing.
+
+### Changed
+
+- **Every AO3 request from the phone now waits its turn.** Search, work pages,
+  series, chapter checks — all start at least 6 seconds apart (the worker's
+  rule, ~10 a minute), whichever feature asks. The tag picker's autocomplete
+  lookups use 1.5 seconds so typing still feels live. Before, several paths
+  spaced AO3 requests 1.5 seconds apart, and a failure was retried four times
+  in half a second.
+- **After AO3 says 429, the phone leaves it alone for 15 minutes** — AO3's own
+  advice after a "Retry later". Nothing is sent to AO3 during that time, the
+  cooldown survives closing the app, and the sync buttons say how long is left.
+
+### Fixed
+
+- **A work dismissed while a nightly was running could come back** in another
+  group: the worker checked a list of dismissed works taken when the run
+  started, hours earlier. It now also checks at the moment it saves. (This is
+  why a fic tagged Omega Shane Hollander showed in the generic Shane/Ilya group
+  but not the combo — it had been dismissed. The combo search itself matches
+  65 of the 66 such fics; the 66th is that one.)
+
+### Notes
+
+- The worker's 6-second pace is unchanged on purpose. It runs on GitHub's
+  servers, whose addresses AO3 sees shared with many other people's scripts,
+  so it gets "slow down" on its first search whatever its own pace. Since
+  v0.8.83 one "slow down" ends its searching for the run.
+
 ## 2026-11-20 — All-time walks resume; the nightly stops jamming on AO3's rationing (v0.8.83)
 
 AO3 is up but rationing searches since its outage ("We are being rate-limited").
