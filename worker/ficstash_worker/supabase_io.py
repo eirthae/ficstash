@@ -552,6 +552,28 @@ def delete_stale_unsaved_matches(client: Client, days: int = 30) -> int:
     return len(ids)
 
 
+def _drop_dismissed_now(client: Client, metas: list[WorkMeta]) -> list[WorkMeta]:
+    """Remove works dismissed up to this moment (not just when the run began).
+
+    Best-effort: if the lookup fails, the start-of-run snapshot still applied.
+    """
+    ids = sorted({m.source_work_id for m in metas if m.source_work_id})
+    if not ids:
+        return metas
+    gone: set[tuple[str, str]] = set()
+    try:
+        for i in range(0, len(ids), 200):
+            resp = (
+                client.table("dismissed_matches").select("source,source_work_id")
+                .in_("source_work_id", ids[i:i + 200]).execute()
+            )
+            for r in resp.data or []:
+                gone.add((r.get("source") or "ao3", r.get("source_work_id") or ""))
+    except Exception:  # noqa: BLE001 — never let this block a save
+        return metas
+    return [m for m in metas if (m.source, m.source_work_id) not in gone]
+
+
 def upsert_tag_matches(
     client: Client, group_id: str, metas: list[WorkMeta],
     dismissed_keys: set[tuple[str, str]] | None = None,
@@ -574,6 +596,11 @@ def upsert_tag_matches(
     """
     if dismissed_keys:
         metas = [m for m in metas if (m.source, m.source_work_id) not in dismissed_keys]
+    # ...and again against the table itself, for just this batch. dismissed_keys
+    # is a snapshot taken when discovery starts, and a nightly runs for hours: on
+    # 2026-10-08 a work was dismissed at 00:07 and this re-added it at 00:27 from
+    # a snapshot taken before. One small `in` query per group closes that window.
+    metas = _drop_dismissed_now(client, metas)
     rows = [
         {
             "group_id": group_id,
